@@ -1,0 +1,13 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Data files downloaded by challenges
+data_mnist/
+
+# Model checkpoints
+checkpoints/
+
+# IDE files
+.idea/
+.vscode/
