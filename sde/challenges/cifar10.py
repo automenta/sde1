@@ -8,18 +8,18 @@ from sde.models.types import DatasetDefinition, DatasetType
 
 # --- 1. The Data Loader Factory ---
 
-def get_mnist_dataloaders(batch_size=64, val_split=0.1, data_dir='./data_mnist'):
+def get_cifar10_dataloaders(batch_size=64, val_split=0.1, data_dir='./data_cifar10'):
     """
-    Returns training and validation DataLoaders for MNIST.
+    Returns training and validation DataLoaders for CIFAR-10.
     A validation set is split from the training data.
     """
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,)) # Mean and std of MNIST
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)) # Normalize to [-1, 1]
     ])
 
     # Download and load the full training dataset
-    full_train_dataset = datasets.MNIST(data_dir, train=True, download=True, transform=transform)
+    full_train_dataset = datasets.CIFAR10(data_dir, train=True, download=True, transform=transform)
 
     # Create a validation split
     num_train = len(full_train_dataset)
@@ -35,8 +35,6 @@ def get_mnist_dataloaders(batch_size=64, val_split=0.1, data_dir='./data_mnist')
     train_subset = Subset(full_train_dataset, train_idx)
     val_subset = Subset(full_train_dataset, val_idx)
 
-    # Using num_workers > 0 can cause issues in some environments, especially with multiprocessing in the next steps.
-    # Sticking to 0 for simplicity and robustness for now.
     train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=0)
 
@@ -44,12 +42,12 @@ def get_mnist_dataloaders(batch_size=64, val_split=0.1, data_dir='./data_mnist')
 
 # --- 2. Dataset Definition ---
 
-MNIST_DATASET = DatasetDefinition(
-    name="MNIST",
+CIFAR10_DATASET = DatasetDefinition(
+    name="CIFAR-10",
     type=DatasetType.IMAGE_CLASSIFICATION,
-    description="A classic dataset of 70,000 28x28 grayscale images of handwritten digits (0-9).",
-    loader_factory=get_mnist_dataloaders,
-    input_shape=(1, 28, 28),
+    description="A dataset of 60,000 32x32 color images in 10 classes (e.g., airplane, dog, cat).",
+    loader_factory=get_cifar10_dataloaders,
+    input_shape=(3, 32, 32),
     output_shape=10,
     loss_function_factory=nn.CrossEntropyLoss,
     performance_metric_name="accuracy"

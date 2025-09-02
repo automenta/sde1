@@ -8,7 +8,8 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus
 from sde.engine.worker import Worker
-from sde.challenges import mnist
+from sde.challenges import AVAILABLE_DATASETS
+from sde.models import AVAILABLE_MODELS
 from sde.exploration.schedulers import AdaptiveScheduler
 from sde.engine.insight import InsightEngine
 
@@ -21,14 +22,18 @@ def trial_to_dict(trial: Trial) -> dict:
 
 # This top-level function will be sent to the ProcessPoolExecutor processes.
 # It needs to be defined at the top level of the module to be pickleable.
-def execute_work_unit_in_process(work_unit: WorkUnit, trial: Trial) -> dict:
+def execute_work_unit_in_process(work_unit: WorkUnit, trial: Trial, model_name: str, dataset_name: str, enable_checkpointing: bool) -> dict:
     """
     A wrapper function that initializes a Worker in a new process
     and executes the given WorkUnit.
     """
-    # Each process creates its own worker instance.
-    worker = Worker(challenge_module=mnist)
-    return worker.execute_work_unit(work_unit, trial)
+    # Each process looks up the definitions from the registries
+    model_def = AVAILABLE_MODELS[model_name]
+    dataset_def = AVAILABLE_DATASETS[dataset_name]
+
+    # Each process creates its own worker instance for the specific model/dataset pair.
+    worker = Worker(model_def=model_def, dataset_def=dataset_def)
+    return worker.execute_work_unit(work_unit, trial, enable_checkpointing)
 
 
 class Scheduler(QObject):
@@ -41,11 +46,13 @@ class Scheduler(QObject):
     experiment_finished = pyqtSignal()
     insight_generated = pyqtSignal(str)
 
-    def __init__(self, trials: List[Trial], adaptive_scheduler: AdaptiveScheduler, max_workers: int = 2):
+    def __init__(self, trials: List[Trial], dataset_name: str, adaptive_scheduler: AdaptiveScheduler, max_workers: int = 2, enable_checkpointing: bool = False):
         super().__init__()
         self.trials = {t.id: t for t in trials}
+        self.dataset_name = dataset_name
         self.adaptive_scheduler = adaptive_scheduler
         self.max_workers = max_workers
+        self.enable_checkpointing = enable_checkpointing
         self.insight_engine = InsightEngine(
             self.trials,
             primary_metric=self.adaptive_scheduler.metric,
@@ -54,7 +61,29 @@ class Scheduler(QObject):
         self.work_queue: List[WorkUnit] = []
         self.executor = None
         self.running_futures = {}
+
+        # --- State flags for execution control ---
         self._is_running = True
+        self._is_paused = False
+        self._active_workers = max_workers
+
+    def pause(self):
+        self.log_message.emit("INFO: Pausing experiment. Finishing active work...")
+        self._is_paused = True
+
+    def resume(self):
+        self.log_message.emit("INFO: Resuming experiment...")
+        self._is_paused = False
+
+    def set_throttle(self, percentage: int):
+        if not (0 < percentage <= 100):
+            self.log_message.emit(f"WARN: Throttle percentage must be between 1-100. Got {percentage}.")
+            return
+
+        new_worker_count = max(1, int(self.max_workers * (percentage / 100.0)))
+        if new_worker_count != self._active_workers:
+            self._active_workers = new_worker_count
+            self.log_message.emit(f"INFO: Throttle set to {percentage}%. Active workers: {self._active_workers}/{self.max_workers}")
 
     def start(self):
         """
@@ -70,41 +99,58 @@ class Scheduler(QObject):
             self.trial_updated.emit(trial_to_dict(trial))
 
         while self._is_running:
-            # 2. Dispatch work from the queue
-            while self.work_queue and len(self.running_futures) < self.max_workers:
+            # If paused, sleep and check for completed work without dispatching new work
+            if self._is_paused:
+                self._process_completed_futures()
+                time.sleep(0.5)
+                continue
+
+            # 2. Dispatch work from the queue, respecting the throttle
+            while self.work_queue and len(self.running_futures) < self._active_workers:
                 work_unit = self.work_queue.pop(0)
                 trial = self.trials[work_unit.trial_id]
 
-                future = self.executor.submit(execute_work_unit_in_process, work_unit, trial)
+                future = self.executor.submit(
+                    execute_work_unit_in_process,
+                    work_unit,
+                    trial,
+                    trial.algorithm_name,
+                    self.dataset_name,
+                    self.enable_checkpointing
+                )
                 self.running_futures[future] = work_unit
-                self.log_message.emit(f"Dispatched: Trial {trial.id}, Epoch {trial.current_epoch + 1}")
+                self.log_message.emit(f"Dispatched: Trial {trial.id} ({trial.algorithm_name}), Epoch {trial.current_epoch + 1}")
 
             # 3. Process completed futures
-            if not self.running_futures:
-                # If no work is running and queue is empty, we might be done
-                if not self.work_queue:
-                    self.log_message.emit("No more work to schedule.")
-                    break
-                else: # Still work in queue, but all workers are free, no need to wait
-                    continue
+            if not self.running_futures and not self.work_queue:
+                self.log_message.emit("No more work to schedule.")
+                break
 
-            done_futures, _ = concurrent.futures.wait(
-                self.running_futures.keys(),
-                timeout=0.5,
-                return_when=concurrent.futures.FIRST_COMPLETED
-            )
-
-            for future in done_futures:
-                work_unit = self.running_futures.pop(future)
-                try:
-                    result = future.result()
-                    self._process_result(work_unit, result)
-                except Exception as e:
-                    self.log_message.emit(f"ERROR: Work unit {work_unit} failed: {e}")
-                    self.trials[work_unit.trial_id].status = TrialStatus.PRUNED
-                    self.trial_updated.emit(trial_to_dict(self.trials[work_unit.trial_id]))
+            self._process_completed_futures()
+            time.sleep(0.1) # Small sleep to prevent busy-waiting
 
         self.shutdown()
+
+    def _process_completed_futures(self):
+        """Helper to check for and process any finished work units."""
+        if not self.running_futures:
+            return
+
+        done_futures, _ = concurrent.futures.wait(
+            self.running_futures.keys(),
+            timeout=0.1, # Short timeout to remain responsive
+            return_when=concurrent.futures.FIRST_COMPLETED
+        )
+
+        for future in done_futures:
+            work_unit = self.running_futures.pop(future)
+            try:
+                result = future.result()
+                self._process_result(work_unit, result)
+            except Exception as e:
+                self.log_message.emit(f"ERROR: Work unit {work_unit} failed: {e}")
+                self.trials[work_unit.trial_id].status = TrialStatus.PRUNED
+                self.trial_updated.emit(trial_to_dict(self.trials[work_unit.trial_id]))
 
     def _process_result(self, work_unit: WorkUnit, result: dict):
         trial = self.trials[work_unit.trial_id]
@@ -112,7 +158,9 @@ class Scheduler(QObject):
         # Update trial state from result
         state_updates = result['state_updates']
         trial.current_epoch = state_updates['current_epoch']
-        trial.checkpoint_path = state_updates['checkpoint_path']
+        # Only update checkpoint path if a new one was created
+        if state_updates['checkpoint_path'] is not None:
+            trial.checkpoint_path = state_updates['checkpoint_path']
 
         metrics = result['metrics']
         for metric_name, value in metrics.items():
@@ -120,7 +168,7 @@ class Scheduler(QObject):
                 trial.results[metric_name] = []
             trial.results[metric_name].append((trial.current_epoch, value))
 
-        self.log_message.emit(f"Result for Trial {trial.id}, Epoch {trial.current_epoch}: {metrics}")
+        self.log_message.emit(f"Result for Trial {trial.id} ({trial.algorithm_name}), Epoch {trial.current_epoch}: {metrics}")
         self.trial_updated.emit(trial_to_dict(trial))
 
         # 3. Analyze for insights
@@ -163,19 +211,26 @@ if __name__ == "__main__":
         ),
         Trial(
             id=f"trial_{uuid.uuid4().hex[:6]}",
-            algorithm_name="SimpleCNN",
+            algorithm_name="LogisticRegression",
             hyperparameters={
-                'model_params': {'dropout_rate': 0.5},
                 'optimizer_params': {'lr': 0.001}
             }
         ),
     ]
 
-    MAX_EPOCHS = 1
+    # This test now runs on MNIST by default
+    DATASET = "MNIST"
+    print(f"Starting experiment with {len(trials_to_run)} trials on {DATASET}.")
 
-    print(f"Starting experiment with {len(trials_to_run)} trials for {MAX_EPOCHS} epochs.")
+    adaptive_scheduler = SuccessiveHalvingScheduler(metric="accuracy", increasing=True)
 
-    scheduler = Scheduler(trials=trials_to_run, max_epochs=MAX_EPOCHS, max_workers=2)
+    scheduler = Scheduler(
+        trials=trials_to_run,
+        dataset_name=DATASET,
+        adaptive_scheduler=adaptive_scheduler,
+        max_workers=2,
+        enable_checkpointing=True # Enabled for test
+    )
 
     start_time = time.time()
     scheduler.start()
@@ -184,6 +239,7 @@ if __name__ == "__main__":
     print(f"\n--- Experiment Finished in {end_time - start_time:.2f} seconds ---")
     for trial in scheduler.trials.values():
         print(f"\nTrial ID: {trial.id}")
+        print(f"  Algorithm: {trial.algorithm_name}")
         print(f"  Status: {trial.status.value}")
         print(f"  Hyperparameters: {trial.hyperparameters}")
         print(f"  Results:")

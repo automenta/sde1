@@ -1,0 +1,7 @@
+from sde.models.vision.cnn import SIMPLE_CNN_MODEL
+from sde.models.classical.logreg import LOGISTIC_REGRESSION_MODEL
+
+AVAILABLE_MODELS = {
+    SIMPLE_CNN_MODEL.name: SIMPLE_CNN_MODEL,
+    LOGISTIC_REGRESSION_MODEL.name: LOGISTIC_REGRESSION_MODEL,
+}

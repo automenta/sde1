@@ -1,49 +1,58 @@
 import torch
 import torch.optim as optim
 import os
-import uuid
 
 from sde.core.types import WorkUnit, Trial, WorkUnitType
-from sde.challenges import mnist
+from sde.models.types import ModelDefinition, DatasetDefinition
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Worker:
     """
     Executes a single WorkUnit, like training a model for one epoch.
-    It is initialized with a specific challenge module.
+    It is initialized with a specific ModelDefinition and DatasetDefinition.
     """
-    def __init__(self, challenge_module):
+    def __init__(self, model_def: ModelDefinition, dataset_def: DatasetDefinition):
         print(f"Worker process initialized. Using device: {DEVICE}")
-        self.challenge = challenge_module
+        self.model_def = model_def
+        self.dataset_def = dataset_def
         # Note: DataLoaders can be slow to initialize.
         # It's better to do this once per worker process.
-        self.train_loader, self.val_loader = self.challenge.get_mnist_dataloaders()
+        # For now, we use default loader params. A future improvement would be to
+        # allow trial-specific loader params (e.g., batch_size).
+        self.train_loader, self.val_loader = self.dataset_def.loader_factory()
         self.checkpoints_dir = './checkpoints'
         os.makedirs(self.checkpoints_dir, exist_ok=True)
 
-    def execute_work_unit(self, work_unit: WorkUnit, trial: Trial) -> dict:
+    def execute_work_unit(self, work_unit: WorkUnit, trial: Trial, enable_checkpointing: bool = True) -> dict:
         """
         Executes the given work unit for the given trial.
         """
         if work_unit.type == WorkUnitType.TRAIN_EPOCH:
-            return self._train_one_epoch(work_unit, trial)
+            return self._train_one_epoch(work_unit, trial, enable_checkpointing)
         else:
             raise ValueError(f"Unsupported WorkUnitType: {work_unit.type}")
 
-    def _train_one_epoch(self, work_unit: WorkUnit, trial: Trial) -> dict:
+    def _train_one_epoch(self, work_unit: WorkUnit, trial: Trial, enable_checkpointing: bool) -> dict:
         # 1. Setup model, optimizer, and loss function
-        AlgorithmClass = self.challenge.get_algorithm_class(trial.algorithm_name)
+        ModelClass = self.model_def.model_class
 
-        # Unpack model-specific hyperparameters
+        # Unpack model-specific hyperparameters from the trial
         model_params = trial.hyperparameters.get('model_params', {})
-        model = AlgorithmClass(**model_params).to(DEVICE)
+
+        # Add dataset-specific properties to the model's constructor arguments
+        model_kwargs = {
+            "input_shape": self.dataset_def.input_shape,
+            "output_shape": self.dataset_def.output_shape,
+            **model_params
+        }
+        model = ModelClass(**model_kwargs).to(DEVICE)
 
         # Unpack optimizer-specific hyperparameters
         optimizer_params = trial.hyperparameters.get('optimizer_params', {'lr': 0.001})
         optimizer = optim.Adam(model.parameters(), **optimizer_params)
 
-        criterion = self.challenge.get_loss_function()
+        criterion = self.dataset_def.loss_function_factory()
 
         # 2. Load state from checkpoint if it exists
         if trial.checkpoint_path:
@@ -82,22 +91,25 @@ class Worker:
         val_loss /= total
         accuracy = correct / total
 
-        # 5. Save new state to a new checkpoint file
-        new_checkpoint_filename = f"{trial.id}_epoch_{trial.current_epoch + 1}.pt"
-        new_checkpoint_path = os.path.join(self.checkpoints_dir, new_checkpoint_filename)
-        torch.save({
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-        }, new_checkpoint_path)
+        # 5. Save new state to a new checkpoint file (if enabled)
+        new_checkpoint_path = None
+        if enable_checkpointing:
+            new_checkpoint_filename = f"{trial.id}_epoch_{trial.current_epoch + 1}.pt"
+            new_checkpoint_path = os.path.join(self.checkpoints_dir, new_checkpoint_filename)
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+            }, new_checkpoint_path)
 
         # 6. Return results and state update instructions
-        metric_name = self.challenge.get_performance_metric_name()
+        metric_name = self.dataset_def.performance_metric_name
         return {
             'metrics': {
                 metric_name: accuracy,
                 'loss': val_loss
             },
             'state_updates': {
+                # If checkpointing is off, the path is None. The Trial's path will not be updated.
                 'checkpoint_path': new_checkpoint_path,
                 'current_epoch': trial.current_epoch + 1
             }
