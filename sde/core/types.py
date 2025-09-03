@@ -1,3 +1,4 @@
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Tuple, Optional
 from enum import Enum
@@ -37,3 +38,9 @@ class Trial:
 
     # Time-series results
     results: Dict[str, List[Tuple[int, float]]] = field(default_factory=dict) # e.g., {'accuracy': [(1, 0.8), (2, 0.9)]}
+
+    def to_dict(self) -> dict:
+        """Converts the Trial to a dictionary, handling enum serialization."""
+        d = dataclasses.asdict(self)
+        d['status'] = self.status.value
+        return d

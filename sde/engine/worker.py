@@ -2,19 +2,22 @@ import torch
 import torch.optim as optim
 import os
 import time
+import logging
+from typing import Tuple
 
 from sde.core.types import WorkUnit, Trial, WorkUnitType
 from sde.models.types import ModelDefinition, DatasetDefinition
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+logger = logging.getLogger(__name__)
 
 class Worker:
     """
     Executes a single WorkUnit, like training a model for one epoch.
     It is initialized with a specific ModelDefinition and DatasetDefinition.
     """
-    def __init__(self, model_def: ModelDefinition, dataset_def: DatasetDefinition):
-        print(f"Worker process initialized. Using device: {DEVICE}")
+    def __init__(self, model_def: ModelDefinition, dataset_def: DatasetDefinition, checkpoints_dir: str = './checkpoints'):
+        logger.info(f"Worker process initialized. Using device: {DEVICE}")
         self.model_def = model_def
         self.dataset_def = dataset_def
         # Note: DataLoaders can be slow to initialize.
@@ -22,7 +25,7 @@ class Worker:
         # For now, we use default loader params. A future improvement would be to
         # allow trial-specific loader params (e.g., batch_size).
         self.train_loader, self.val_loader = self.dataset_def.loader_factory()
-        self.checkpoints_dir = './checkpoints'
+        self.checkpoints_dir = checkpoints_dir
         os.makedirs(self.checkpoints_dir, exist_ok=True)
 
     def execute_work_unit(self, work_unit: WorkUnit, trial: Trial, enable_checkpointing: bool = True) -> dict:
@@ -36,11 +39,9 @@ class Worker:
         else:
             raise ValueError(f"Unsupported WorkUnitType: {work_unit.type}")
 
-    def _profile_speed(self, work_unit: WorkUnit, trial: Trial) -> dict:
-        """
-        Runs a few training batches to estimate the time per epoch.
-        """
-        # 1. Setup model, optimizer, and loss function (similar to training)
+    def _setup_model_and_optimizer(self, trial: Trial) -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
+        """Initializes the model and optimizer based on trial hyperparameters."""
+        # 1. Setup model
         ModelClass = self.model_def.model_class
         model_params = trial.hyperparameters.get('model_params', {})
         model_kwargs = {
@@ -49,15 +50,34 @@ class Worker:
             **model_params
         }
         model = ModelClass(**model_kwargs).to(DEVICE)
-        optimizer_params = trial.hyperparameters.get('optimizer_params', {'lr': 0.001})
-        optimizer = optim.Adam(model.parameters(), **optimizer_params)
+
+        # 2. Setup optimizer
+        optimizer_hparams = trial.hyperparameters.get('optimizer_params', {})
+        optimizer_name = optimizer_hparams.get('name', 'Adam').lower()
+        optimizer_params = {k: v for k, v in optimizer_hparams.items() if k != 'name'}
+
+        if optimizer_name == 'adam':
+            optimizer_class = optim.Adam
+        elif optimizer_name == 'sgd':
+            optimizer_class = optim.SGD
+        else:
+            raise ValueError(f"Unsupported optimizer: {optimizer_name}")
+
+        optimizer = optimizer_class(model.parameters(), **optimizer_params)
+        return model, optimizer
+
+    def _profile_speed(self, work_unit: WorkUnit, trial: Trial) -> dict:
+        """
+        Runs a few training batches to estimate the time per epoch.
+        """
+        # 1. Setup model, optimizer, and loss function
+        model, optimizer = self._setup_model_and_optimizer(trial)
         criterion = self.dataset_def.loss_function_factory()
 
         # 2. Run a few batches and time it
         model.train()
         num_batches_to_profile = 5
         if len(self.train_loader) < num_batches_to_profile:
-            # Handle cases where the dataset is very small
             num_batches_to_profile = len(self.train_loader)
 
         if num_batches_to_profile == 0:
@@ -82,30 +102,13 @@ class Worker:
 
         return {
             'profile_results': {'est_time_per_epoch': est_time_per_epoch},
-            # Return empty state updates as profiling doesn't change trial state
             'state_updates': {'checkpoint_path': None, 'current_epoch': trial.current_epoch},
             'metrics': {}
         }
 
     def _train_one_epoch(self, work_unit: WorkUnit, trial: Trial, enable_checkpointing: bool) -> dict:
         # 1. Setup model, optimizer, and loss function
-        ModelClass = self.model_def.model_class
-
-        # Unpack model-specific hyperparameters from the trial
-        model_params = trial.hyperparameters.get('model_params', {})
-
-        # Add dataset-specific properties to the model's constructor arguments
-        model_kwargs = {
-            "input_shape": self.dataset_def.input_shape,
-            "output_shape": self.dataset_def.output_shape,
-            **model_params
-        }
-        model = ModelClass(**model_kwargs).to(DEVICE)
-
-        # Unpack optimizer-specific hyperparameters
-        optimizer_params = trial.hyperparameters.get('optimizer_params', {'lr': 0.001})
-        optimizer = optim.Adam(model.parameters(), **optimizer_params)
-
+        model, optimizer = self._setup_model_and_optimizer(trial)
         criterion = self.dataset_def.loss_function_factory()
 
         # 2. Load state from checkpoint if it exists
@@ -115,8 +118,7 @@ class Worker:
                 model.load_state_dict(checkpoint['model_state_dict'])
                 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             except FileNotFoundError:
-                print(f"Warning: Checkpoint file not found at {trial.checkpoint_path}. Starting from scratch.")
-
+                logger.warning(f"Checkpoint file not found at {trial.checkpoint_path}. Starting from scratch.")
 
         # 3. Training loop for one epoch
         model.train()
@@ -163,7 +165,6 @@ class Worker:
                 'loss': val_loss
             },
             'state_updates': {
-                # If checkpointing is off, the path is None. The Trial's path will not be updated.
                 'checkpoint_path': new_checkpoint_path,
                 'current_epoch': trial.current_epoch + 1
             }
