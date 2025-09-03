@@ -1,6 +1,7 @@
 import torch
 import torch.optim as optim
 import os
+import time
 
 from sde.core.types import WorkUnit, Trial, WorkUnitType
 from sde.models.types import ModelDefinition, DatasetDefinition
@@ -30,8 +31,61 @@ class Worker:
         """
         if work_unit.type == WorkUnitType.TRAIN_EPOCH:
             return self._train_one_epoch(work_unit, trial, enable_checkpointing)
+        elif work_unit.type == WorkUnitType.PROFILE_SPEED:
+            return self._profile_speed(work_unit, trial)
         else:
             raise ValueError(f"Unsupported WorkUnitType: {work_unit.type}")
+
+    def _profile_speed(self, work_unit: WorkUnit, trial: Trial) -> dict:
+        """
+        Runs a few training batches to estimate the time per epoch.
+        """
+        # 1. Setup model, optimizer, and loss function (similar to training)
+        ModelClass = self.model_def.model_class
+        model_params = trial.hyperparameters.get('model_params', {})
+        model_kwargs = {
+            "input_shape": self.dataset_def.input_shape,
+            "output_shape": self.dataset_def.output_shape,
+            **model_params
+        }
+        model = ModelClass(**model_kwargs).to(DEVICE)
+        optimizer_params = trial.hyperparameters.get('optimizer_params', {'lr': 0.001})
+        optimizer = optim.Adam(model.parameters(), **optimizer_params)
+        criterion = self.dataset_def.loss_function_factory()
+
+        # 2. Run a few batches and time it
+        model.train()
+        num_batches_to_profile = 5
+        if len(self.train_loader) < num_batches_to_profile:
+            # Handle cases where the dataset is very small
+            num_batches_to_profile = len(self.train_loader)
+
+        if num_batches_to_profile == 0:
+            return {'profile_results': {'est_time_per_epoch': 0.0}}
+
+        start_time = time.time()
+        for i, (data, target) in enumerate(self.train_loader):
+            if i >= num_batches_to_profile:
+                break
+            data, target = data.to(DEVICE), target.to(DEVICE)
+            optimizer.zero_grad()
+            output = model(data)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
+        end_time = time.time()
+
+        # 3. Extrapolate to full epoch
+        time_per_batch = (end_time - start_time) / num_batches_to_profile
+        total_batches = len(self.train_loader)
+        est_time_per_epoch = time_per_batch * total_batches
+
+        return {
+            'profile_results': {'est_time_per_epoch': est_time_per_epoch},
+            # Return empty state updates as profiling doesn't change trial state
+            'state_updates': {'checkpoint_path': None, 'current_epoch': trial.current_epoch},
+            'metrics': {}
+        }
 
     def _train_one_epoch(self, work_unit: WorkUnit, trial: Trial, enable_checkpointing: bool) -> dict:
         # 1. Setup model, optimizer, and loss function

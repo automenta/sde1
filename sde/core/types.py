@@ -3,6 +3,7 @@ from typing import Dict, Any, List, Tuple, Optional
 from enum import Enum
 
 class WorkUnitType(Enum):
+    PROFILE_SPEED = "PROFILE_SPEED"
     TRAIN_EPOCH = "TRAIN_EPOCH"
     EVALUATE = "EVALUATE"
 
@@ -30,6 +31,9 @@ class Trial:
     # State for pausing/resuming
     current_epoch: int = 0
     checkpoint_path: Optional[str] = None
+
+    # Performance metrics
+    est_time_per_epoch: Optional[float] = None
 
     # Time-series results
     results: Dict[str, List[Tuple[int, float]]] = field(default_factory=dict) # e.g., {'accuracy': [(1, 0.8), (2, 0.9)]}

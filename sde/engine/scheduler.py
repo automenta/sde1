@@ -6,7 +6,7 @@ from typing import List, Callable
 import dataclasses
 import threading
 
-from sde.core.types import Trial, WorkUnit, TrialStatus
+from sde.core.types import Trial, WorkUnit, TrialStatus, WorkUnitType
 from sde.engine.worker import Worker
 from sde.challenges import AVAILABLE_DATASETS
 from sde.models import AVAILABLE_MODELS
@@ -62,6 +62,7 @@ class Scheduler:
     """
     log_message = Signal(str)
     trial_updated = Signal(dict)
+    trial_profiled = Signal(str, float)
     experiment_finished = Signal()
     insight_generated = Signal(str)
 
@@ -111,21 +112,23 @@ class Scheduler:
 
     def start(self):
         """
-        Initializes the scheduler and starts the main execution loop.
+        Initializes the scheduler, runs the profiling phase, and starts the main execution loop.
         """
         self.executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.max_workers)
-        self.log_message.emit("INFO: Scheduler starting with adaptive policy...")
+        self.log_message.emit("INFO: Scheduler starting...")
 
         try:
-            # Populate the initial work queue
+            # Phase 1: Performance Profiling
+            self._run_profiling_phase()
+
+            # Phase 2: Main Experiment Loop
+            self.log_message.emit("INFO: Profiling complete. Starting main experiment with adaptive policy...")
             self.work_queue = self.adaptive_scheduler.get_initial_work_units(self.trials)
             for trial in self.trials.values():
                 self.trial_updated.emit(trial_to_dict(trial))
 
-            # Start the main loop
             self._main_loop()
         finally:
-            # Ensure shutdown is always called
             self.shutdown()
 
     def _main_loop(self):
@@ -206,17 +209,57 @@ class Scheduler:
                 # Ensure trial UI is always updated, even on failure
                 self.trial_updated.emit(trial_to_dict(self.trials[work_unit.trial_id]))
 
+    def _run_profiling_phase(self):
+        """
+        Identifies unique algorithms and runs a PROFILE_SPEED work unit for each
+        to estimate the time per epoch.
+        """
+        self.log_message.emit("INFO: Starting performance profiling phase...")
+
+        unique_algorithms = {} # algorithm_name -> representative_trial
+        for trial in self.trials.values():
+            if trial.algorithm_name not in unique_algorithms:
+                unique_algorithms[trial.algorithm_name] = trial
+
+        if not unique_algorithms:
+            return
+
+        profiling_work = [WorkUnit(trial_id=t.id, type=WorkUnitType.PROFILE_SPEED) for t in unique_algorithms.values()]
+
+        # Temporarily use the main work queue for profiling
+        self.work_queue.extend(profiling_work)
+
+        # Blocking loop to wait for profiling to finish
+        while any(w.type == WorkUnitType.PROFILE_SPEED for w in self.work_queue) or \
+              any(f.running() and self.running_futures.get(f).type == WorkUnitType.PROFILE_SPEED for f in self.running_futures):
+            self._dispatch_work_units(self.max_workers)
+            self._process_completed_futures()
+            time.sleep(0.1)
+
+        # One final check for any remaining completed futures
+        self._process_completed_futures()
+
     def _process_result(self, work_unit: WorkUnit, result: dict):
         trial = self.trials[work_unit.trial_id]
 
-        # Update trial state from result
+        if work_unit.type == WorkUnitType.PROFILE_SPEED:
+            est_time = result.get('profile_results', {}).get('est_time_per_epoch')
+            if est_time is not None:
+                self.log_message.emit(f"INFO: Profiled {trial.algorithm_name}: {est_time:.2f}s/epoch")
+                # Apply this estimate to all trials with the same algorithm
+                for t in self.trials.values():
+                    if t.algorithm_name == trial.algorithm_name:
+                        t.est_time_per_epoch = est_time
+                        self.trial_profiled.emit(t.id, est_time)
+            return
+
+        # --- Existing logic for TRAIN_EPOCH ---
         state_updates = result['state_updates']
         trial.current_epoch = state_updates['current_epoch']
-        # Only update checkpoint path if a new one was created
         if state_updates['checkpoint_path'] is not None:
             trial.checkpoint_path = state_updates['checkpoint_path']
 
-        metrics = result['metrics']
+        metrics = result.get('metrics', {})
         for metric_name, value in metrics.items():
             if metric_name not in trial.results:
                 trial.results[metric_name] = []
@@ -225,17 +268,14 @@ class Scheduler:
         self.log_message.emit(f"Result for Trial {trial.id} ({trial.algorithm_name}), Epoch {trial.current_epoch}: {metrics}")
         self.trial_updated.emit(trial_to_dict(trial))
 
-        # 3. Analyze for insights
         insights = self.insight_engine.analyze(trial)
         for insight in insights:
             self.insight_generated.emit(f"[INSIGHT] {insight.message}")
 
-        # 4. Get next work units from the adaptive scheduler
         new_work_units = self.adaptive_scheduler.get_next_work_units(trial, self.trials)
         if new_work_units:
             self.work_queue.extend(new_work_units)
 
-        # The adaptive scheduler may have pruned trials, so we need to update their status
         for t in self.trials.values():
             if t.status == TrialStatus.PRUNED:
                 self.trial_updated.emit(trial_to_dict(t))
