@@ -24,8 +24,21 @@ class HyperparameterDialog(QDialog):
 
         main_layout = QVBoxLayout(self)
 
-        # --- Strategy Selection ---
-        strategy_group = QGroupBox("Search Strategy")
+        # --- Adaptive Scheduler Selection ---
+        ada_sched_group = QGroupBox("Adaptive Scheduling Strategy")
+        ada_sched_layout = QFormLayout(ada_sched_group)
+        self.ada_sched_combo = QComboBox()
+        self.ada_sched_combo.addItems(["Successive Halving", "Hyperband"])
+        self.max_epochs_spinbox = QSpinBox()
+        self.max_epochs_spinbox.setRange(10, 1000)
+        self.max_epochs_spinbox.setValue(81)
+        self.max_epochs_label = QLabel("Max Epochs per Trial:")
+        ada_sched_layout.addRow("Scheduler:", self.ada_sched_combo)
+        ada_sched_layout.addRow(self.max_epochs_label, self.max_epochs_spinbox)
+        self.ada_sched_combo.currentTextChanged.connect(self._update_scheduler_widgets)
+
+        # --- Hyperparameter Generation Strategy ---
+        strategy_group = QGroupBox("Hyperparameter Generation Strategy")
         strategy_layout = QFormLayout(strategy_group)
         self.strategy_combo = QComboBox()
         self.strategy_combo.addItems(["Grid Search", "Random Search"])
@@ -36,6 +49,7 @@ class HyperparameterDialog(QDialog):
         strategy_layout.addRow(self.num_trials_label, self.num_trials_spinbox)
         self.strategy_combo.currentTextChanged.connect(self._update_strategy_label)
         self._update_strategy_label(self.strategy_combo.currentText())
+        self._update_scheduler_widgets(self.ada_sched_combo.currentText())
 
         # --- Parameters ---
         params_group = QGroupBox("Hyperparameter Space")
@@ -52,11 +66,17 @@ class HyperparameterDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
 
+        main_layout.addWidget(ada_sched_group)
         main_layout.addWidget(strategy_group)
         main_layout.addWidget(params_group, 1) # Give more space to params
         main_layout.addWidget(button_box)
 
         self._populate_hyperparameters()
+
+    def _update_scheduler_widgets(self, scheduler: str):
+        is_hyperband = scheduler == "Hyperband"
+        self.max_epochs_label.setVisible(is_hyperband)
+        self.max_epochs_spinbox.setVisible(is_hyperband)
 
     def _update_strategy_label(self, strategy: str):
         if strategy == "Grid Search":
@@ -118,7 +138,11 @@ class HyperparameterDialog(QDialog):
 
     def get_configuration(self):
         """Constructs the configuration dictionary from the UI widgets."""
-        self.config['strategy'] = self.strategy_combo.currentText()
+        self.config['adaptive_scheduler'] = self.ada_sched_combo.currentText()
+        if self.config['adaptive_scheduler'] == 'Hyperband':
+            self.config['max_epochs'] = self.max_epochs_spinbox.value()
+
+        self.config['hparam_strategy'] = self.strategy_combo.currentText()
         self.config['num_trials'] = self.num_trials_spinbox.value()
         self.config['models'] = {}
 

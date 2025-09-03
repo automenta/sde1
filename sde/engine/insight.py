@@ -114,9 +114,7 @@ class InsightEngine:
                 if other_trial.id == active_trial.id:
                     continue
 
-                # To avoid detecting the same crossover twice, only the trial with the lexicographically smaller ID is responsible for detection
-                if active_trial.id > other_trial.id:
-                    continue
+                # The check for crossover_pair in _fired_crossover_insights is now the sole guard against duplicates.
 
                 other_perf_now = self._get_perf_at_epoch(other_trial.id, current_epoch)
                 other_perf_prev = self._get_perf_at_epoch(other_trial.id, current_epoch - 1)

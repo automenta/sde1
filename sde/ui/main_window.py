@@ -19,7 +19,7 @@ import pyqtgraph as pg
 from sde.engine.scheduler import Scheduler
 from sde.engine.insight import Insight
 from sde.core.types import Trial
-from sde.exploration.schedulers import SuccessiveHalvingScheduler
+from sde.exploration.schedulers import SuccessiveHalvingScheduler, HyperbandScheduler
 from sde.models import AVAILABLE_MODELS
 from sde.challenges import AVAILABLE_DATASETS
 from sde.ui.hyperparameters import HyperparameterDialog
@@ -79,7 +79,11 @@ class InsightListItem(QListWidgetItem):
         self.setIcon(icon)
 
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.setText(f"[{timestamp}] {self.insight.message}")
+        # Truncate long messages for display in the list
+        display_message = (self.insight.message[:70] + '...') if len(self.insight.message) > 70 else self.insight.message
+        self.setText(f"[{timestamp}] {display_message}")
+        # Set the full message as a tooltip for discoverability
+        self.setToolTip(self.insight.message)
 
 
 class MainWindow(QMainWindow):
@@ -300,7 +304,9 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self._clear_previous_experiment()
         trials = self._create_default_trials(selected_models)
-        self._setup_and_run_scheduler(trials, dataset_name)
+        # For a simple experiment, default to Successive Halving
+        scheduler_config = {'adaptive_scheduler': 'Successive Halving'}
+        self._setup_and_run_scheduler(trials, dataset_name, scheduler_config)
 
     def open_tuning_dialog(self):
         dataset_name, selected_models_names = self._get_experiment_settings()
@@ -313,7 +319,7 @@ class MainWindow(QMainWindow):
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             config = dialog.get_configuration()
-            self.append_log_message(f"INFO: Starting hyperparameter tuning with strategy: {config['strategy']}")
+            self.append_log_message(f"INFO: Starting tuning with scheduler '{config['adaptive_scheduler']}' and h-param strategy '{config['hparam_strategy']}'")
 
             template_trials = self._create_default_trials(selected_models_names)
             tuned_trials = self._generate_trials_from_config(template_trials, config)
@@ -329,10 +335,10 @@ class MainWindow(QMainWindow):
 
             self.update_button_states(running=True, paused=False)
             self._clear_previous_experiment()
-            self._setup_and_run_scheduler(tuned_trials, dataset_name)
+            self._setup_and_run_scheduler(tuned_trials, dataset_name, config)
 
     def _generate_trials_from_config(self, template_trials: list, config: dict) -> list:
-        strategy = config.get('strategy', 'Grid Search')
+        strategy = config.get('hparam_strategy', 'Grid Search')
         steps = config.get('num_trials', 1)
         all_new_trials = []
         for template_trial in template_trials:
@@ -407,13 +413,33 @@ class MainWindow(QMainWindow):
             trials.append(Trial(id=f"{model_name[:4]}_{uuid.uuid4().hex[:4]}", algorithm_name=model_name, hyperparameters=default_hparams))
         return trials
 
-    def _setup_and_run_scheduler(self, trials: list, dataset_name: str):
+    def _setup_and_run_scheduler(self, trials: list, dataset_name: str, scheduler_config: dict):
         if not trials:
             self.append_log_message("ERROR: No trials were generated for the experiment.")
             self.update_button_states(running=False, paused=False)
             return
         dataset_def = AVAILABLE_DATASETS[dataset_name]
-        adaptive_scheduler = SuccessiveHalvingScheduler(metric=dataset_def.performance_metric_name, increasing=True, min_epochs_per_rung=2, reduction_factor=2)
+
+        # --- Instantiate the correct adaptive scheduler based on config ---
+        scheduler_name = scheduler_config.get('adaptive_scheduler', 'Successive Halving')
+        metric = dataset_def.performance_metric_name
+        is_increasing = dataset_def.type == 'classification' # Assume classification metrics are increasing
+
+        if scheduler_name == 'Hyperband':
+            max_epochs = scheduler_config.get('max_epochs', 81)
+            adaptive_scheduler = HyperbandScheduler(
+                metric=metric,
+                increasing=is_increasing,
+                max_resource_per_trial=max_epochs
+            )
+        else: # Default to Successive Halving
+            adaptive_scheduler = SuccessiveHalvingScheduler(
+                metric=metric,
+                increasing=is_increasing,
+                min_epochs_per_rung=2,
+                reduction_factor=2
+            )
+
         scheduler = Scheduler(trials=trials, dataset_name=dataset_name, adaptive_scheduler=adaptive_scheduler, max_workers=4, enable_checkpointing=self.checkpoint_checkbox.isChecked())
         self.scheduler_thread = QThread()
         self.scheduler_runner = SchedulerRunner(scheduler)
@@ -508,7 +534,7 @@ class MainWindow(QMainWindow):
             "BEST_PERFORMER": style.standardIcon(QStyle.StandardPixmap.SP_ArrowUp),
             "PLATEAU": style.standardIcon(QStyle.StandardPixmap.SP_ArrowRight),
             "POOR_INITIAL_PERFORMANCE": style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning),
-            "PERFORMANCE_CROSSOVER": style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon),
+            "PERFORMANCE_CROSSOVER": style.standardIcon(QStyle.StandardPixmap.SP_MediaSeekForward),
             "HYPERPARAM_CORRELATION": style.standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton),
             "DEFAULT": style.standardIcon(QStyle.StandardPixmap.SP_DialogInfoButton)
         }
