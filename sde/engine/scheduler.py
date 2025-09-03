@@ -199,6 +199,8 @@ class Scheduler(QObject):
 
 # A simple test block to run the backend from the command line
 if __name__ == "__main__":
+    from sde.exploration.schedulers import SuccessiveHalvingScheduler
+
     # Define a few sample trials with a structured hyperparameter format
     trials_to_run = [
         Trial(
@@ -222,7 +224,7 @@ if __name__ == "__main__":
     DATASET = "MNIST"
     print(f"Starting experiment with {len(trials_to_run)} trials on {DATASET}.")
 
-    adaptive_scheduler = SuccessiveHalvingScheduler(metric="accuracy", increasing=True)
+    adaptive_scheduler = SuccessiveHalvingScheduler(metric="accuracy", increasing=True, max_rungs=4)
 
     scheduler = Scheduler(
         trials=trials_to_run,

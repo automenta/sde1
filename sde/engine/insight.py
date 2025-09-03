@@ -75,14 +75,16 @@ class InsightEngine:
         try:
             history = [val for epoch, val in trial.results[self.primary_metric]]
             if len(history) < lookback:
-                return None # Not enough data
+                return None  # Not enough data
 
             recent_history = history[-lookback:]
-            improvement = max(recent_history) - min(recent_history) if self.higher_is_better else max(recent_history) - min(recent_history)
+            # Check the range of values in the recent history. If the range is smaller
+            # than the tolerance, the metric is considered to have plateaued.
+            value_range = abs(max(recent_history) - min(recent_history))
 
-            if abs(improvement) < tolerance:
+            if value_range < tolerance:
                 # To avoid spamming, only fire this insight once per plateau
-                if not hasattr(trial, '_plateau_insight_fired'):
+                if not hasattr(trial, '_plateau_insight_fired') or not trial._plateau_insight_fired:
                     trial._plateau_insight_fired = True
                     return Insight(
                         message=f"Warning: Trial {trial.id[:6]}'s performance has plateaued.",
@@ -90,8 +92,7 @@ class InsightEngine:
                     )
             else:
                 # Reset the flag if performance improves again
-                if hasattr(trial, '_plateau_insight_fired'):
-                    del trial._plateau_insight_fired
+                trial._plateau_insight_fired = False
 
         except (KeyError, IndexError):
             return None

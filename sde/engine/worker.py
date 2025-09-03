@@ -13,7 +13,6 @@ class Worker:
     It is initialized with a specific ModelDefinition and DatasetDefinition.
     """
     def __init__(self, model_def: ModelDefinition, dataset_def: DatasetDefinition):
-        print(f"Worker process initialized. Using device: {DEVICE}")
         self.model_def = model_def
         self.dataset_def = dataset_def
         # Note: DataLoaders can be slow to initialize.

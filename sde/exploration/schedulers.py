@@ -29,12 +29,13 @@ class SuccessiveHalvingScheduler(AdaptiveScheduler):
     This scheduler runs trials for a certain number of epochs (a "rung"),
     then prunes the worst-performing half and continues with the survivors.
     """
-    def __init__(self, metric: str, increasing: bool, min_epochs_per_rung: int = 1, reduction_factor: int = 2):
+    def __init__(self, metric: str, increasing: bool, min_epochs_per_rung: int = 1, reduction_factor: int = 2, max_rungs: int = 5):
         self.metric = metric
         self.increasing = increasing # True if higher metric value is better (e.g., accuracy)
         self.min_epochs_per_rung = min_epochs_per_rung
         self.eta = reduction_factor
         self.rung_level = 0
+        self.max_rungs = max_rungs
 
     def get_initial_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
         """Schedules the first epoch for all pending trials."""
@@ -46,52 +47,50 @@ class SuccessiveHalvingScheduler(AdaptiveScheduler):
         return work_units
 
     def get_next_work_units(self, finished_trial: Trial, all_trials: Dict[str, Trial]) -> List[WorkUnit]:
-        """Checks if a rung is complete and prunes trials if so."""
+        """
+        Decides the next work units. It checks if a pruning decision can be made,
+        terminates if max_rungs is reached, and schedules work to prevent stalls.
+        """
+        # --- Termination Condition ---
+        if self.rung_level >= self.max_rungs:
+            for trial in all_trials.values():
+                if trial.status == TrialStatus.ACTIVE:
+                    trial.status = TrialStatus.COMPLETED
+            return [] # Stop scheduling new work
 
-        # 1. Determine the current rung's target epoch
-        # This is a simplified rung calculation. A full implementation of Hyperband would be more complex.
+        # --- Rung-based Pruning Logic ---
         current_rung_epoch = self.min_epochs_per_rung * (self.eta ** self.rung_level)
+        active_trials = [t for t in all_trials.values() if t.status == TrialStatus.ACTIVE]
 
-        # Only proceed if the finished trial has completed the target number of epochs for this rung
-        if finished_trial.current_epoch < current_rung_epoch:
-            # Not at a rung decision point yet, just schedule the next epoch for this trial
+        # A decision can only be made if all active trials have reached the rung epoch.
+        if all(t.current_epoch >= current_rung_epoch for t in active_trials):
+            # Get performance of each trial at the rung
+            rung_performance = []
+            for trial in active_trials:
+                try:
+                    metric_value = next(m for e, m in trial.results[self.metric] if e >= current_rung_epoch)
+                    rung_performance.append((trial, metric_value))
+                except (KeyError, StopIteration):
+                    rung_performance.append((trial, -math.inf if self.increasing else math.inf))
+
+            rung_performance.sort(key=lambda x: x[1], reverse=self.increasing)
+            num_to_keep = math.ceil(len(rung_performance) / self.eta)
+            survivors = rung_performance[:num_to_keep]
+            pruned = rung_performance[num_to_keep:]
+
+            new_work_units = []
+            for trial, _ in pruned:
+                trial.status = TrialStatus.PRUNED
+            for trial, _ in survivors:
+                new_work_units.append(WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH))
+
+            self.rung_level += 1
+            return new_work_units
+
+        # --- Default Scheduling (No Pruning Decision) ---
+        # If not all trials are at a rung, just schedule the next work unit for the finished trial
+        # to prevent the system from stalling.
+        if finished_trial.status == TrialStatus.ACTIVE:
             return [WorkUnit(trial_id=finished_trial.id, type=WorkUnitType.TRAIN_EPOCH)]
 
-        # 2. Check if all other active trials have also completed this rung
-        active_trials = [t for t in all_trials.values() if t.status == TrialStatus.ACTIVE]
-        if not all(t.current_epoch >= current_rung_epoch for t in active_trials):
-            # Not all trials are at the decision point yet. Wait for others to finish.
-            return []
-
-        # 3. All trials are at the decision point. Time to prune.
-        # Get the performance of each trial at the current rung epoch
-        rung_performance = []
-        for trial in active_trials:
-            try:
-                metric_value = next(m for e, m in trial.results[self.metric] if e == current_rung_epoch)
-                rung_performance.append((trial, metric_value))
-            except (KeyError, StopIteration):
-                # This trial doesn't have the required metric. Prune it by default.
-                rung_performance.append((trial, -math.inf if self.increasing else math.inf))
-
-        # Sort trials by performance
-        rung_performance.sort(key=lambda x: x[1], reverse=self.increasing)
-
-        # 4. Prune the worst trials
-        num_to_keep = math.ceil(len(rung_performance) / self.eta)
-        survivors = rung_performance[:num_to_keep]
-        pruned = rung_performance[num_to_keep:]
-
-        new_work_units = []
-        for trial, _ in pruned:
-            trial.status = TrialStatus.PRUNED
-            # No work unit, effectively stopping it. The main scheduler will emit an update.
-
-        for trial, _ in survivors:
-            # Schedule the next epoch for the survivors
-            new_work_units.append(WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH))
-
-        # 5. Advance to the next rung
-        self.rung_level += 1
-
-        return new_work_units
+        return []

@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit, QSplitter,
     QPushButton, QSizePolicy, QComboBox, QLabel, QListWidget, QListWidgetItem,
-    QFormLayout
+    QFormLayout, QSlider, QCheckBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 import pyqtgraph as pg
