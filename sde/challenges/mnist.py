@@ -1,33 +1,29 @@
 import torch.nn as nn
 from torchvision import datasets, transforms
+from functools import partial
 
 from sde.models.types import DatasetDefinition, DatasetType
-from sde.challenges.utils import create_train_val_dataloaders
+from sde.challenges.utils import DataLoaderFactory
 
-# --- 1. The Data Loader Factory ---
-
-def get_mnist_dataloaders(batch_size=64, data_dir='./data_mnist'):
-    """
-    Returns training and validation DataLoaders for MNIST using the utility function.
-    """
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))  # Mean and std of MNIST
-    ])
-    return create_train_val_dataloaders(
-        dataset_class=datasets.MNIST,
-        data_dir=data_dir,
-        transform=transform,
-        batch_size=batch_size
-    )
+# --- 1. Define the transform ---
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.1307,), (0.3081,))  # Mean and std of MNIST
+])
 
 # --- 2. Dataset Definition ---
-
+# We use functools.partial to pre-configure the DataLoaderFactory for MNIST.
+# This creates a callable that the worker can then instantiate.
 MNIST_DATASET = DatasetDefinition(
     name="MNIST",
     type=DatasetType.IMAGE_CLASSIFICATION,
     description="A classic dataset of 70,000 28x28 grayscale images of handwritten digits (0-9).",
-    loader_factory=get_mnist_dataloaders,
+    loader_factory=partial(
+        DataLoaderFactory,
+        dataset_class=datasets.MNIST,
+        data_dir='./data_mnist',
+        transform=transform
+    ),
     input_shape=(1, 28, 28),
     output_shape=10,
     loss_function_factory=nn.CrossEntropyLoss,

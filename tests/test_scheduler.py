@@ -34,8 +34,8 @@ class TestScheduler(unittest.TestCase):
 
     def test_initialization(self):
         """Test that the scheduler initializes correctly."""
-        self.assertEqual(len(self.scheduler.trials), 2)
-        self.assertIsInstance(self.scheduler.trials['trial_1'], Trial)
+        self.assertEqual(len(self.scheduler.datastore.get_all_trials()), 2)
+        self.assertIsInstance(self.scheduler.datastore.get_trial('trial_1'), Trial)
         self.assertFalse(self.scheduler._is_paused)
         self.assertTrue(self.scheduler._is_running)
 
@@ -86,7 +86,7 @@ class TestScheduler(unittest.TestCase):
 
         # The scheduler will only dispatch work for trials in the ACTIVE state.
         # The real adaptive_scheduler sets this, so we must simulate it here.
-        self.scheduler.trials['trial_1'].status = TrialStatus.ACTIVE
+        self.scheduler.datastore.set_trial_status('trial_1', TrialStatus.ACTIVE)
 
         log_callback = self.scheduler.log_message._callbacks[0]
         trial_updated_callback = self.scheduler.trial_updated._callbacks[0]

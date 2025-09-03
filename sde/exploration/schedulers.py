@@ -1,21 +1,26 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict
+from typing import List, Optional, Tuple
 import math
 
 from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus
+from sde.engine.datastore import DataStore
 
 class AdaptiveScheduler(ABC):
     """
     Abstract base class for an adaptive scheduler policy.
     It determines what work to do next based on intermediate results.
     """
+    def __init__(self, metric: str, increasing: bool):
+        self.metric = metric
+        self.increasing = increasing
+
     @abstractmethod
-    def get_initial_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
+    def get_initial_work_units(self, datastore: DataStore) -> List[WorkUnit]:
         """Returns the first batch of WorkUnits to start an experiment."""
         ...
 
     @abstractmethod
-    def get_next_work_units(self, finished_trial: Trial, all_trials: Dict[str, Trial]) -> List[WorkUnit]:
+    def get_next_work_units(self, finished_trial: Trial, datastore: DataStore) -> List[WorkUnit]:
         """
         Determines the next WorkUnits to schedule based on the result of a
         just-finished trial and the state of all other trials.
@@ -24,74 +29,99 @@ class AdaptiveScheduler(ABC):
 
 class SuccessiveHalvingScheduler(AdaptiveScheduler):
     """
-    Implements the Successive Halving algorithm.
+    An asynchronous, non-blocking implementation of Successive Halving.
 
-    This scheduler runs trials for a certain number of epochs (a "rung"),
-    then prunes the worst-performing half and continues with the survivors.
+    This scheduler evaluates trials at periodic "rungs" (decision points defined
+    by powers of the reduction_factor). When a trial completes an epoch that
+    falls on a rung, it compares its performance against all other active trials
+    that have also reached that rung. If the trial is in the bottom tier of
+    performers, it is pruned.
+
+    This implementation is "non-blocking" because a fast trial never has to wait
+    for a slow one. It makes its pruning decision based on whatever data is
+    available in the DataStore at that moment.
     """
     def __init__(self, metric: str, increasing: bool, min_epochs_per_rung: int = 1, reduction_factor: int = 2):
-        self.metric = metric
-        self.increasing = increasing # True if higher metric value is better (e.g., accuracy)
-        self.min_epochs_per_rung = min_epochs_per_rung
+        super().__init__(metric, increasing)
+        self.min_epochs = min_epochs_per_rung
         self.eta = reduction_factor
-        self.rung_level = 0
+        # A dictionary to keep track of trials that have been pruned at a specific rung
+        # to avoid re-evaluating them if they somehow get more work scheduled.
+        self._pruned_at_rung = {}
 
-    def get_initial_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
+    def get_initial_work_units(self, datastore: DataStore) -> List[WorkUnit]:
         """Schedules the first epoch for all pending trials."""
         work_units = []
-        for trial in trials.values():
-            if trial.status == TrialStatus.PENDING:
-                trial.status = TrialStatus.ACTIVE
-                work_units.append(WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH))
+        for trial in datastore.get_trials_by_status(TrialStatus.PENDING):
+            datastore.set_trial_status(trial.id, TrialStatus.ACTIVE)
+            work_units.append(WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH))
         return work_units
 
-    def get_next_work_units(self, finished_trial: Trial, all_trials: Dict[str, Trial]) -> List[WorkUnit]:
-        """Checks if a rung is complete and prunes trials if so."""
+    def _is_rung_epoch(self, epoch: int) -> bool:
+        """Checks if a given epoch is a rung (a decision point)."""
+        if epoch < self.min_epochs:
+            return False
 
-        # 1. Determine the current rung's target epoch
-        # This is a simplified rung calculation. A full implementation of Hyperband would be more complex.
-        current_rung_epoch = self.min_epochs_per_rung * (self.eta ** self.rung_level)
+        # An epoch is a rung if (epoch / min_epochs) is a power of eta.
+        # We use logs to check this, with a tolerance for floating point inaccuracies.
+        if self.min_epochs == 0 and epoch > 0: return True # Edge case for 0 min_epochs
+        if self.min_epochs <= 0: return False
 
-        # Only proceed if the finished trial has completed the target number of epochs for this rung
-        if finished_trial.current_epoch < current_rung_epoch:
-            # Not at a rung decision point yet, just schedule the next epoch for this trial
+        log_val = math.log(epoch / self.min_epochs, self.eta)
+        return abs(log_val - round(log_val)) < 1e-9
+
+    def _get_performance_at_epoch(self, trial: Trial, epoch: int) -> Optional[float]:
+        """Safely retrieves a trial's performance for a specific epoch."""
+        try:
+            return next(m for e, m in trial.results[self.metric] if e == epoch)
+        except (KeyError, StopIteration):
+            return None
+
+    def get_next_work_units(self, finished_trial: Trial, datastore: DataStore) -> List[WorkUnit]:
+        """Determines if a trial should be pruned or continue."""
+        current_epoch = finished_trial.current_epoch
+
+        # 1. If the current epoch is not a decision point, continue training.
+        if not self._is_rung_epoch(current_epoch):
             return [WorkUnit(trial_id=finished_trial.id, type=WorkUnitType.TRAIN_EPOCH)]
 
-        # 2. Check if all other active trials have also completed this rung
-        active_trials = [t for t in all_trials.values() if t.status == TrialStatus.ACTIVE]
-        if not all(t.current_epoch >= current_rung_epoch for t in active_trials):
-            # Not all trials are at the decision point yet. Wait for others to finish.
-            return []
+        # 2. This is a decision point (a "rung").
+        rung_epoch = current_epoch
 
-        # 3. All trials are at the decision point. Time to prune.
-        # Get the performance of each trial at the current rung epoch
-        rung_performance = []
-        for trial in active_trials:
-            try:
-                metric_value = next(m for e, m in trial.results[self.metric] if e == current_rung_epoch)
-                rung_performance.append((trial, metric_value))
-            except (KeyError, StopIteration):
-                # This trial doesn't have the required metric. Prune it by default.
-                rung_performance.append((trial, -math.inf if self.increasing else math.inf))
+        # Avoid re-pruning a trial that has already been marked for pruning at this rung.
+        if finished_trial.id in self._pruned_at_rung.get(rung_epoch, set()):
+             datastore.set_trial_status(finished_trial.id, TrialStatus.PRUNED)
+             return []
 
-        # Sort trials by performance
-        rung_performance.sort(key=lambda x: x[1], reverse=self.increasing)
+        # 3. Gather all other active trials that have also reached this rung.
+        contemporaries: List[Tuple[Trial, float]] = []
+        for trial in datastore.get_trials_by_status(TrialStatus.ACTIVE):
+            performance = self._get_performance_at_epoch(trial, rung_epoch)
+            if performance is not None:
+                contemporaries.append((trial, performance))
 
-        # 4. Prune the worst trials
-        num_to_keep = math.ceil(len(rung_performance) / self.eta)
-        survivors = rung_performance[:num_to_keep]
-        pruned = rung_performance[num_to_keep:]
+        # 4. If there aren't enough other trials to make a comparison, let this one continue.
+        # This prevents a fast trial from being unfairly pruned before others have reported results.
+        if len(contemporaries) < self.eta:
+             return [WorkUnit(trial_id=finished_trial.id, type=WorkUnitType.TRAIN_EPOCH)]
 
-        new_work_units = []
-        for trial, _ in pruned:
-            trial.status = TrialStatus.PRUNED
-            # No work unit, effectively stopping it. The main scheduler will emit an update.
+        # 5. Sort the contenders and check the rank of the finished trial.
+        contemporaries.sort(key=lambda x: x[1], reverse=self.increasing)
+        try:
+            rank = [t.id for t, p in contemporaries].index(finished_trial.id)
+        except ValueError:
+            # Should not happen, but as a safeguard, let the trial continue if it's not in the list.
+            return [WorkUnit(trial_id=finished_trial.id, type=WorkUnitType.TRAIN_EPOCH)]
 
-        for trial, _ in survivors:
-            # Schedule the next epoch for the survivors
-            new_work_units.append(WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH))
-
-        # 5. Advance to the next rung
-        self.rung_level += 1
-
-        return new_work_units
+        # 6. Prune the trial if it's in the bottom tier of performers.
+        num_to_prune = len(contemporaries) // self.eta
+        if rank >= (len(contemporaries) - num_to_prune):
+            datastore.set_trial_status(finished_trial.id, TrialStatus.PRUNED)
+            # Record the pruning decision to prevent redundant checks.
+            if rung_epoch not in self._pruned_at_rung:
+                self._pruned_at_rung[rung_epoch] = set()
+            self._pruned_at_rung[rung_epoch].add(finished_trial.id)
+            return [] # No more work for this trial.
+        else:
+            # It's a survivor, schedule the next epoch.
+            return [WorkUnit(trial_id=finished_trial.id, type=WorkUnitType.TRAIN_EPOCH)]
