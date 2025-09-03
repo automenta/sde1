@@ -16,7 +16,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 import pyqtgraph as pg
 
 # Import backend components
-from sde.engine.scheduler import Scheduler
+from sde.engine.orchestrator import Orchestrator
 from sde.engine.insight import Insight
 from sde.core.types import Trial
 from sde.exploration.schedulers import SuccessiveHalvingScheduler, HyperbandScheduler
@@ -24,9 +24,9 @@ from sde.models import AVAILABLE_MODELS
 from sde.challenges import AVAILABLE_DATASETS
 from sde.ui.hyperparameters import HyperparameterDialog
 
-class SchedulerRunner(QObject):
+class ExperimentRunner(QObject):
     """
-    A QObject wrapper that runs the framework-agnostic Scheduler in a QThread
+    A QObject wrapper that runs the framework-agnostic Orchestrator in a QThread
     and translates its custom signals into PyQt signals.
     """
     # PyQt signals that will be emitted from the UI thread
@@ -36,31 +36,32 @@ class SchedulerRunner(QObject):
     experiment_finished = pyqtSignal()
     insight_generated = pyqtSignal(object) # Emits the full Insight object
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, orchestrator: Orchestrator):
         super().__init__()
-        self.scheduler = scheduler
+        self.orchestrator = orchestrator
         self._is_running = True
 
-        # Connect the scheduler's custom signals to methods that emit PyQt signals
-        self.scheduler.log_message.connect(self.log_message.emit)
-        self.scheduler.trial_updated.connect(self.trial_updated.emit)
-        self.scheduler.trial_profiled.connect(self.trial_profiled.emit)
-        self.scheduler.experiment_finished.connect(self.on_scheduler_finished)
-        self.scheduler.insight_generated.connect(self.insight_generated.emit)
+        # Connect the orchestrator's custom signals to methods that emit PyQt signals
+        self.orchestrator.log_message.connect(self.log_message.emit)
+        self.orchestrator.trial_updated.connect(self.trial_updated.emit)
+        self.orchestrator.trial_profiled.connect(self.trial_profiled.emit)
+        self.orchestrator.experiment_finished.connect(self.on_experiment_finished)
+        self.orchestrator.insight_generated.connect(self.insight_generated.emit)
 
     def run(self):
         """The main work method that is executed in the QThread."""
         if self._is_running:
-            self.scheduler.start()
+            self.orchestrator.start()
+            self.orchestrator.join() # Wait for the experiment thread to finish
 
     def stop(self):
-        """Stops the scheduler gracefully."""
-        self.log_message.emit("INFO: UI requested scheduler shutdown.")
+        """Stops the orchestrator gracefully."""
+        self.log_message.emit("INFO: UI requested orchestrator shutdown.")
         self._is_running = False
-        self.scheduler.stop()
+        self.orchestrator.stop()
 
-    def on_scheduler_finished(self):
-        """Handles the scheduler's finished signal."""
+    def on_experiment_finished(self):
+        """Handles the orchestrator's finished signal."""
         self._is_running = False
         self.experiment_finished.emit()
 
@@ -135,8 +136,8 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1400, 900)
 
         # --- Backend components ---
-        self.scheduler_thread = None
-        self.scheduler_runner = None
+        self.experiment_thread = None
+        self.experiment_runner = None
 
         # --- Data maps for UI updates ---
         self.trial_row_map = {}  # trial.id -> table_row_index
@@ -313,17 +314,15 @@ class MainWindow(QMainWindow):
 
     def on_trial_double_clicked(self, row, column):
         """Shows a dialog with the hyperparameters for the double-clicked trial."""
-        # We can get the trial ID from the first column.
         trial_id_item = self.trials_table.item(row, 0)
-        if not trial_id_item:
-            return # Clicked on an empty row
+        if not trial_id_item: return
         trial_id = trial_id_item.text()
 
-        if not self.scheduler_runner or not self.scheduler_runner.scheduler:
-            self.append_log_message("WARN: Cannot show h-params, scheduler not running.")
+        if not self.experiment_runner or not self.experiment_runner.orchestrator:
+            self.append_log_message("WARN: Cannot show h-params, orchestrator not running.")
             return
 
-        trial = self.scheduler_runner.scheduler.trials.get(trial_id)
+        trial = self.experiment_runner.orchestrator.datastore.get_trial(trial_id)
         if trial:
             dialog = HyperparameterViewerDialog(trial.hyperparameters, self)
             dialog.exec()
@@ -334,25 +333,29 @@ class MainWindow(QMainWindow):
     def update_button_states(self, running: bool, paused: bool):
         self.start_button.setEnabled(not running)
         self.tune_button.setEnabled(not running)
-        self.pause_button.setEnabled(running and not paused)
-        self.resume_button.setEnabled(running and paused)
+        # Pause/Resume is not implemented in the new Orchestrator yet
+        self.pause_button.setEnabled(False) # Temporarily disable
+        self.resume_button.setEnabled(False) # Temporarily disable
         self.setup_group.setEnabled(not running)
         self.settings_group.setEnabled(not running)
 
     def update_throttle(self, value: int):
         self.throttle_label.setText(f"{value}%")
-        if self.scheduler_runner:
-            self.scheduler_runner.scheduler.set_throttle(value)
+        # Throttle is not implemented in the new Scheduler yet
+        # if self.experiment_runner:
+        #     self.experiment_runner.orchestrator.set_throttle(value)
 
     def pause_experiment(self):
-        if self.scheduler_runner:
-            self.scheduler_runner.scheduler.pause()
-            self.update_button_states(running=True, paused=True)
+        self.append_log_message("INFO: Pause/Resume is not yet implemented in the refactored engine.")
+        # if self.experiment_runner:
+        #     self.experiment_runner.orchestrator.pause()
+        #     self.update_button_states(running=True, paused=True)
 
     def resume_experiment(self):
-        if self.scheduler_runner:
-            self.scheduler_runner.scheduler.resume()
-            self.update_button_states(running=True, paused=False)
+        self.append_log_message("INFO: Pause/Resume is not yet implemented in the refactored engine.")
+        # if self.experiment_runner:
+        #     self.experiment_runner.orchestrator.resume()
+        #     self.update_button_states(running=True, paused=False)
 
     def start_simple_experiment(self):
         dataset_name, selected_models = self._get_experiment_settings()
@@ -365,9 +368,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self._clear_previous_experiment()
         trials = self._create_default_trials(selected_models)
-        # For a simple experiment, default to Successive Halving
         scheduler_config = {'adaptive_scheduler': 'Successive Halving'}
-        self._setup_and_run_scheduler(trials, dataset_name, scheduler_config)
+        self._setup_and_run_experiment(trials, dataset_name, scheduler_config)
 
     def open_tuning_dialog(self):
         dataset_name, selected_models_names = self._get_experiment_settings()
@@ -396,7 +398,7 @@ class MainWindow(QMainWindow):
 
             self.update_button_states(running=True, paused=False)
             self._clear_previous_experiment()
-            self._setup_and_run_scheduler(tuned_trials, dataset_name, config)
+            self._setup_and_run_experiment(tuned_trials, dataset_name, config)
 
     def _generate_trials_from_config(self, template_trials: list, config: dict) -> list:
         strategy = config.get('hparam_strategy', 'Grid Search')
@@ -474,45 +476,38 @@ class MainWindow(QMainWindow):
             trials.append(Trial(id=f"{model_name[:4]}_{uuid.uuid4().hex[:4]}", algorithm_name=model_name, hyperparameters=default_hparams))
         return trials
 
-    def _setup_and_run_scheduler(self, trials: list, dataset_name: str, scheduler_config: dict):
+    def _setup_and_run_experiment(self, trials: list, dataset_name: str, scheduler_config: dict):
         if not trials:
             self.append_log_message("ERROR: No trials were generated for the experiment.")
             self.update_button_states(running=False, paused=False)
             return
         dataset_def = AVAILABLE_DATASETS[dataset_name]
 
-        # --- Instantiate the correct adaptive scheduler based on config ---
         scheduler_name = scheduler_config.get('adaptive_scheduler', 'Successive Halving')
         metric = dataset_def.performance_metric_name
-        is_increasing = dataset_def.type == 'classification' # Assume classification metrics are increasing
+        is_increasing = dataset_def.type == 'classification'
 
         if scheduler_name == 'Hyperband':
             max_epochs = scheduler_config.get('max_epochs', 81)
-            adaptive_scheduler = HyperbandScheduler(
-                metric=metric,
-                increasing=is_increasing,
-                max_resource_per_trial=max_epochs
-            )
+            adaptive_scheduler = HyperbandScheduler(metric=metric, increasing=is_increasing, max_resource_per_trial=max_epochs)
         else: # Default to Successive Halving
-            adaptive_scheduler = SuccessiveHalvingScheduler(
-                metric=metric,
-                increasing=is_increasing,
-                min_epochs_per_rung=2,
-                reduction_factor=2
-            )
+            adaptive_scheduler = SuccessiveHalvingScheduler(metric=metric, increasing=is_increasing, min_epochs_per_rung=2, reduction_factor=2)
 
-        scheduler = Scheduler(trials=trials, dataset_name=dataset_name, adaptive_scheduler=adaptive_scheduler, max_workers=4, enable_checkpointing=self.checkpoint_checkbox.isChecked())
-        self.scheduler_thread = QThread()
-        self.scheduler_runner = SchedulerRunner(scheduler)
-        self.scheduler_runner.moveToThread(self.scheduler_thread)
-        self.scheduler_runner.log_message.connect(self.append_log_message)
-        self.scheduler_runner.trial_updated.connect(self.update_trial_ui)
-        self.scheduler_runner.trial_profiled.connect(self.on_trial_profiled)
-        self.scheduler_runner.experiment_finished.connect(self.on_experiment_finished)
-        self.scheduler_runner.insight_generated.connect(self.add_insight)
-        self.scheduler_thread.started.connect(self.scheduler_runner.run)
+        orchestrator = Orchestrator(trials=trials, dataset_name=dataset_name, adaptive_scheduler=adaptive_scheduler, max_workers=4, enable_checkpointing=self.checkpoint_checkbox.isChecked())
+
+        self.experiment_thread = QThread()
+        self.experiment_runner = ExperimentRunner(orchestrator)
+        self.experiment_runner.moveToThread(self.experiment_thread)
+
+        self.experiment_runner.log_message.connect(self.append_log_message)
+        self.experiment_runner.trial_updated.connect(self.update_trial_ui)
+        self.experiment_runner.trial_profiled.connect(self.on_trial_profiled)
+        self.experiment_runner.experiment_finished.connect(self.on_experiment_finished)
+        self.experiment_runner.insight_generated.connect(self.add_insight)
+
+        self.experiment_thread.started.connect(self.experiment_runner.run)
         self.update_throttle(self.throttle_slider.value())
-        self.scheduler_thread.start()
+        self.experiment_thread.start()
 
     def on_trial_selected(self):
         selected_items = self.trials_table.selectedItems()
@@ -580,11 +575,12 @@ class MainWindow(QMainWindow):
 
         self._style_trial_ui(trial_id, status)
 
-        if self.scheduler_runner:
-            total_trials = len(self.scheduler_runner.scheduler.trials)
+        if self.experiment_runner:
+            all_trials = self.experiment_runner.orchestrator.datastore.get_all_trials().values()
+            total_trials = len(all_trials)
             if total_trials > 0:
                 completed_statuses = {"COMPLETED", "PRUNED"}
-                completed_trials = sum(1 for t in self.scheduler_runner.scheduler.trials.values() if t.status.value in completed_statuses)
+                completed_trials = sum(1 for t in all_trials if t.status.value in completed_statuses)
                 progress = int((completed_trials / total_trials) * 100)
                 self.progress_bar.setValue(progress)
 
@@ -605,11 +601,10 @@ class MainWindow(QMainWindow):
         if not isinstance(item, InsightListItem):
             return
 
-        # Toggle selection off if the same item is clicked again
         if self.selected_insight_item == item:
             self.insights_list.clearSelection()
             self.selected_insight_item = None
-            self.on_trial_selected() # Resets all highlights
+            self.on_trial_selected()
             return
 
         self.selected_insight_item = item
@@ -646,21 +641,20 @@ class MainWindow(QMainWindow):
         row_color = QColor('white')
         pen = self.plot_curve_map[trial_id].opts['pen']
 
-        is_best = self.scheduler_runner and self.scheduler_runner.scheduler.insight_engine.current_best_trial_id == trial_id
+        is_best = self.experiment_runner and self.experiment_runner.orchestrator.insight_engine.current_best_trial_id == trial_id
 
         if is_best:
-            row_color = QColor('#FFFACD') # LemonChiffon
-            pen.setColor(pg.mkColor('#FFD700')) # Gold
+            row_color = QColor('#FFFACD')
+            pen.setColor(pg.mkColor('#FFD700'))
             pen.setWidth(4)
         elif status == "PRUNED":
-            row_color = QColor('#D3D3D3') # LightGray
-            pen.setColor(pg.mkColor('#808080')) # Gray
+            row_color = QColor('#D3D3D3')
+            pen.setColor(pg.mkColor('#808080'))
             pen.setStyle(Qt.PenStyle.DotLine)
         elif status == "COMPLETED":
-            row_color = QColor('#ADD8E6') # LightBlue
-            pen.setColor(pg.mkColor('#0000FF')) # Blue
+            row_color = QColor('#ADD8E6')
+            pen.setColor(pg.mkColor('#0000FF'))
         else: # ACTIVE
-            # Reset to original color if it's no longer the best
             original_color = pg.intColor(list(self.plot_curve_map.keys()).index(trial_id), hues=9, values=1)
             pen.setColor(original_color)
             pen.setWidth(2)
@@ -686,22 +680,21 @@ class MainWindow(QMainWindow):
         self.append_log_message("INFO: Experiment finished.")
         self.update_button_states(running=False, paused=False)
         self.progress_bar.setValue(100)
-        if self.scheduler_thread and self.scheduler_thread.isRunning():
-            self.scheduler_thread.quit()
-            self.scheduler_thread.wait()
-        self.scheduler_runner = None
+        if self.experiment_thread and self.experiment_thread.isRunning():
+            self.experiment_thread.quit()
+            self.experiment_thread.wait()
+        self.experiment_runner = None
 
     def closeEvent(self, event):
-        if self.scheduler_runner:
-            self.scheduler_runner.stop()
-        if self.scheduler_thread and self.scheduler_thread.isRunning():
-            self.scheduler_thread.quit()
-            self.scheduler_thread.wait()
+        if self.experiment_runner:
+            self.experiment_runner.stop()
+        if self.experiment_thread and self.experiment_thread.isRunning():
+            self.experiment_thread.quit()
+            self.experiment_thread.wait()
         event.accept()
 
 
 if __name__ == '__main__':
-    # A simple test block to run and view the UI layout
     app = QApplication(sys.argv)
     main_win = MainWindow()
     main_win.show()
