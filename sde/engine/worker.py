@@ -20,13 +20,24 @@ class Worker:
         logger.info(f"Worker process initialized. Using device: {DEVICE}")
         self.model_def = model_def
         self.dataset_def = dataset_def
-        # Note: DataLoaders can be slow to initialize.
-        # It's better to do this once per worker process.
-        # For now, we use default loader params. A future improvement would be to
-        # allow trial-specific loader params (e.g., batch_size).
-        self.train_loader, self.val_loader = self.dataset_def.loader_factory()
         self.checkpoints_dir = checkpoints_dir
+        self._dataloader_cache = {}
         os.makedirs(self.checkpoints_dir, exist_ok=True)
+
+    def _get_dataloaders(self, trial: Trial) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+        """
+        Creates and caches dataloaders based on trial-specific hyperparameters.
+        This avoids re-creating the dataloader for every epoch of the same trial,
+        but allows different trials to have different batch sizes.
+        """
+        loader_params = trial.hyperparameters.get('loader_params', {})
+        batch_size = loader_params.get('batch_size', 64)
+
+        if batch_size not in self._dataloader_cache:
+            logger.info(f"Creating new dataloader for batch size: {batch_size}")
+            self._dataloader_cache[batch_size] = self.dataset_def.loader_factory(batch_size=batch_size)
+
+        return self._dataloader_cache[batch_size]
 
     def execute_work_unit(self, work_unit: WorkUnit, trial: Trial, enable_checkpointing: bool = True) -> dict:
         """
@@ -74,17 +85,20 @@ class Worker:
         model, optimizer = self._setup_model_and_optimizer(trial)
         criterion = self.dataset_def.loss_function_factory()
 
-        # 2. Run a few batches and time it
+        # 2. Get trial-specific dataloader
+        train_loader, _ = self._get_dataloaders(trial)
+
+        # 3. Run a few batches and time it
         model.train()
         num_batches_to_profile = 5
-        if len(self.train_loader) < num_batches_to_profile:
-            num_batches_to_profile = len(self.train_loader)
+        if len(train_loader) < num_batches_to_profile:
+            num_batches_to_profile = len(train_loader)
 
         if num_batches_to_profile == 0:
             return {'profile_results': {'est_time_per_epoch': 0.0}}
 
         start_time = time.time()
-        for i, (data, target) in enumerate(self.train_loader):
+        for i, (data, target) in enumerate(train_loader):
             if i >= num_batches_to_profile:
                 break
             data, target = data.to(DEVICE), target.to(DEVICE)
@@ -95,9 +109,9 @@ class Worker:
             optimizer.step()
         end_time = time.time()
 
-        # 3. Extrapolate to full epoch
+        # 4. Extrapolate to full epoch
         time_per_batch = (end_time - start_time) / num_batches_to_profile
-        total_batches = len(self.train_loader)
+        total_batches = len(train_loader)
         est_time_per_epoch = time_per_batch * total_batches
 
         return {
@@ -111,7 +125,10 @@ class Worker:
         model, optimizer = self._setup_model_and_optimizer(trial)
         criterion = self.dataset_def.loss_function_factory()
 
-        # 2. Load state from checkpoint if it exists
+        # 2. Get trial-specific dataloaders
+        train_loader, val_loader = self._get_dataloaders(trial)
+
+        # 3. Load state from checkpoint if it exists
         if trial.checkpoint_path:
             try:
                 checkpoint = torch.load(trial.checkpoint_path, map_location=DEVICE)
@@ -120,9 +137,9 @@ class Worker:
             except FileNotFoundError:
                 logger.warning(f"Checkpoint file not found at {trial.checkpoint_path}. Starting from scratch.")
 
-        # 3. Training loop for one epoch
+        # 4. Training loop for one epoch
         model.train()
-        for batch_idx, (data, target) in enumerate(self.train_loader):
+        for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(DEVICE), target.to(DEVICE)
             optimizer.zero_grad()
             output = model(data)
@@ -130,13 +147,13 @@ class Worker:
             loss.backward()
             optimizer.step()
 
-        # 4. Evaluation on validation set
+        # 5. Evaluation on validation set
         model.eval()
         val_loss = 0
         correct = 0
         total = 0
         with torch.no_grad():
-            for data, target in self.val_loader:
+            for data, target in val_loader:
                 data, target = data.to(DEVICE), target.to(DEVICE)
                 output = model(data)
                 val_loss += criterion(output, target).item() * data.size(0)

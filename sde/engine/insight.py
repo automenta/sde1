@@ -18,6 +18,10 @@ class InsightEngine:
         self.primary_metric = primary_metric
         self.higher_is_better = higher_is_better
         self.current_best_trial_id: Optional[str] = None
+        # Internal state to track fired insights and avoid spam
+        self._fired_plateau_insights = set()
+        self._fired_poor_start_insights = set()
+
 
     def analyze(self, finished_trial: Trial) -> List[Insight]:
         """
@@ -95,16 +99,16 @@ class InsightEngine:
 
             if improvement < relative_tolerance:
                 # To avoid spamming, only fire this insight once per plateau
-                if not getattr(trial, '_plateau_insight_fired', False):
-                    setattr(trial, '_plateau_insight_fired', True)
+                if trial.id not in self._fired_plateau_insights:
+                    self._fired_plateau_insights.add(trial.id)
                     return Insight(
                         message=f"Warning: Trial {trial.id[:6]}'s performance may have plateaued.",
                         type="PLATEAU"
                     )
             else:
                 # Reset the flag if performance improves again
-                if hasattr(trial, '_plateau_insight_fired'):
-                    delattr(trial, '_plateau_insight_fired')
+                if trial.id in self._fired_plateau_insights:
+                    self._fired_plateau_insights.remove(trial.id)
 
         except (KeyError, IndexError):
             return None
@@ -121,7 +125,7 @@ class InsightEngine:
                 return None
 
             # Avoid firing this insight more than once
-            if getattr(trial, '_poor_start_insight_fired', False):
+            if trial.id in self._fired_poor_start_insights:
                 return None
 
             own_perf = trial.results[self.primary_metric][-1][1]
@@ -156,7 +160,7 @@ class InsightEngine:
                               (not self.higher_is_better and z_score > z_score_threshold)
 
             if is_poor_outlier:
-                setattr(trial, '_poor_start_insight_fired', True)
+                self._fired_poor_start_insights.add(trial.id)
                 return Insight(
                     message=f"Warning: Trial {trial.id[:6]} is performing poorly ({own_perf:.4f}) compared to its peers (avg: {mean_perf:.4f}) after the first epoch.",
                     type="POOR_INITIAL_PERFORMANCE"

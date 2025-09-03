@@ -26,7 +26,6 @@ class TestSuccessiveHalvingScheduler(unittest.TestCase):
     def test_pruning_logic_increasing_metric(self):
         """Test the pruning logic with a metric where higher is better."""
         scheduler = SuccessiveHalvingScheduler(metric='accuracy', increasing=True, min_epochs_per_rung=1, reduction_factor=2)
-        scheduler.trials_in_rung = list(self.trials.keys()) # Manually set the rung
 
         # Simulate completion of the first rung
         for i, trial in enumerate(self.trials.values()):
@@ -55,7 +54,6 @@ class TestSuccessiveHalvingScheduler(unittest.TestCase):
     def test_pruning_logic_decreasing_metric(self):
         """Test the pruning logic with a metric where lower is better."""
         scheduler = SuccessiveHalvingScheduler(metric='loss', increasing=False, min_epochs_per_rung=1, reduction_factor=2)
-        scheduler.trials_in_rung = list(self.trials.keys()) # Manually set the rung
 
         # Simulate completion of the first rung
         for i, trial in enumerate(self.trials.values()):
