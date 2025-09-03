@@ -71,6 +71,9 @@ from PyQt6.QtWidgets import QAbstractItemView
 from datetime import datetime
 
 
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QTreeWidget, QTreeWidgetItem
+
+
 class InsightListItem(QListWidgetItem):
     """A custom QListWidgetItem that stores the full Insight object."""
     def __init__(self, insight: Insight, icon: QIcon, parent: QListWidget | None = None):
@@ -79,11 +82,47 @@ class InsightListItem(QListWidgetItem):
         self.setIcon(icon)
 
         timestamp = datetime.now().strftime("%H:%M:%S")
-        # Truncate long messages for display in the list
-        display_message = (self.insight.message[:70] + '...') if len(self.insight.message) > 70 else self.insight.message
-        self.setText(f"[{timestamp}] {display_message}")
-        # Set the full message as a tooltip for discoverability
+        self.setText(f"[{timestamp}] {self.insight.message}")
+        # The full message is now displayed, but tooltip is still good for copy/paste.
         self.setToolTip(self.insight.message)
+
+
+class HyperparameterViewerDialog(QDialog):
+    """A dialog to display nested hyperparameter dictionaries in a readable tree."""
+    def __init__(self, hparams: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Hyperparameter Details")
+        self.setLayout(QVBoxLayout())
+        self.resize(450, 350)
+
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["Parameter", "Value"])
+        self.layout().addWidget(self.tree)
+
+        self.populate_tree(hparams)
+        self.tree.expandAll()
+        for i in range(self.tree.columnCount()):
+            self.tree.resizeColumnToContents(i)
+
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        self.layout().addWidget(ok_button)
+
+    def populate_tree(self, data: dict, parent_item: QTreeWidgetItem = None):
+        if parent_item is None:
+            parent_item = self.tree.invisibleRootItem()
+
+        for key, value in data.items():
+            item = QTreeWidgetItem(parent_item, [str(key)])
+            if isinstance(value, dict):
+                self.populate_tree(value, item)
+            else:
+                if isinstance(value, float):
+                    value_str = f"{value:.6g}" # Use general format for nice printing
+                else:
+                    value_str = str(value)
+                item.setText(1, value_str)
 
 
 class MainWindow(QMainWindow):
@@ -208,6 +247,7 @@ class MainWindow(QMainWindow):
         insights_group = QGroupBox("Insights")
         insights_layout = QVBoxLayout(insights_group)
         self.insights_list = QListWidget()
+        self.insights_list.setWordWrap(True)  # Enable word wrapping for insight messages
         insights_layout.addWidget(self.insights_list)
         insights_layout.setContentsMargins(0, 5, 0, 0)
         insights_group.setLayout(insights_layout)
@@ -268,7 +308,28 @@ class MainWindow(QMainWindow):
         self.trials_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.trials_table.itemSelectionChanged.connect(self.on_trial_selected)
+        self.trials_table.cellDoubleClicked.connect(self.on_trial_double_clicked)
         self.insights_list.itemClicked.connect(self.on_insight_selected)
+
+    def on_trial_double_clicked(self, row, column):
+        """Shows a dialog with the hyperparameters for the double-clicked trial."""
+        # We can get the trial ID from the first column.
+        trial_id_item = self.trials_table.item(row, 0)
+        if not trial_id_item:
+            return # Clicked on an empty row
+        trial_id = trial_id_item.text()
+
+        if not self.scheduler_runner or not self.scheduler_runner.scheduler:
+            self.append_log_message("WARN: Cannot show h-params, scheduler not running.")
+            return
+
+        trial = self.scheduler_runner.scheduler.trials.get(trial_id)
+        if trial:
+            dialog = HyperparameterViewerDialog(trial.hyperparameters, self)
+            dialog.exec()
+        else:
+            self.append_log_message(f"WARN: Could not find trial data for ID {trial_id}")
+
 
     def update_button_states(self, running: bool, paused: bool):
         self.start_button.setEnabled(not running)
@@ -536,7 +597,7 @@ class MainWindow(QMainWindow):
             "POOR_INITIAL_PERFORMANCE": style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning),
             "PERFORMANCE_CROSSOVER": style.standardIcon(QStyle.StandardPixmap.SP_MediaSeekForward),
             "HYPERPARAM_CORRELATION": style.standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton),
-            "DEFAULT": style.standardIcon(QStyle.StandardPixmap.SP_DialogInfoButton)
+            "DEFAULT": style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
         }
 
     def on_insight_selected(self, item: InsightListItem):

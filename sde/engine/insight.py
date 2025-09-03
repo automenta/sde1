@@ -97,6 +97,9 @@ class InsightEngine:
     def _detect_performance_crossover(self, active_trial: Trial) -> List[Insight]:
         """
         Checks if the active trial has just overtaken another trial in performance.
+        This is checked any time a trial completes an epoch. A crossover is only
+        fired once per pair and winner, allowing for "cross-back" events to be
+        reported.
         """
         insights = []
         try:
@@ -108,19 +111,17 @@ class InsightEngine:
             active_perf_prev = self._get_perf_at_epoch(active_trial.id, current_epoch - 1)
 
             if active_perf_now is None or active_perf_prev is None:
-                return [] # Not enough history for the active trial
+                return []  # Not enough history for the active trial
 
             for other_trial in self.trials.values():
                 if other_trial.id == active_trial.id:
                     continue
 
-                # The check for crossover_pair in _fired_crossover_insights is now the sole guard against duplicates.
-
                 other_perf_now = self._get_perf_at_epoch(other_trial.id, current_epoch)
                 other_perf_prev = self._get_perf_at_epoch(other_trial.id, current_epoch - 1)
 
                 if other_perf_now is None or other_perf_prev is None:
-                    continue # Not enough history for the other trial to compare
+                    continue  # Not enough history for the other trial to compare
 
                 # Check for crossover event (handles both increasing and decreasing metrics)
                 prev_delta = active_perf_prev - other_perf_prev
@@ -133,16 +134,19 @@ class InsightEngine:
                     if not self.higher_is_better:
                         winner_id, loser_id = loser_id, winner_id
 
-                    crossover_pair = frozenset([active_trial.id, other_trial.id])
-                    if crossover_pair not in self._fired_crossover_insights:
-                        self._fired_crossover_insights.add(crossover_pair)
+                    # The key for the insight should be the pair of trials and the winner,
+                    # to allow detecting a "cross-back" event later.
+                    crossover_key = (frozenset([active_trial.id, other_trial.id]), winner_id)
+
+                    if crossover_key not in self._fired_crossover_insights:
+                        self._fired_crossover_insights.add(crossover_key)
                         insights.append(Insight(
                             message=f"Performance Crossover: Trial {winner_id[:6]} has overtaken {loser_id[:6]} at epoch {current_epoch}.",
                             type="PERFORMANCE_CROSSOVER",
                             trial_ids=[active_trial.id, other_trial.id]
                         ))
         except (KeyError, IndexError):
-            return [] # Should not happen with the guards in place, but good practice
+            return []  # Should not happen with the guards in place, but good practice
 
         return insights
 
