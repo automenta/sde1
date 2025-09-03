@@ -249,7 +249,7 @@ class Scheduler:
         # 2. Analyze for insights
         insights = self.insight_engine.analyze(trial)
         for insight in insights:
-            self.insight_generated.emit(f"[INSIGHT] {insight.message}")
+            self.insight_generated.emit(insight)
 
         # 3. Get next work from the adaptive scheduler
         new_work = self.adaptive_scheduler.get_next_work_units(trial, self.trials)

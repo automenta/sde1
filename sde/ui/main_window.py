@@ -8,13 +8,16 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit, QSplitter,
     QPushButton, QSizePolicy, QComboBox, QLabel, QListWidget, QListWidgetItem,
-    QFormLayout, QSlider, QCheckBox, QProgressBar, QGroupBox, QMessageBox, QDialog
+    QFormLayout, QSlider, QCheckBox, QProgressBar, QGroupBox, QMessageBox, QDialog,
+    QStyle
 )
+from PyQt6.QtGui import QIcon, QColor
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 import pyqtgraph as pg
 
 # Import backend components
 from sde.engine.scheduler import Scheduler
+from sde.engine.insight import Insight
 from sde.core.types import Trial
 from sde.exploration.schedulers import SuccessiveHalvingScheduler
 from sde.models import AVAILABLE_MODELS
@@ -31,7 +34,7 @@ class SchedulerRunner(QObject):
     trial_updated = pyqtSignal(dict)
     trial_profiled = pyqtSignal(str, float)
     experiment_finished = pyqtSignal()
-    insight_generated = pyqtSignal(str)
+    insight_generated = pyqtSignal(object) # Emits the full Insight object
 
     def __init__(self, scheduler: Scheduler):
         super().__init__()
@@ -68,6 +71,17 @@ from PyQt6.QtWidgets import QAbstractItemView
 from datetime import datetime
 
 
+class InsightListItem(QListWidgetItem):
+    """A custom QListWidgetItem that stores the full Insight object."""
+    def __init__(self, insight: Insight, icon: QIcon, parent: QListWidget | None = None):
+        super().__init__(parent)
+        self.insight = insight
+        self.setIcon(icon)
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.setText(f"[{timestamp}] {self.insight.message}")
+
+
 class MainWindow(QMainWindow):
     """
     The main window for the Scientific Discovery Engine UI.
@@ -85,6 +99,8 @@ class MainWindow(QMainWindow):
         self.trial_row_map = {}  # trial.id -> table_row_index
         self.plot_curve_map = {} # trial.id -> plot_curve_item
         self.legend = None
+        self.selected_insight_item = None
+        self._setup_icons()
 
         # --- Main Layout ---
         central_widget = QWidget()
@@ -248,6 +264,7 @@ class MainWindow(QMainWindow):
         self.trials_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.trials_table.itemSelectionChanged.connect(self.on_trial_selected)
+        self.insights_list.itemClicked.connect(self.on_insight_selected)
 
     def update_button_states(self, running: bool, paused: bool):
         self.start_button.setEnabled(not running)
@@ -427,17 +444,7 @@ class MainWindow(QMainWindow):
                 selected_trial_id = tid
                 break
         if selected_trial_id:
-            for trial_id, curve in self.plot_curve_map.items():
-                pen = curve.opts['pen']
-                color = pen.color()
-                if trial_id == selected_trial_id:
-                    color.setAlpha(255)
-                    curve.setPen(pg.mkPen(color=color, width=4))
-                    curve.setZValue(100)
-                else:
-                    color.setAlpha(30)
-                    curve.setPen(pg.mkPen(color=color, width=1))
-                    curve.setZValue(0)
+            self._update_plot_highlight({selected_trial_id})
 
     def on_trial_profiled(self, trial_id: str, est_time: float):
         if trial_id in self.trial_row_map:
@@ -462,7 +469,8 @@ class MainWindow(QMainWindow):
         row = self.trial_row_map[trial_id]
         self.trials_table.setItem(row, 0, QTableWidgetItem(trial_id))
         self.trials_table.setItem(row, 1, QTableWidgetItem(trial_data['algorithm_name']))
-        self.trials_table.setItem(row, 2, QTableWidgetItem(trial_data['status']))
+        status = trial_data['status']
+        self.trials_table.setItem(row, 2, QTableWidgetItem(status))
         self.trials_table.setItem(row, 3, QTableWidgetItem(str(trial_data['current_epoch'])))
         dataset_name = self.dataset_combo.currentText()
         metric_name = AVAILABLE_DATASETS[dataset_name].performance_metric_name
@@ -483,6 +491,8 @@ class MainWindow(QMainWindow):
             epochs, metrics = zip(*metric_list)
             self.plot_curve_map[trial_id].setData(epochs, metrics)
 
+        self._style_trial_ui(trial_id, status)
+
         if self.scheduler_runner:
             total_trials = len(self.scheduler_runner.scheduler.trials)
             if total_trials > 0:
@@ -491,9 +501,93 @@ class MainWindow(QMainWindow):
                 progress = int((completed_trials / total_trials) * 100)
                 self.progress_bar.setValue(progress)
 
-    def add_insight(self, message: str):
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        item = QListWidgetItem(f"[{timestamp}] {message}")
+    def _setup_icons(self):
+        """Pre-loads icons for different insight types."""
+        style = self.style()
+        self.insight_icons = {
+            "BEST_PERFORMER": style.standardIcon(QStyle.StandardPixmap.SP_ArrowUp),
+            "PLATEAU": style.standardIcon(QStyle.StandardPixmap.SP_ArrowRight),
+            "POOR_INITIAL_PERFORMANCE": style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxWarning),
+            "PERFORMANCE_CROSSOVER": style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon),
+            "HYPERPARAM_CORRELATION": style.standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton),
+            "DEFAULT": style.standardIcon(QStyle.StandardPixmap.SP_DialogInfoButton)
+        }
+
+    def on_insight_selected(self, item: InsightListItem):
+        """Highlights the trials relevant to the selected insight."""
+        if not isinstance(item, InsightListItem):
+            return
+
+        # Toggle selection off if the same item is clicked again
+        if self.selected_insight_item == item:
+            self.insights_list.clearSelection()
+            self.selected_insight_item = None
+            self.on_trial_selected() # Resets all highlights
+            return
+
+        self.selected_insight_item = item
+        highlight_ids = set(item.insight.trial_ids)
+        if not highlight_ids:
+            return
+
+        self.trials_table.clearSelection()
+        self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+
+        for trial_id, row in self.trial_row_map.items():
+            if trial_id in highlight_ids:
+                self.trials_table.selectRow(row)
+
+        self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._update_plot_highlight(highlight_ids)
+
+    def _update_plot_highlight(self, highlight_ids: set):
+        """Highlights a specific set of trials on the plot."""
+        for trial_id, curve in self.plot_curve_map.items():
+            pen = curve.opts['pen']
+            color = pen.color()
+            if trial_id in highlight_ids:
+                color.setAlpha(255)
+                curve.setPen(pg.mkPen(color=color, width=4))
+                curve.setZValue(100)
+            else:
+                color.setAlpha(30)
+                curve.setPen(pg.mkPen(color=color, width=1))
+                curve.setZValue(0)
+
+    def _style_trial_ui(self, trial_id: str, status: str):
+        """Applies coloring and styling to a trial's row and plot based on its status."""
+        row_color = QColor('white')
+        pen = self.plot_curve_map[trial_id].opts['pen']
+
+        is_best = self.scheduler_runner and self.scheduler_runner.scheduler.insight_engine.current_best_trial_id == trial_id
+
+        if is_best:
+            row_color = QColor('#FFFACD') # LemonChiffon
+            pen.setColor(pg.mkColor('#FFD700')) # Gold
+            pen.setWidth(4)
+        elif status == "PRUNED":
+            row_color = QColor('#D3D3D3') # LightGray
+            pen.setColor(pg.mkColor('#808080')) # Gray
+            pen.setStyle(Qt.PenStyle.DotLine)
+        elif status == "COMPLETED":
+            row_color = QColor('#ADD8E6') # LightBlue
+            pen.setColor(pg.mkColor('#0000FF')) # Blue
+        else: # ACTIVE
+            # Reset to original color if it's no longer the best
+            original_color = pg.intColor(list(self.plot_curve_map.keys()).index(trial_id), hues=9, values=1)
+            pen.setColor(original_color)
+            pen.setWidth(2)
+            pen.setStyle(Qt.PenStyle.SolidLine)
+
+        self.plot_curve_map[trial_id].setPen(pen)
+
+        row = self.trial_row_map[trial_id]
+        for col in range(self.trials_table.columnCount()):
+            self.trials_table.item(row, col).setBackground(row_color)
+
+    def add_insight(self, insight: Insight):
+        icon = self.insight_icons.get(insight.type, self.insight_icons["DEFAULT"])
+        item = InsightListItem(insight, icon, self.insights_list)
         self.insights_list.addItem(item)
         self.insights_list.scrollToBottom()
 
