@@ -2,18 +2,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from sde.models.types import ModelDefinition, DatasetType
+from sde.models.types import ModelDefinition, DatasetType, SdeModel
 
-class SimpleCNN(nn.Module):
+class SimpleCNN(SdeModel):
     """
     A simple, generic CNN for image classification.
     The architecture is adaptable based on input shape and output shape.
     """
     def __init__(self, input_shape, output_shape, dropout_rate=0.5, **kwargs):
-        super(SimpleCNN, self).__init__()
+        super().__init__(input_shape, output_shape)
 
-        input_channels, image_height, image_width = input_shape
-        num_classes = output_shape
+        input_channels, image_height, image_width = self.input_shape
+        num_classes = self.output_shape
 
         self.conv1 = nn.Conv2d(input_channels, 32, kernel_size=3, stride=1, padding=1)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)

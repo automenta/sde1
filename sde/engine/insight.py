@@ -23,17 +23,17 @@ class InsightEngine:
         """
         Runs all insight detectors and returns a list of new insights.
         """
+        detectors = [
+            self._detect_best_performer,
+            self._detect_performance_plateau,
+            self._detect_poor_initial_performance,
+        ]
+
         insights = []
-
-        # Run detectors
-        best_performer_insight = self._detect_best_performer(finished_trial)
-        if best_performer_insight:
-            insights.append(best_performer_insight)
-
-        plateau_insight = self._detect_performance_plateau(finished_trial)
-        if plateau_insight:
-            insights.append(plateau_insight)
-
+        for detector in detectors:
+            insight = detector(finished_trial)
+            if insight:
+                insights.append(insight)
         return insights
 
     def _detect_best_performer(self, finished_trial: Trial) -> Optional[Insight]:
@@ -68,30 +68,99 @@ class InsightEngine:
             )
         return None
 
-    def _detect_performance_plateau(self, trial: Trial, lookback: int = 3, tolerance: float = 0.001) -> Optional[Insight]:
+    def _detect_performance_plateau(self, trial: Trial, lookback: int = 4, relative_tolerance: float = 0.005) -> Optional[Insight]:
         """
-        Checks if a trial's performance has not improved significantly over the last few epochs.
+        Checks if a trial's performance has not improved significantly over recent epochs.
+        Uses a relative tolerance to be robust to different metric scales.
         """
         try:
-            history = [val for epoch, val in trial.results[self.primary_metric]]
+            history = [val for _, val in trial.results[self.primary_metric]]
             if len(history) < lookback:
-                return None # Not enough data
+                return None  # Not enough data
 
-            recent_history = history[-lookback:]
-            improvement = max(recent_history) - min(recent_history) if self.higher_is_better else max(recent_history) - min(recent_history)
+            # Get the most recent value and the value from 'lookback' epochs ago
+            last_value = history[-1]
+            past_value = history[-lookback]
 
-            if abs(improvement) < tolerance:
+            # Avoid division by zero if the past value was 0
+            if abs(past_value) < 1e-9:
+                return None
+
+            # Calculate relative improvement
+            improvement = (last_value - past_value) / abs(past_value)
+
+            # If we expect the metric to decrease, a positive improvement is bad
+            if not self.higher_is_better:
+                improvement = -improvement
+
+            if improvement < relative_tolerance:
                 # To avoid spamming, only fire this insight once per plateau
-                if not hasattr(trial, '_plateau_insight_fired'):
-                    trial._plateau_insight_fired = True
+                if not getattr(trial, '_plateau_insight_fired', False):
+                    setattr(trial, '_plateau_insight_fired', True)
                     return Insight(
-                        message=f"Warning: Trial {trial.id[:6]}'s performance has plateaued.",
+                        message=f"Warning: Trial {trial.id[:6]}'s performance may have plateaued.",
                         type="PLATEAU"
                     )
             else:
                 # Reset the flag if performance improves again
                 if hasattr(trial, '_plateau_insight_fired'):
-                    del trial._plateau_insight_fired
+                    delattr(trial, '_plateau_insight_fired')
+
+        except (KeyError, IndexError):
+            return None
+
+        return None
+
+    def _detect_poor_initial_performance(self, trial: Trial, z_score_threshold: float = 2.0) -> Optional[Insight]:
+        """
+        Checks if a trial's performance after its first epoch is a significant outlier.
+        """
+        try:
+            # Only run this check for the first epoch result
+            if trial.current_epoch != 1:
+                return None
+
+            # Avoid firing this insight more than once
+            if getattr(trial, '_poor_start_insight_fired', False):
+                return None
+
+            own_perf = trial.results[self.primary_metric][-1][1]
+
+            # Gather performance of other trials at the same point (1 epoch)
+            peer_performances = []
+            for other_trial in self.trials.values():
+                if other_trial.id == trial.id or other_trial.current_epoch < 1:
+                    continue
+                try:
+                    # Find the result for the first epoch
+                    peer_perf = next(p for e, p in other_trial.results[self.primary_metric] if e == 1)
+                    peer_performances.append(peer_perf)
+                except (KeyError, StopIteration):
+                    continue # No data for this peer at epoch 1
+
+            if len(peer_performances) < 2:
+                return None # Not enough peers to form a meaningful comparison
+
+            # Calculate Z-score
+            mean_perf = sum(peer_performances) / len(peer_performances)
+            std_dev = (sum([(p - mean_perf) ** 2 for p in peer_performances]) / len(peer_performances)) ** 0.5
+
+            if std_dev < 1e-9:
+                return None # Avoid division by zero if all peers have the same performance
+
+            z_score = (own_perf - mean_perf) / std_dev
+
+            # If higher is better, a large negative z-score is bad.
+            # If lower is better, a large positive z-score is bad.
+            is_poor_outlier = (self.higher_is_better and z_score < -z_score_threshold) or \
+                              (not self.higher_is_better and z_score > z_score_threshold)
+
+            if is_poor_outlier:
+                setattr(trial, '_poor_start_insight_fired', True)
+                return Insight(
+                    message=f"Warning: Trial {trial.id[:6]} is performing poorly ({own_perf:.4f}) compared to its peers (avg: {mean_perf:.4f}) after the first epoch.",
+                    type="POOR_INITIAL_PERFORMANCE"
+                )
 
         except (KeyError, IndexError):
             return None

@@ -1,6 +1,17 @@
+import torch.nn as nn
 from dataclasses import dataclass, field
 from typing import List, Type, Any, Tuple, Callable
 from enum import Enum
+
+class SdeModel(nn.Module):
+    """
+    Base class for all models in the Scientific Discovery Engine.
+    It standardizes the model interface.
+    """
+    def __init__(self, input_shape: Tuple[int, ...], output_shape: int, **kwargs):
+        super().__init__()
+        self.input_shape = input_shape
+        self.output_shape = output_shape
 
 class DatasetType(Enum):
     """

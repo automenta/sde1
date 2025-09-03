@@ -6,9 +6,9 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit, QSplitter,
     QPushButton, QSizePolicy, QComboBox, QLabel, QListWidget, QListWidgetItem,
-    QFormLayout
+    QFormLayout, QSlider, QCheckBox, QProgressBar, QGroupBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 import pyqtgraph as pg
 
 # Import backend components
@@ -18,6 +18,45 @@ from sde.exploration.schedulers import SuccessiveHalvingScheduler
 from sde.models import AVAILABLE_MODELS
 from sde.challenges import AVAILABLE_DATASETS
 
+class SchedulerRunner(QObject):
+    """
+    A QObject wrapper that runs the framework-agnostic Scheduler in a QThread
+    and translates its custom signals into PyQt signals.
+    """
+    # PyQt signals that will be emitted from the UI thread
+    log_message = pyqtSignal(str)
+    trial_updated = pyqtSignal(dict)
+    experiment_finished = pyqtSignal()
+    insight_generated = pyqtSignal(str)
+
+    def __init__(self, scheduler: Scheduler):
+        super().__init__()
+        self.scheduler = scheduler
+        self._is_running = True
+
+        # Connect the scheduler's custom signals to methods that emit PyQt signals
+        self.scheduler.log_message.connect(self.log_message.emit)
+        self.scheduler.trial_updated.connect(self.trial_updated.emit)
+        self.scheduler.experiment_finished.connect(self.on_scheduler_finished)
+        self.scheduler.insight_generated.connect(self.insight_generated.emit)
+
+    def run(self):
+        """The main work method that is executed in the QThread."""
+        if self._is_running:
+            self.scheduler.start()
+
+    def stop(self):
+        """Stops the scheduler gracefully."""
+        self.log_message.emit("INFO: UI requested scheduler shutdown.")
+        self._is_running = False
+        self.scheduler.stop()
+
+    def on_scheduler_finished(self):
+        """Handles the scheduler's finished signal."""
+        self._is_running = False
+        self.experiment_finished.emit()
+
+
 class MainWindow(QMainWindow):
     """
     The main window for the Scientific Discovery Engine UI.
@@ -25,7 +64,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Scientific Discovery Engine")
-        self.setGeometry(100, 100, 1400, 900) # Increased size for new controls
+        self.setGeometry(100, 100, 1400, 900)
+
+        # --- Backend components ---
+        self.scheduler_thread = None
+        self.scheduler_runner = None
 
         # --- Data maps for UI updates ---
         self.trial_row_map = {}  # trial.id -> table_row_index
@@ -48,41 +91,58 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(setup_pane)
         main_layout.addWidget(results_pane, 1) # Give results pane more space
 
-        # --- Experiment Setup Controls ---
-        setup_form_layout = QFormLayout()
+        # --- Experiment Setup Group ---
+        setup_group = QGroupBox("1. Experiment Setup")
+        setup_form_layout = QFormLayout(setup_group)
 
         self.dataset_combo = QComboBox()
         self.model_list = QListWidget()
         self.model_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.model_list.setMinimumHeight(150) # Ensure it has some space
 
-        setup_form_layout.addRow(QLabel("1. Select Dataset:"), self.dataset_combo)
-        setup_form_layout.addRow(QLabel("2. Select Models:"), self.model_list)
+        setup_form_layout.addRow("Dataset:", self.dataset_combo)
+        setup_form_layout.addRow("Models:", self.model_list)
+
+        # --- Execution Settings Group ---
+        settings_group = QGroupBox("2. Execution Settings")
+        settings_form_layout = QFormLayout(settings_group)
+
+        self.throttle_slider = QSlider(Qt.Orientation.Horizontal)
+        self.throttle_slider.setRange(1, 100)
+        self.throttle_slider.setValue(100)
+        self.throttle_label = QLabel("100%")
+        throttle_widget = QWidget()
+        throttle_layout = QHBoxLayout(throttle_widget)
+        throttle_layout.addWidget(self.throttle_slider)
+        throttle_layout.addWidget(self.throttle_label)
+        throttle_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.checkpoint_checkbox = QCheckBox("Enable Checkpointing")
+        self.checkpoint_checkbox.setChecked(False)
+
+        settings_form_layout.addRow("Worker Throttle:", throttle_widget)
+        settings_form_layout.addRow(self.checkpoint_checkbox)
 
         # --- Execution Controls ---
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("Progress: %p%")
+
         execution_controls_layout = QHBoxLayout()
-        self.start_button = QPushButton("Start")
+        self.start_button = QPushButton("Start Experiment")
         self.pause_button = QPushButton("Pause")
         self.resume_button = QPushButton("Resume")
-
         execution_controls_layout.addWidget(self.start_button)
         execution_controls_layout.addWidget(self.pause_button)
         execution_controls_layout.addWidget(self.resume_button)
 
-        throttle_layout = QHBoxLayout()
-        self.throttle_slider = QSlider(Qt.Orientation.Horizontal)
-        self.throttle_slider.setRange(1, 100)
-        self.throttle_slider.setValue(100)
-        self.throttle_label = QLabel("Throttle: 100%")
-        throttle_layout.addWidget(self.throttle_slider)
-        throttle_layout.addWidget(self.throttle_label)
-
-        self.checkpoint_checkbox = QCheckBox("Enable Checkpointing")
-        self.checkpoint_checkbox.setChecked(False) # Disabled by default
-
-        setup_layout.addLayout(setup_form_layout)
+        # --- Assemble Left Pane ---
+        setup_layout.addWidget(setup_group)
+        setup_layout.addWidget(settings_group)
         setup_layout.addStretch(1)
-        setup_layout.addWidget(self.checkpoint_checkbox)
-        setup_layout.addLayout(throttle_layout)
+        setup_layout.addWidget(self.progress_bar)
         setup_layout.addLayout(execution_controls_layout)
 
         # --- Connect Signals and Slots ---
@@ -135,13 +195,17 @@ class MainWindow(QMainWindow):
             return
 
         dataset_def = AVAILABLE_DATASETS[selected_dataset_name]
+        supported_models = [
+            name for name, model_def in AVAILABLE_MODELS.items()
+            if dataset_def.type in model_def.supported_dataset_types
+        ]
 
-        for model_name, model_def in AVAILABLE_MODELS.items():
-            if dataset_def.type in model_def.supported_dataset_types:
-                item = QListWidgetItem(model_name)
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(Qt.CheckState.Unchecked)
-                self.model_list.addItem(item)
+        for model_name in supported_models:
+            item = QListWidgetItem(model_name)
+            # Make item checkable
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.model_list.addItem(item)
 
     def setup_plot(self):
         self.plot_widget.setBackground('w')
@@ -175,29 +239,22 @@ class MainWindow(QMainWindow):
         self.checkpoint_checkbox.setEnabled(not running)
 
     def update_throttle(self, value: int):
-        self.throttle_label.setText(f"Throttle: {value}%")
-        if hasattr(self, 'scheduler'):
-            self.scheduler.set_throttle(value)
+        self.throttle_label.setText(f"{value}%")
+        if self.scheduler_runner:
+            self.scheduler_runner.scheduler.set_throttle(value)
 
     def pause_experiment(self):
-        if hasattr(self, 'scheduler'):
-            self.scheduler.pause()
+        if self.scheduler_runner:
+            self.scheduler_runner.scheduler.pause()
             self.update_button_states(running=True, paused=True)
 
     def resume_experiment(self):
-        if hasattr(self, 'scheduler'):
-            self.scheduler.resume()
+        if self.scheduler_runner:
+            self.scheduler_runner.scheduler.resume()
             self.update_button_states(running=True, paused=False)
 
     def start_experiment(self):
-        # 1. Get selections from UI
-        dataset_name = self.dataset_combo.currentText()
-        selected_models = []
-        for i in range(self.model_list.count()):
-            item = self.model_list.item(i)
-            if item.checkState() == Qt.CheckState.Checked:
-                selected_models.append(item.text())
-
+        dataset_name, selected_models = self._get_experiment_settings()
         if not dataset_name or not selected_models:
             self.append_log_message("ERROR: Please select a dataset and at least one model.")
             return
@@ -205,19 +262,32 @@ class MainWindow(QMainWindow):
         self.update_button_states(running=True, paused=False)
         self.append_log_message(f"INFO: Starting new experiment on '{dataset_name}' with models: {selected_models}")
 
-        # 2. Clear previous experiment data
+        self.progress_bar.setValue(0)
+        self._clear_previous_experiment()
+        trials = self._create_trials(selected_models)
+        self._setup_and_run_scheduler(trials, dataset_name)
+
+    def _get_experiment_settings(self):
+        dataset_name = self.dataset_combo.currentText()
+        selected_models = [
+            self.model_list.item(i).text()
+            for i in range(self.model_list.count())
+            if self.model_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+        return dataset_name, selected_models
+
+    def _clear_previous_experiment(self):
         self.trials_table.setRowCount(0)
         self.plot_widget.clear()
         self.trial_row_map.clear()
         self.plot_curve_map.clear()
-        self.setup_plot() # Re-add legend, etc.
+        self.setup_plot() # Re-add legend, title, etc.
 
-        # 3. Define trials for the experiment based on UI selections
-        # For simplicity, we'll create one trial per model with default hyperparameters.
-        # A more advanced UI would allow configuring hyperparameter search spaces.
+    def _create_trials(self, selected_models: list) -> list:
         trials = []
         for model_name in selected_models:
             model_def = AVAILABLE_MODELS[model_name]
+            # For simplicity, use default hyperparameters defined in the model's schema
             default_hparams = {}
             if "model_params" in model_def.hyperparameter_schema:
                 default_hparams['model_params'] = {
@@ -233,37 +303,38 @@ class MainWindow(QMainWindow):
                 algorithm_name=model_name,
                 hyperparameters=default_hparams
             ))
+        return trials
 
-        # 4. Create the adaptive scheduler policy
+    def _setup_and_run_scheduler(self, trials: list, dataset_name: str):
         dataset_def = AVAILABLE_DATASETS[dataset_name]
         adaptive_scheduler = SuccessiveHalvingScheduler(
             metric=dataset_def.performance_metric_name,
-            increasing=True, # Assuming higher is better for now
+            increasing=True,  # Assuming higher metric is better
             min_epochs_per_rung=2,
             reduction_factor=2
         )
 
-        # 5. Create and set up the main scheduler and worker thread
-        enable_checkpointing = self.checkpoint_checkbox.isChecked()
-        self.scheduler_thread = QThread()
-        self.scheduler = Scheduler(
+        scheduler = Scheduler(
             trials=trials,
             dataset_name=dataset_name,
             adaptive_scheduler=adaptive_scheduler,
-            max_workers=4,
-            enable_checkpointing=enable_checkpointing
+            max_workers=4,  # TODO: Make this configurable in the UI
+            enable_checkpointing=self.checkpoint_checkbox.isChecked()
         )
-        self.scheduler.moveToThread(self.scheduler_thread)
-        self.update_throttle(self.throttle_slider.value()) # Set initial throttle
 
-        # 6. Connect signals and slots
-        self.scheduler.log_message.connect(self.append_log_message)
-        self.scheduler.trial_updated.connect(self.update_trial_ui)
-        self.scheduler.experiment_finished.connect(self.on_experiment_finished)
-        self.scheduler.insight_generated.connect(self.append_log_message)
+        self.scheduler_thread = QThread()
+        self.scheduler_runner = SchedulerRunner(scheduler)
+        self.scheduler_runner.moveToThread(self.scheduler_thread)
 
-        # 7. Start the thread
-        self.scheduler_thread.started.connect(self.scheduler.start)
+        # Connect signals from the runner to the UI
+        self.scheduler_runner.log_message.connect(self.append_log_message)
+        self.scheduler_runner.trial_updated.connect(self.update_trial_ui)
+        self.scheduler_runner.experiment_finished.connect(self.on_experiment_finished)
+        self.scheduler_runner.insight_generated.connect(self.append_log_message)
+
+        # Start the thread, which will then start the scheduler
+        self.scheduler_thread.started.connect(self.scheduler_runner.run)
+        self.update_throttle(self.throttle_slider.value())
         self.scheduler_thread.start()
 
     def update_trial_ui(self, trial_data: dict):
@@ -275,7 +346,6 @@ class MainWindow(QMainWindow):
             self.trials_table.insertRow(row_position)
             self.trial_row_map[trial_id] = row_position
             # Add a basic plot curve for the new trial
-            # Use a color rotation for better visibility
             color = pg.intColor(len(self.plot_curve_map), hues=9, values=1)
             pen = pg.mkPen(color=color, width=2)
             self.plot_curve_map[trial_id] = self.plot_widget.plot(
@@ -288,7 +358,6 @@ class MainWindow(QMainWindow):
         self.trials_table.setItem(row, 2, QTableWidgetItem(trial_data['status']))
         self.trials_table.setItem(row, 3, QTableWidgetItem(str(trial_data['current_epoch'])))
 
-        # Extract latest accuracy and loss if available
         dataset_name = self.dataset_combo.currentText()
         metric_name = AVAILABLE_DATASETS[dataset_name].performance_metric_name
         metric_list = trial_data['results'].get(metric_name, [])
@@ -302,9 +371,17 @@ class MainWindow(QMainWindow):
 
         # -- Update Plot --
         if metric_list:
-            epochs = [item[0] for item in metric_list]
-            metrics = [item[1] for item in metric_list]
+            epochs, metrics = zip(*metric_list)
             self.plot_curve_map[trial_id].setData(epochs, metrics)
+
+        # -- Update Progress Bar --
+        if self.scheduler_runner:
+            total_trials = len(self.scheduler_runner.scheduler.trials)
+            if total_trials > 0:
+                completed_statuses = {"COMPLETED", "PRUNED"}
+                completed_trials = sum(1 for t in self.scheduler_runner.scheduler.trials.values() if t.status.value in completed_statuses)
+                progress = int((completed_trials / total_trials) * 100)
+                self.progress_bar.setValue(progress)
 
     def append_log_message(self, message: str):
         self.log_text_edit.append(message)
@@ -313,14 +390,17 @@ class MainWindow(QMainWindow):
     def on_experiment_finished(self):
         self.append_log_message("INFO: Experiment finished.")
         self.update_button_states(running=False, paused=False)
-        self.scheduler_thread.quit()
-        self.scheduler_thread.wait()
+        self.progress_bar.setValue(100)
+        if self.scheduler_thread and self.scheduler_thread.isRunning():
+            self.scheduler_thread.quit()
+            self.scheduler_thread.wait()
+        self.scheduler_runner = None
 
     def closeEvent(self, event):
         """Ensure the scheduler thread is stopped cleanly on exit."""
-        if hasattr(self, 'scheduler'):
-            self.scheduler.stop()
-        if hasattr(self, 'scheduler_thread') and self.scheduler_thread.isRunning():
+        if self.scheduler_runner:
+            self.scheduler_runner.stop()
+        if self.scheduler_thread and self.scheduler_thread.isRunning():
             self.scheduler_thread.quit()
             self.scheduler_thread.wait()
         event.accept()

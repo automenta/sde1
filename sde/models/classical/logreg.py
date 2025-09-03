@@ -2,18 +2,18 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from sde.models.types import ModelDefinition, DatasetType
+from sde.models.types import ModelDefinition, DatasetType, SdeModel
 
-class LogisticRegression(nn.Module):
+class LogisticRegression(SdeModel):
     """
     A simple Logistic Regression model implemented as a PyTorch module.
     It flattens the input and applies a single linear layer.
     """
     def __init__(self, input_shape, output_shape, **kwargs):
-        super(LogisticRegression, self).__init__()
+        super().__init__(input_shape, output_shape)
         # Calculate the total number of input features from the input shape
-        input_features = int(np.prod(input_shape))
-        self.linear = nn.Linear(input_features, output_shape)
+        input_features = int(np.prod(self.input_shape))
+        self.linear = nn.Linear(input_features, self.output_shape)
 
     def forward(self, x):
         # Flatten the input tensor to (batch_size, num_features)

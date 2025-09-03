@@ -1,46 +1,25 @@
-import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Subset
-import numpy as np
 
 from sde.models.types import DatasetDefinition, DatasetType
+from sde.challenges.utils import create_train_val_dataloaders
 
 # --- 1. The Data Loader Factory ---
 
-def get_mnist_dataloaders(batch_size=64, val_split=0.1, data_dir='./data_mnist'):
+def get_mnist_dataloaders(batch_size=64, data_dir='./data_mnist'):
     """
-    Returns training and validation DataLoaders for MNIST.
-    A validation set is split from the training data.
+    Returns training and validation DataLoaders for MNIST using the utility function.
     """
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,)) # Mean and std of MNIST
+        transforms.Normalize((0.1307,), (0.3081,))  # Mean and std of MNIST
     ])
-
-    # Download and load the full training dataset
-    full_train_dataset = datasets.MNIST(data_dir, train=True, download=True, transform=transform)
-
-    # Create a validation split
-    num_train = len(full_train_dataset)
-    indices = list(range(num_train))
-    split = int(np.floor(val_split * num_train))
-
-    # Use a fixed seed for reproducibility of the split
-    np.random.seed(42)
-    np.random.shuffle(indices)
-
-    train_idx, val_idx = indices[split:], indices[:split]
-
-    train_subset = Subset(full_train_dataset, train_idx)
-    val_subset = Subset(full_train_dataset, val_idx)
-
-    # Using num_workers > 0 can cause issues in some environments, especially with multiprocessing in the next steps.
-    # Sticking to 0 for simplicity and robustness for now.
-    train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=0)
-
-    return train_loader, val_loader
+    return create_train_val_dataloaders(
+        dataset_class=datasets.MNIST,
+        data_dir=data_dir,
+        transform=transform,
+        batch_size=batch_size
+    )
 
 # --- 2. Dataset Definition ---
 

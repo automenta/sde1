@@ -1,44 +1,25 @@
-import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Subset
-import numpy as np
 
 from sde.models.types import DatasetDefinition, DatasetType
+from sde.challenges.utils import create_train_val_dataloaders
 
 # --- 1. The Data Loader Factory ---
 
-def get_cifar10_dataloaders(batch_size=64, val_split=0.1, data_dir='./data_cifar10'):
+def get_cifar10_dataloaders(batch_size=64, data_dir='./data_cifar10'):
     """
-    Returns training and validation DataLoaders for CIFAR-10.
-    A validation set is split from the training data.
+    Returns training and validation DataLoaders for CIFAR-10 using the utility function.
     """
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)) # Normalize to [-1, 1]
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # Normalize to [-1, 1]
     ])
-
-    # Download and load the full training dataset
-    full_train_dataset = datasets.CIFAR10(data_dir, train=True, download=True, transform=transform)
-
-    # Create a validation split
-    num_train = len(full_train_dataset)
-    indices = list(range(num_train))
-    split = int(np.floor(val_split * num_train))
-
-    # Use a fixed seed for reproducibility of the split
-    np.random.seed(42)
-    np.random.shuffle(indices)
-
-    train_idx, val_idx = indices[split:], indices[:split]
-
-    train_subset = Subset(full_train_dataset, train_idx)
-    val_subset = Subset(full_train_dataset, val_idx)
-
-    train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=0)
-
-    return train_loader, val_loader
+    return create_train_val_dataloaders(
+        dataset_class=datasets.CIFAR10,
+        data_dir=data_dir,
+        transform=transform,
+        batch_size=batch_size
+    )
 
 # --- 2. Dataset Definition ---
 

@@ -1,53 +1,71 @@
 import concurrent.futures
 import time
 import uuid
-from typing import List
+import traceback
+from typing import List, Callable
 import dataclasses
+import threading
 
-from PyQt6.QtCore import QObject, pyqtSignal
-
-from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus
+from sde.core.types import Trial, WorkUnit, TrialStatus
 from sde.engine.worker import Worker
 from sde.challenges import AVAILABLE_DATASETS
 from sde.models import AVAILABLE_MODELS
 from sde.exploration.schedulers import AdaptiveScheduler
 from sde.engine.insight import InsightEngine
 
+class Signal:
+    """A simple signal implementation to remove Qt dependency from the core engine."""
+    def __init__(self, *arg_types):
+        self._callbacks: List[Callable] = []
+
+    def connect(self, callback: Callable):
+        self._callbacks.append(callback)
+
+    def emit(self, *args, **kwargs):
+        for callback in self._callbacks:
+            # In a real-world scenario, you might want to handle exceptions here
+            callback(*args, **kwargs)
+
 def trial_to_dict(trial: Trial) -> dict:
     """Converts a Trial dataclass instance to a dictionary for signal emission."""
-    # Enums are not directly JSON serializable, so convert them to their string values
     d = dataclasses.asdict(trial)
-    d['status'] = trial.status.value
+    d['status'] = trial.status.value # Enums need to be converted to string values
     return d
 
-# This top-level function will be sent to the ProcessPoolExecutor processes.
-# It needs to be defined at the top level of the module to be pickleable.
-def execute_work_unit_in_process(work_unit: WorkUnit, trial: Trial, model_name: str, dataset_name: str, enable_checkpointing: bool) -> dict:
+def execute_work_unit_in_process(
+    work_unit: WorkUnit,
+    trial: Trial,
+    model_name: str,
+    dataset_name: str,
+    enable_checkpointing: bool
+) -> dict:
     """
     A wrapper function that initializes a Worker in a new process
-    and executes the given WorkUnit.
+    and executes the given WorkUnit. It's a top-level function to be pickleable.
     """
-    # Each process looks up the definitions from the registries
-    model_def = AVAILABLE_MODELS[model_name]
-    dataset_def = AVAILABLE_DATASETS[dataset_name]
+    try:
+        model_def = AVAILABLE_MODELS[model_name]
+        dataset_def = AVAILABLE_DATASETS[dataset_name]
+        worker = Worker(model_def=model_def, dataset_def=dataset_def)
+        return worker.execute_work_unit(work_unit, trial, enable_checkpointing)
+    except Exception:
+        return {
+            'error': traceback.format_exc()
+        }
 
-    # Each process creates its own worker instance for the specific model/dataset pair.
-    worker = Worker(model_def=model_def, dataset_def=dataset_def)
-    return worker.execute_work_unit(work_unit, trial, enable_checkpointing)
 
-
-class Scheduler(QObject):
+class Scheduler:
     """
     Manages the lifecycle of an experiment, dispatching WorkUnits to a
     pool of workers based on decisions from an AdaptiveScheduler.
+    This class is designed to be framework-agnostic.
     """
-    log_message = pyqtSignal(str)
-    trial_updated = pyqtSignal(dict)
-    experiment_finished = pyqtSignal()
-    insight_generated = pyqtSignal(str)
+    log_message = Signal(str)
+    trial_updated = Signal(dict)
+    experiment_finished = Signal()
+    insight_generated = Signal(str)
 
     def __init__(self, trials: List[Trial], dataset_name: str, adaptive_scheduler: AdaptiveScheduler, max_workers: int = 2, enable_checkpointing: bool = False):
-        super().__init__()
         self.trials = {t.id: t for t in trials}
         self.dataset_name = dataset_name
         self.adaptive_scheduler = adaptive_scheduler
@@ -63,73 +81,98 @@ class Scheduler(QObject):
         self.running_futures = {}
 
         # --- State flags for execution control ---
+        self.lock = threading.Lock()
         self._is_running = True
         self._is_paused = False
         self._active_workers = max_workers
 
     def pause(self):
-        self.log_message.emit("INFO: Pausing experiment. Finishing active work...")
-        self._is_paused = True
+        with self.lock:
+            if not self._is_paused:
+                self.log_message.emit("INFO: Pausing experiment. Finishing active work...")
+                self._is_paused = True
 
     def resume(self):
-        self.log_message.emit("INFO: Resuming experiment...")
-        self._is_paused = False
+        with self.lock:
+            if self._is_paused:
+                self.log_message.emit("INFO: Resuming experiment...")
+                self._is_paused = False
 
     def set_throttle(self, percentage: int):
-        if not (0 < percentage <= 100):
+        if not (1 <= percentage <= 100):
             self.log_message.emit(f"WARN: Throttle percentage must be between 1-100. Got {percentage}.")
             return
 
-        new_worker_count = max(1, int(self.max_workers * (percentage / 100.0)))
-        if new_worker_count != self._active_workers:
-            self._active_workers = new_worker_count
-            self.log_message.emit(f"INFO: Throttle set to {percentage}%. Active workers: {self._active_workers}/{self.max_workers}")
+        with self.lock:
+            new_worker_count = max(1, int(self.max_workers * (percentage / 100.0)))
+            if new_worker_count != self._active_workers:
+                self._active_workers = new_worker_count
+                self.log_message.emit(f"INFO: Throttle set to {percentage}%. Active workers: {self._active_workers}/{self.max_workers}")
 
     def start(self):
         """
-        Starts the main scheduling loop.
+        Initializes the scheduler and starts the main execution loop.
         """
         self.executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.max_workers)
-        self.log_message.emit("Scheduler starting with adaptive policy...")
+        self.log_message.emit("INFO: Scheduler starting with adaptive policy...")
 
-        # 1. Get initial work from the adaptive scheduler
-        self.work_queue = self.adaptive_scheduler.get_initial_work_units(self.trials)
-        for trial in self.trials.values():
-             # Emit the initial state of all trials
-            self.trial_updated.emit(trial_to_dict(trial))
+        try:
+            # Populate the initial work queue
+            self.work_queue = self.adaptive_scheduler.get_initial_work_units(self.trials)
+            for trial in self.trials.values():
+                self.trial_updated.emit(trial_to_dict(trial))
 
+            # Start the main loop
+            self._main_loop()
+        finally:
+            # Ensure shutdown is always called
+            self.shutdown()
+
+    def _main_loop(self):
+        """
+        The core execution loop of the scheduler.
+        """
         while self._is_running:
-            # If paused, sleep and check for completed work without dispatching new work
-            if self._is_paused:
-                self._process_completed_futures()
-                time.sleep(0.5)
+            with self.lock:
+                is_paused = self._is_paused
+                active_workers = self._active_workers
+
+            if is_paused:
+                self._handle_paused_state()
                 continue
 
-            # 2. Dispatch work from the queue, respecting the throttle
-            while self.work_queue and len(self.running_futures) < self._active_workers:
-                work_unit = self.work_queue.pop(0)
-                trial = self.trials[work_unit.trial_id]
+            self._dispatch_work_units(active_workers)
+            self._process_completed_futures()
 
-                future = self.executor.submit(
-                    execute_work_unit_in_process,
-                    work_unit,
-                    trial,
-                    trial.algorithm_name,
-                    self.dataset_name,
-                    self.enable_checkpointing
-                )
-                self.running_futures[future] = work_unit
-                self.log_message.emit(f"Dispatched: Trial {trial.id} ({trial.algorithm_name}), Epoch {trial.current_epoch + 1}")
-
-            # 3. Process completed futures
             if not self.running_futures and not self.work_queue:
-                self.log_message.emit("No more work to schedule.")
+                self.log_message.emit("INFO: All work is complete.")
                 break
 
-            self._process_completed_futures()
-            time.sleep(0.1) # Small sleep to prevent busy-waiting
+            time.sleep(0.1) # Prevent busy-waiting
 
-        self.shutdown()
+    def _handle_paused_state(self):
+        """Processes completed work while paused without dispatching new work."""
+        self._process_completed_futures()
+        time.sleep(0.5) # Sleep longer when paused
+
+    def _dispatch_work_units(self, active_workers: int):
+        """Dispatches new work from the queue if workers are available."""
+        while self.work_queue and len(self.running_futures) < active_workers:
+            work_unit = self.work_queue.pop(0)
+            trial = self.trials[work_unit.trial_id]
+
+            # Ensure we don't schedule work for a trial that's no longer active
+            if trial.status != TrialStatus.ACTIVE:
+                self.log_message.emit(f"WARN: Skipping work for trial {trial.id} with status {trial.status.value}.")
+                continue
+
+            future = self.executor.submit(
+                execute_work_unit_in_process,
+                work_unit, trial, trial.algorithm_name,
+                self.dataset_name, self.enable_checkpointing
+            )
+            self.running_futures[future] = work_unit
+            self.log_message.emit(f"INFO: Dispatched: Trial {trial.id} ({trial.algorithm_name}), Epoch {trial.current_epoch + 1}")
 
     def _process_completed_futures(self):
         """Helper to check for and process any finished work units."""
@@ -146,10 +189,21 @@ class Scheduler(QObject):
             work_unit = self.running_futures.pop(future)
             try:
                 result = future.result()
-                self._process_result(work_unit, result)
+                # Check if the worker process returned an error
+                if 'error' in result:
+                    error_traceback = result['error']
+                    self.log_message.emit(f"ERROR: Trial {work_unit.trial_id} failed in worker process.")
+                    self.log_message.emit(f"--- TRACEBACK ---\n{error_traceback}\n---")
+                    self.trials[work_unit.trial_id].status = TrialStatus.PRUNED
+                else:
+                    self._process_result(work_unit, result)
             except Exception as e:
-                self.log_message.emit(f"ERROR: Work unit {work_unit} failed: {e}")
+                # This catches errors in the scheduler logic itself (e.g., _process_result)
+                self.log_message.emit(f"ERROR: Scheduler failed to process result for trial {work_unit.trial_id}: {e}")
+                self.log_message.emit(f"--- TRACEBACK ---\n{traceback.format_exc()}\n---")
                 self.trials[work_unit.trial_id].status = TrialStatus.PRUNED
+            finally:
+                # Ensure trial UI is always updated, even on failure
                 self.trial_updated.emit(trial_to_dict(self.trials[work_unit.trial_id]))
 
     def _process_result(self, work_unit: WorkUnit, result: dict):
@@ -187,8 +241,9 @@ class Scheduler(QObject):
                 self.trial_updated.emit(trial_to_dict(t))
 
     def stop(self):
-        self._is_running = False
-        self.log_message.emit("Shutdown signal received. Finishing active work...")
+        if self._is_running:
+            self.log_message.emit("INFO: Shutdown signal received. The scheduler will stop after finishing active work units.")
+            self._is_running = False
 
     def shutdown(self):
         if self.executor:
