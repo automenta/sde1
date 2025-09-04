@@ -9,8 +9,17 @@ from sde.models.types import ModelDefinition, ModelType, DatasetType
 
 class MLP(nn.Module):
     """A simple Multi-Layer Perceptron (MLP) for image classification."""
-    def __init__(self, input_size=28*28, hidden_sizes=[512, 256], output_size=10, dropout_rate=0.2):
+    def __init__(self, hidden_sizes=[512, 256], dropout_rate=0.2, input_shape=None, output_shape=None, **kwargs):
         super().__init__()
+
+        if input_shape:
+            input_size = int(np.prod(input_shape))
+        else:
+            input_size = 28 * 28  # Default for MNIST
+
+        if not output_shape:
+            output_shape = 10 # Default for MNIST
+
         self.input_size = input_size
         layers = []
         in_size = input_size
@@ -19,7 +28,7 @@ class MLP(nn.Module):
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout_rate))
             in_size = h_size
-        layers.append(nn.Linear(in_size, output_size))
+        layers.append(nn.Linear(in_size, output_shape))
         self.layers = nn.Sequential(*layers)
 
     def forward(self, x):

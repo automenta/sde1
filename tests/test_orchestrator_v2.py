@@ -57,18 +57,26 @@ class TestExperimentOrchestrator(unittest.TestCase):
         mock_emit.assert_any_call(ANY)
         self.assertTrue(any(isinstance(call.args[0], dict) for call in mock_emit.call_args_list))
 
-    def test_dispatch_start_run(self, mock_emit):
+    @patch('sde.engine.orchestrator.SdeRuntimeEngine')
+    def test_dispatch_start_run(self, MockSdeRuntimeEngine, mock_emit):
         """Test the START_RUN action."""
         orchestrator = ExperimentOrchestrator()
-        orchestrator.experiment.challenge = {"name": "Test"}
-        orchestrator.experiment.algorithms['algo1'] = MagicMock()
+        orchestrator.experiment.challenge = {"name": "MNIST", "type": "IMAGE_CLASSIFICATION"}
+        # The trial generation logic needs an algorithm with a parameter space
+        orchestrator.experiment.algorithms['algo1'] = MagicMock(parameter_space={'lr': (0.01, 0.1)})
         mock_emit.reset_mock()
 
         orchestrator.dispatch("START_RUN", {})
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
-        # Check for the log messages
-        mock_emit.assert_any_call("INFO: START_RUN action received. Initializing runtime.")
-        mock_emit.assert_any_call("SIM: Would start SdeRuntimeEngine now.")
+
+        # Check that the runtime engine was created and started
+        MockSdeRuntimeEngine.assert_called_once()
+        # The orchestrator creates an instance, so we check the mock instance
+        mock_engine_instance = MockSdeRuntimeEngine.return_value
+        mock_engine_instance.start.assert_called_once()
+
+        # Check for the log message
+        mock_emit.assert_any_call("INFO: SdeRuntimeEngine started successfully.")
         # Check that a state change was emitted
         self.assertTrue(any(isinstance(call.args[0], dict) for call in mock_emit.call_args_list))
 

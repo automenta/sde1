@@ -102,6 +102,8 @@ class MainWindow(QMainWindow):
         self.plot_curve_map = {} # trial.id -> plot_curve_item
         self.legend = None
         self.selected_insight_item = None
+        self.best_trial_id = None
+        self.current_state = {}
         self._setup_icons()
 
         # --- Main Layout ---
@@ -271,23 +273,43 @@ class MainWindow(QMainWindow):
         self.trials_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.trials_table.itemSelectionChanged.connect(self.on_trial_selected)
-        # self.trials_table.cellDoubleClicked.connect(self.on_trial_double_clicked)
+        self.trials_table.cellDoubleClicked.connect(self.on_trial_double_clicked)
         self.insights_list.itemClicked.connect(self.on_insight_selected)
+
+    def on_trial_double_clicked(self, row, column):
+        """Shows the hyperparameter viewer for the double-clicked trial."""
+        trial_id = None
+        for tid, r in self.trial_row_map.items():
+            if r == row:
+                trial_id = tid
+                break
+
+        if trial_id:
+            trials = self.current_state.get('trials', {})
+            trial_data = trials.get(trial_id)
+            if trial_data:
+                hparams = trial_data.get('hyperparameters', {})
+                dialog = HyperparameterViewerDialog(hparams, self)
+                dialog.exec()
 
     def on_state_changed(self, state: dict):
         """
         The central handler for all state updates from the V2 Orchestrator.
         """
+        self.current_state = state
         status = state.get('status', 'DEFINING')
         is_running = status == 'RUNNING'
         is_paused = status == 'PAUSED'
 
         self.update_button_states(running=(is_running or is_paused), paused=is_paused)
 
-        # Update trials table
         trials = state.get('trials', {})
-        for trial_id, trial_data in trials.items():
-            self.update_trial_ui(trial_data) # This method can be reused
+
+        # Update table and plots
+        for trial_data in trials.values():
+            self.update_trial_ui(trial_data) # This method now primarily handles the table
+
+        self.update_plots(trials) # This new method handles updating the plots
 
         # Update progress bar
         if trials:
@@ -299,13 +321,71 @@ class MainWindow(QMainWindow):
         else:
             self.progress_bar.setValue(0)
 
+        # --- Find and store best trial ---
+        dataset_name = self.dataset_combo.currentText()
+        if dataset_name:
+            challenge_def = AVAILABLE_DATASETS[dataset_name]
+            metric_name = challenge_def.performance_metric_name
+            higher_is_better = 'accuracy' in metric_name.lower() # Simple inference
+
+            best_trial_id = None
+            best_perf = -float('inf') if higher_is_better else float('inf')
+
+            for trial_id, trial_data in trials.items():
+                if trial_data.get('results', {}).get(metric_name):
+                    latest_perf = trial_data['results'][metric_name][-1][1]
+                    if (higher_is_better and latest_perf > best_perf) or \
+                       (not higher_is_better and latest_perf < best_perf):
+                        best_perf = latest_perf
+                        best_trial_id = trial_id
+
+            self.best_trial_id = best_trial_id
+
+        # Update insights
+        insights = state.get('insights', [])
+        if not hasattr(self, 'displayed_insight_messages'):
+            self.displayed_insight_messages = set()
+
+        for insight_data in insights:
+            # Use message as a unique key to avoid displaying duplicates
+            if insight_data['message'] not in self.displayed_insight_messages:
+                # The add_insight method expects an Insight object, not a dict.
+                # Re-create the object from the dictionary.
+                insight_obj = Insight(
+                    message=insight_data['message'],
+                    type=insight_data['type'],
+                    trial_ids=insight_data['trial_ids']
+                )
+                self.add_insight(insight_obj)
+                self.displayed_insight_messages.add(insight_obj.message)
+
+
+    def update_plots(self, trials_data: dict):
+        """Updates all plot curves based on the latest trial data."""
+        dataset_name = self.dataset_combo.currentText()
+        if not dataset_name:
+            return
+
+        metric_name = AVAILABLE_DATASETS[dataset_name].performance_metric_name
+
+        for trial_id, trial_data in trials_data.items():
+            if trial_id in self.plot_curve_map:
+                metric_list = trial_data.get('results', {}).get(metric_name, [])
+                if metric_list:
+                    # Ensure data is in a format that can be plotted
+                    try:
+                        epochs, metrics = zip(*metric_list)
+                        self.plot_curve_map[trial_id].setData(epochs, metrics)
+                    except ValueError:
+                        # Handle cases with empty or malformed metric_list
+                        self.plot_curve_map[trial_id].clear()
+
 
     def update_button_states(self, running: bool, paused: bool):
         self.start_button.setEnabled(not running)
         self.tune_button.setEnabled(not running)
-        # Pause/Resume is not implemented in the new Orchestrator yet
-        self.pause_button.setEnabled(False) # Temporarily disable
-        self.resume_button.setEnabled(False) # Temporarily disable
+        self.pause_button.setEnabled(running and not paused)
+        self.resume_button.setEnabled(paused)
         self.setup_group.setEnabled(not running)
         self.settings_group.setEnabled(not running)
 
@@ -316,16 +396,10 @@ class MainWindow(QMainWindow):
         #     self.experiment_runner.orchestrator.set_throttle(value)
 
     def pause_experiment(self):
-        self.append_log_message("INFO: Pause/Resume is not yet implemented in the refactored engine.")
-        # if self.experiment_runner:
-        #     self.experiment_runner.orchestrator.pause()
-        #     self.update_button_states(running=True, paused=True)
+        self.orchestrator.dispatch("PAUSE_RUN", {})
 
     def resume_experiment(self):
-        self.append_log_message("INFO: Pause/Resume is not yet implemented in the refactored engine.")
-        # if self.experiment_runner:
-        #     self.experiment_runner.orchestrator.resume()
-        #     self.update_button_states(running=True, paused=False)
+        self.orchestrator.dispatch("RESUME_RUN", {})
 
     def start_simple_experiment(self):
         """
@@ -360,7 +434,6 @@ class MainWindow(QMainWindow):
 
 
     def open_tuning_dialog(self):
-        self.append_log_message("INFO: Tuning dialog is temporarily disabled during refactoring.")
         dataset_name, selected_models_names = self._get_experiment_settings()
         if not dataset_name or not selected_models_names:
             QMessageBox.warning(self, "Warning", "Please select a dataset and at least one model to tune.")
@@ -369,75 +442,81 @@ class MainWindow(QMainWindow):
         selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
         dialog = HyperparameterDialog(selected_model_defs, self)
 
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            config = dialog.get_configuration()
-            self.append_log_message(f"INFO: Starting tuning with scheduler '{config['adaptive_scheduler']}' and h-param strategy '{config['hparam_strategy']}'")
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
 
-            template_trials = self._create_default_trials(selected_models_names)
-            tuned_trials = self._generate_trials_from_config(template_trials, config)
+        config = dialog.get_configuration()
+        self.append_log_message(f"INFO: Configuring tuning experiment with scheduler '{config['adaptive_scheduler']}' and h-param strategy '{config['hparam_strategy']}'")
+        self._clear_previous_experiment()
 
-            if not tuned_trials:
-                self.append_log_message("ERROR: Tuning configuration did not generate any trials.")
-                return
+        # --- V2 Dispatch Logic ---
+        # 1. Set Challenge
+        challenge_def = AVAILABLE_DATASETS[dataset_name]
+        self.orchestrator.dispatch("SET_CHALLENGE", {"name": dataset_name, "type": challenge_def.type})
 
-            if len(tuned_trials) > 15:
-                self.legend.setVisible(False)
-            else:
-                self.legend.setVisible(True)
+        # 2. Generate parameter combinations and dispatch ADD_ALGORITHM for each
+        param_combinations = self._generate_param_combinations(config)
 
-            self.update_button_states(running=True, paused=False)
-            self._clear_previous_experiment()
-            self._setup_and_run_experiment(tuned_trials, dataset_name, config)
+        if not param_combinations:
+            self.append_log_message("ERROR: Tuning configuration did not generate any parameter combinations.")
+            return
 
-    def _generate_trials_from_config(self, template_trials: list, config: dict) -> list:
+        for model_name, hparams in param_combinations:
+             # The "parameter space" for this action is just the single, fixed point
+             # from the hyperparameter search.
+            self.orchestrator.dispatch("ADD_ALGORITHM", {
+                "name": model_name,
+                "parameter_space": hparams
+            })
+
+        # 3. Start the run
+        self.append_log_message(f"INFO: Starting run with {len(param_combinations)} trial configurations.")
+        self.orchestrator.dispatch("START_RUN", {})
+
+    def _generate_param_combinations(self, config: dict) -> list[tuple[str, dict]]:
+        """
+        Generates a list of (model_name, hparams) tuples based on the
+        tuning configuration from the dialog.
+        """
         strategy = config.get('hparam_strategy', 'Grid Search')
-        steps = config.get('num_trials', 1)
-        all_new_trials = []
-        for template_trial in template_trials:
-            model_config = config.get('models', {}).get(template_trial.algorithm_name)
-            if not model_config:
-                all_new_trials.append(template_trial)
-                continue
-            hparam_space = {}
+        num_trials = config.get('num_trials', 1)
+        all_combinations = []
+
+        for model_name, model_config in config.get('models', {}).items():
+            hparam_def = {}
+            # Flatten the param definition for easier processing
             for param_type, params in model_config.items():
                 for param_name, properties in params.items():
-                    space_key = (param_type, param_name)
-                    if properties['scale'] == 'log':
-                        space = np.logspace(np.log10(properties['min']), np.log10(properties['max']), steps)
-                    else:
-                        space = np.linspace(properties['min'], properties['max'], steps)
-                    hparam_space[space_key] = space
-            if not hparam_space:
-                all_new_trials.append(template_trial)
+                    hparam_def[param_name] = properties
+
+            if not hparam_def:
                 continue
-            keys, values = zip(*hparam_space.items())
+
             if strategy == 'Grid Search':
-                param_combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
-            else:
-                total_random_trials = config.get('num_trials', 1)
-                param_combinations = []
-                model_hparams_config = config.get('models', {}).get(template_trial.algorithm_name, {})
-                for _ in range(total_random_trials):
+                # Create a list of value lists for grid search
+                param_grid = {
+                    k: np.linspace(v['min'], v['max'], num_trials) if v.get('scale') != 'log'
+                    else np.logspace(np.log10(v['min']), np.log10(v['max']), num_trials)
+                    for k, v in hparam_def.items()
+                }
+                keys, values = zip(*param_grid.items())
+                combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+                for combo in combinations:
+                    all_combinations.append((model_name, combo))
+            else:  # Random Search
+                for _ in range(num_trials):
                     combination = {}
-                    for param_type, params in model_hparams_config.items():
-                        for param_name, properties in params.items():
-                            min_val = properties['min']
-                            max_val = properties['max']
-                            scale = properties['scale']
-                            if scale == 'log':
-                                log_min = np.log10(min_val)
-                                log_max = np.log10(max_val)
-                                value = 10**random.uniform(log_min, log_max)
-                            else:
-                                value = random.uniform(min_val, max_val)
-                            combination[(param_type, param_name)] = value
-                    param_combinations.append(combination)
-            for combination in param_combinations:
-                new_hparams = {k: v.copy() for k, v in template_trial.hyperparameters.items()}
-                for (param_type, param_name), value in combination.items():
-                    if param_type not in new_hparams: new_hparams[param_type] = {}
-                    new_hparams[param_type][param_name] = value
-                all_new_trials.append(Trial(id=f"{template_trial.algorithm_name[:4]}_t_{uuid.uuid4().hex[:4]}", algorithm_name=template_trial.algorithm_name, hyperparameters=new_hparams))
+                    for param_name, properties in hparam_def.items():
+                        if properties.get('scale') == 'log':
+                            log_min = np.log10(properties['min'])
+                            log_max = np.log10(properties['max'])
+                            value = 10**random.uniform(log_min, log_max)
+                        else:
+                            value = random.uniform(properties['min'], properties['max'])
+                        combination[param_name] = value
+                    all_combinations.append((model_name, combination))
+
+        return all_combinations
     def _get_experiment_settings(self):
         dataset_name = self.dataset_combo.currentText()
         selected_models = [self.model_list.item(i).text() for i in range(self.model_list.count()) if self.model_list.item(i).checkState() == Qt.CheckState.Checked]
@@ -511,10 +590,6 @@ class MainWindow(QMainWindow):
 
         self.trials_table.setItem(row, 7, QTableWidgetItem(json.dumps(trial_data['hyperparameters'])))
 
-        if metric_list:
-            epochs, metrics = zip(*metric_list)
-            self.plot_curve_map[trial_id].setData(epochs, metrics)
-
         self._style_trial_ui(trial_id, status)
 
         if self.experiment_runner:
@@ -583,15 +658,22 @@ class MainWindow(QMainWindow):
         row_color = QColor('white')
         pen = self.plot_curve_map[trial_id].opts['pen']
 
-        # V2 Refactor: Best trial highlighting is removed for now as it depended on the old orchestrator structure.
-        # This can be re-added later by deriving the best trial from the state.
-        if status == "PRUNED":
+        is_best = (self.best_trial_id == trial_id)
+
+        if is_best:
+            row_color = QColor('#FFFACD')  # LemonChiffon
+            pen.setColor(pg.mkColor('#FFD700')) # Gold
+            pen.setWidth(4)
+            pen.setStyle(Qt.PenStyle.SolidLine)
+        elif status == "PRUNED":
             row_color = QColor('#D3D3D3')
             pen.setColor(pg.mkColor('#808080'))
             pen.setStyle(Qt.PenStyle.DotLine)
         elif status == "COMPLETED":
             row_color = QColor('#ADD8E6')
             pen.setColor(pg.mkColor('#0000FF'))
+            pen.setWidth(2)
+            pen.setStyle(Qt.PenStyle.SolidLine)
         else: # ACTIVE
             original_color = pg.intColor(list(self.plot_curve_map.keys()).index(trial_id), hues=9, values=1)
             pen.setColor(original_color)

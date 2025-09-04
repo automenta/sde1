@@ -1,4 +1,5 @@
 import concurrent.futures
+import multiprocessing
 import uuid
 import traceback
 from typing import List, Dict, Tuple, Iterator
@@ -65,7 +66,13 @@ class Scheduler:
     def start(self):
         """Initializes the process pool executor."""
         if not self._is_running:
-            self.executor = concurrent.futures.ProcessPoolExecutor(max_workers=self.max_workers)
+            # Using 'spawn' context is crucial for compatibility with CUDA and to
+            # avoid deadlocks in multi-threaded applications.
+            ctx = multiprocessing.get_context('spawn')
+            self.executor = concurrent.futures.ProcessPoolExecutor(
+                max_workers=self.max_workers,
+                mp_context=ctx
+            )
             self._is_running = True
 
     def stop(self):
