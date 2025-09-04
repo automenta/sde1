@@ -44,3 +44,35 @@ class Trial:
         d = dataclasses.asdict(self)
         d['status'] = self.status.value
         return d
+
+# --- V2 Unified Specification Types ---
+import uuid
+
+class ExperimentStatus(Enum):
+    DEFINING = "DEFINING" # The initial state, no compute is running.
+    RUNNING = "RUNNING"
+    PAUSED = "PAUSED"
+    COMPLETED = "COMPLETED"
+
+@dataclass
+class AlgorithmConfig:
+    id: str
+    name: str
+    parameter_space: Dict[str, Any] # e.g., {'lr': (0.001, 0.1), ...}
+    is_active: bool = True
+
+@dataclass
+class Experiment:
+    id: str = field(default_factory=lambda: f"exp_{uuid.uuid4().hex[:8]}")
+    status: ExperimentStatus = ExperimentStatus.DEFINING
+
+    # Core Definition
+    challenge: Optional[Dict[str, Any]] = None
+    algorithms: Dict[str, AlgorithmConfig] = field(default_factory=dict)
+
+    # Runtime State
+    trials: Dict[str, Trial] = field(default_factory=dict)
+
+    # Strategy & Constraints
+    adaptive_policy: str = "SuccessiveHalving" # Default policy
+    patience_budget: Optional[Dict[str, int]] = None

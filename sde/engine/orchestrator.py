@@ -1,14 +1,9 @@
-import time
-import threading
 import logging
 import traceback
-from typing import List, Callable
+from typing import List, Callable, Dict, Any
 
-from sde.core.types import Trial, WorkUnit, TrialStatus, WorkUnitType
-from sde.engine.datastore import DataStore
-from sde.engine.scheduler import Scheduler
-from sde.exploration.schedulers import AdaptiveScheduler
-from sde.engine.insight import InsightEngine
+from sde.core.types import Experiment, ExperimentStatus
+from sde.engine.runtime import SdeRuntimeEngine
 
 logger = logging.getLogger(__name__)
 
@@ -27,156 +22,105 @@ class Signal:
             except Exception:
                 logger.error(f"Error in signal callback: {traceback.format_exc()}")
 
-class Orchestrator:
+class ExperimentOrchestrator:
     """
-    Manages the high-level lifecycle of an experiment, coordinating all other
-    components like the DataStore, Scheduler, and InsightEngine.
+    V2 Orchestrator: Manages the canonical Experiment state object and
+    orchestrates the SDE Runtime Engine based on user actions.
     """
+    # Signals to update the UI
+    state_changed = Signal(dict)
     log_message = Signal(str)
-    trial_updated = Signal(dict)
-    trial_profiled = Signal(str, float)
-    experiment_finished = Signal()
-    insight_generated = Signal(str)
 
-    def __init__(
-        self,
-        trials: List[Trial],
-        dataset_name: str,
-        adaptive_scheduler: AdaptiveScheduler,
-        max_workers: int = 2,
-        enable_checkpointing: bool = False,
-        checkpoints_dir: str = './checkpoints'
-    ):
-        self.datastore = DataStore(trials)
-        self.adaptive_scheduler = adaptive_scheduler
-        self.insight_engine = InsightEngine(
-            self.datastore.get_all_trials(),
-            primary_metric=self.adaptive_scheduler.metric,
-            higher_is_better=self.adaptive_scheduler.increasing
-        )
-        self.scheduler = Scheduler(
-            datastore=self.datastore,
-            dataset_name=dataset_name,
-            max_workers=max_workers,
-            enable_checkpointing=enable_checkpointing,
-            checkpoints_dir=checkpoints_dir
-        )
+    def __init__(self):
+        self.experiment = Experiment()
+        self.runtime_engine = None # Will be initialized on START_RUN
+        self.log_message.emit("INFO: Orchestrator initialized in DEFINING state.")
 
-        self._is_running = False
-        self._main_thread = None
-
-    def start(self):
-        """Initializes the scheduler and starts the main execution loop in a new thread."""
-        if self._is_running:
+    def dispatch(self, action_type: str, payload: Dict[str, Any]):
+        """
+        Receives an action, validates it, mutates the state,
+        and triggers side effects.
+        """
+        handler = getattr(self, f"handle_{action_type.lower()}", None)
+        if not handler:
+            self.log_message.emit(f"ERROR: No handler for action '{action_type}'")
             return
 
-        self.log_message.emit("INFO: Orchestrator starting...")
-        self._is_running = True
-        self._main_thread = threading.Thread(target=self._run_experiment)
-        self._main_thread.start()
-        return self._main_thread
+        # Use the validator to check if the action is allowed
+        if action_type not in self.get_valid_actions():
+            self.log_message.emit(f"WARN: Action '{action_type}' is not valid in state '{self.experiment.status.value}'")
+            return
 
-    def _run_experiment(self):
         try:
-            self.scheduler.start()
+            handler(payload)
+            self.emit_state_change()
+        except Exception as e:
+            self.log_message.emit(f"ERROR: Failed to execute action {action_type}: {e}")
+            logger.error(traceback.format_exc())
 
-            # Phase 1: Profiling
-            self.log_message.emit("INFO: Starting performance profiling phase...")
-            profiling_work = self._get_profiling_work()
-            if profiling_work:
-                for work_unit, result in self.scheduler.run(profiling_work):
-                    if not self._is_running: break
-                    self._process_profiling_result(work_unit, result)
+    def emit_state_change(self):
+        """Serializes the experiment state and emits it."""
+        # A real implementation would have a more robust serializer
+        state_dict = {
+            "id": self.experiment.id,
+            "status": self.experiment.status.value,
+            "challenge": self.experiment.challenge,
+            "algorithms": {k: v.__dict__ for k, v in self.experiment.algorithms.items()},
+            "trials": {k: v.to_dict() for k, v in self.experiment.trials.items()},
+            "adaptive_policy": self.experiment.adaptive_policy,
+        }
+        self.state_changed.emit(state_dict)
 
-            # Phase 2: Main Experiment Loop
-            self.log_message.emit("INFO: Profiling complete. Starting main experiment.")
-            work_queue = self.adaptive_scheduler.get_initial_work_units(self.datastore.get_all_trials())
-            for trial in self.datastore.get_all_trials().values():
-                self.trial_updated.emit(trial.to_dict())
+    # --- Action Handlers ---
 
-            while self._is_running and work_queue:
-                next_work_queue = []
-                for work_unit, result in self.scheduler.run(work_queue):
-                    if not self._is_running: break
+    def handle_set_challenge(self, payload: Dict[str, Any]):
+        self.experiment.challenge = payload
+        self.log_message.emit(f"INFO: Challenge set to '{payload.get('name', 'Unknown')}'")
 
-                    if 'error' in result:
-                        self._handle_work_error(work_unit, result['error'])
-                    else:
-                        new_work = self._process_training_result(work_unit, result)
-                        next_work_queue.extend(new_work)
+    def handle_add_algorithm(self, payload: Dict[str, Any]):
+        # In a real app, this would do more validation
+        from sde.core.types import AlgorithmConfig
+        algo_id = f"algo_{len(self.experiment.algorithms)}"
+        new_algo = AlgorithmConfig(
+            id=algo_id,
+            name=payload['name'],
+            parameter_space=payload['parameter_space']
+        )
+        self.experiment.algorithms[algo_id] = new_algo
+        self.log_message.emit(f"INFO: Added algorithm: {new_algo.name}")
 
-                    # Always emit an update for the trial that just finished
-                    finished_trial = self.datastore.get_trial(work_unit.trial_id)
-                    if finished_trial:
-                        self.trial_updated.emit(finished_trial.to_dict())
+    def handle_start_run(self, payload: Dict[str, Any]):
+        self.log_message.emit("INFO: START_RUN action received. Initializing runtime.")
+        self.experiment.status = ExperimentStatus.RUNNING
 
-                work_queue = next_work_queue
+        # This is where the old logic would be triggered, but in a more
+        # controlled way. For this refactoring, we'll just log it.
+        self.log_message.emit("SIM: Would start SdeRuntimeEngine now.")
+        # In a full implementation, you would initialize and start the engine here.
+        # self.runtime_engine = SdeRuntimeEngine(...)
+        # self.runtime_engine.start()
 
-            if self._is_running:
-                self.log_message.emit("INFO: All work is complete.")
+    def get_valid_actions(self) -> List[str]:
+        """
+        This is the Action Validator. It inspects the current state and returns
+        a list of action types that are currently valid.
+        """
+        status = self.experiment.status
+        actions = []
 
-        except Exception:
-            self.log_message.emit(f"FATAL: An unexpected error occurred: {traceback.format_exc()}")
-        finally:
-            self.shutdown()
+        if status == ExperimentStatus.DEFINING:
+            if self.experiment.challenge is None:
+                actions.append("SET_CHALLENGE")
+            else:
+                actions.append("ADD_ALGORITHM")
+                if self.experiment.algorithms:
+                    actions.append("START_RUN")
 
-    def _get_profiling_work(self) -> List[WorkUnit]:
-        """Gets the initial work units for the profiling phase."""
-        trials = self.datastore.get_all_trials()
-        unique_algorithms = {t.algorithm_name: t for t in trials.values()}
-        return [WorkUnit(trial_id=t.id, type=WorkUnitType.PROFILE_SPEED) for t in unique_algorithms.values()]
+        elif status == ExperimentStatus.RUNNING:
+            actions.append("PAUSE_RUN")
+            actions.append("ADD_ALGORITHM") # Example of a mid-run interaction
 
-    def _handle_work_error(self, work_unit: WorkUnit, error_traceback: str):
-        self.log_message.emit(f"ERROR: Trial {work_unit.trial_id} failed.")
-        self.log_message.emit(f"--- TRACEBACK ---\n{error_traceback}\n---")
-        self.datastore.update_trial_status(work_unit.trial_id, TrialStatus.PRUNED)
+        elif status == ExperimentStatus.PAUSED:
+            actions.append("RESUME_RUN")
 
-    def _process_profiling_result(self, work_unit: WorkUnit, result: dict):
-        trial = self.datastore.get_trial(work_unit.trial_id)
-        est_time = result.get('profile_results', {}).get('est_time_per_epoch')
-        if est_time is not None:
-            self.log_message.emit(f"INFO: Profiled {trial.algorithm_name}: {est_time:.2f}s/epoch")
-            self.datastore.update_algorithm_profile(trial.algorithm_name, est_time)
-            for t in self.datastore.get_all_trials().values():
-                if t.algorithm_name == trial.algorithm_name:
-                    self.trial_profiled.emit(t.id, est_time)
-
-    def _process_training_result(self, work_unit: WorkUnit, result: dict) -> List[WorkUnit]:
-        """Processes a training result and returns the next batch of work."""
-        # 1. Update datastore
-        self.datastore.update_trial_state(work_unit, result)
-        trial = self.datastore.get_trial(work_unit.trial_id)
-        self.log_message.emit(f"Result for Trial {trial.id}, Epoch {trial.current_epoch}: {result.get('metrics', {})}")
-
-        # 2. Analyze for insights
-        insights = self.insight_engine.analyze(trial)
-        for insight in insights:
-            self.insight_generated.emit(insight)
-
-        # 3. Get next work from the adaptive scheduler
-        all_trials = self.datastore.get_all_trials()
-        new_work = self.adaptive_scheduler.get_next_work_units(trial, all_trials)
-
-        # 4. Emit updates for any newly pruned trials
-        for t in all_trials.values():
-            if t.status == TrialStatus.PRUNED:
-                self.trial_updated.emit(t.to_dict())
-
-        return new_work
-
-    def stop(self):
-        """Signals the main loop to stop and shuts down the scheduler."""
-        if self._is_running:
-            self.log_message.emit("INFO: Shutdown signal received.")
-            self._is_running = False
-            # The scheduler will be stopped in the finally block
-
-    def shutdown(self):
-        self.scheduler.stop()
-        self.log_message.emit("Orchestrator shutdown complete.")
-        self.experiment_finished.emit()
-
-    def join(self):
-        """Waits for the main experiment thread to complete."""
-        if self._main_thread and self._main_thread.is_alive():
-            self._main_thread.join()
+        return actions

@@ -16,54 +16,13 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 import pyqtgraph as pg
 
 # Import backend components
-from sde.engine.orchestrator import Orchestrator
+from sde.engine.orchestrator import ExperimentOrchestrator
 from sde.engine.insight import Insight
 from sde.core.types import Trial
 from sde.exploration.schedulers import SuccessiveHalvingScheduler, HyperbandScheduler
 from sde.models import AVAILABLE_MODELS
 from sde.challenges import AVAILABLE_DATASETS
 from sde.ui.hyperparameters import HyperparameterDialog
-
-class ExperimentRunner(QObject):
-    """
-    A QObject wrapper that runs the framework-agnostic Orchestrator in a QThread
-    and translates its custom signals into PyQt signals.
-    """
-    # PyQt signals that will be emitted from the UI thread
-    log_message = pyqtSignal(str)
-    trial_updated = pyqtSignal(dict)
-    trial_profiled = pyqtSignal(str, float)
-    experiment_finished = pyqtSignal()
-    insight_generated = pyqtSignal(object) # Emits the full Insight object
-
-    def __init__(self, orchestrator: Orchestrator):
-        super().__init__()
-        self.orchestrator = orchestrator
-        self._is_running = True
-
-        # Connect the orchestrator's custom signals to methods that emit PyQt signals
-        self.orchestrator.log_message.connect(self.log_message.emit)
-        self.orchestrator.trial_updated.connect(self.trial_updated.emit)
-        self.orchestrator.trial_profiled.connect(self.trial_profiled.emit)
-        self.orchestrator.experiment_finished.connect(self.on_experiment_finished)
-        self.orchestrator.insight_generated.connect(self.insight_generated.emit)
-
-    def run(self):
-        """The main work method that is executed in the QThread."""
-        if self._is_running:
-            self.orchestrator.start()
-            self.orchestrator.join() # Wait for the experiment thread to finish
-
-    def stop(self):
-        """Stops the orchestrator gracefully."""
-        self.log_message.emit("INFO: UI requested orchestrator shutdown.")
-        self._is_running = False
-        self.orchestrator.stop()
-
-    def on_experiment_finished(self):
-        """Handles the orchestrator's finished signal."""
-        self._is_running = False
-        self.experiment_finished.emit()
 
 
 from PyQt6.QtWidgets import QAbstractItemView
@@ -135,9 +94,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Scientific Discovery Engine")
         self.setGeometry(100, 100, 1400, 900)
 
-        # --- Backend components ---
-        self.experiment_thread = None
-        self.experiment_runner = None
+        # --- V2 Backend components ---
+        self.orchestrator = ExperimentOrchestrator()
 
         # --- Data maps for UI updates ---
         self.trial_row_map = {}  # trial.id -> table_row_index
@@ -231,6 +189,10 @@ class MainWindow(QMainWindow):
         self.resume_button.clicked.connect(self.resume_experiment)
         self.throttle_slider.valueChanged.connect(self.update_throttle)
 
+        # V2 Signal Connections
+        self.orchestrator.log_message.connect(self.append_log_message)
+        self.orchestrator.state_changed.connect(self.on_state_changed)
+
         self.update_model_list()
         self.update_button_states(running=False, paused=False)
 
@@ -309,25 +271,33 @@ class MainWindow(QMainWindow):
         self.trials_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.trials_table.itemSelectionChanged.connect(self.on_trial_selected)
-        self.trials_table.cellDoubleClicked.connect(self.on_trial_double_clicked)
+        # self.trials_table.cellDoubleClicked.connect(self.on_trial_double_clicked)
         self.insights_list.itemClicked.connect(self.on_insight_selected)
 
-    def on_trial_double_clicked(self, row, column):
-        """Shows a dialog with the hyperparameters for the double-clicked trial."""
-        trial_id_item = self.trials_table.item(row, 0)
-        if not trial_id_item: return
-        trial_id = trial_id_item.text()
+    def on_state_changed(self, state: dict):
+        """
+        The central handler for all state updates from the V2 Orchestrator.
+        """
+        status = state.get('status', 'DEFINING')
+        is_running = status == 'RUNNING'
+        is_paused = status == 'PAUSED'
 
-        if not self.experiment_runner or not self.experiment_runner.orchestrator:
-            self.append_log_message("WARN: Cannot show h-params, orchestrator not running.")
-            return
+        self.update_button_states(running=(is_running or is_paused), paused=is_paused)
 
-        trial = self.experiment_runner.orchestrator.datastore.get_trial(trial_id)
-        if trial:
-            dialog = HyperparameterViewerDialog(trial.hyperparameters, self)
-            dialog.exec()
+        # Update trials table
+        trials = state.get('trials', {})
+        for trial_id, trial_data in trials.items():
+            self.update_trial_ui(trial_data) # This method can be reused
+
+        # Update progress bar
+        if trials:
+            total_trials = len(trials)
+            completed_statuses = {"COMPLETED", "PRUNED"}
+            completed_trials = sum(1 for t in trials.values() if t['status'] in completed_statuses)
+            progress = int((completed_trials / total_trials) * 100)
+            self.progress_bar.setValue(progress)
         else:
-            self.append_log_message(f"WARN: Could not find trial data for ID {trial_id}")
+            self.progress_bar.setValue(0)
 
 
     def update_button_states(self, running: bool, paused: bool):
@@ -358,20 +328,39 @@ class MainWindow(QMainWindow):
         #     self.update_button_states(running=True, paused=False)
 
     def start_simple_experiment(self):
+        """
+        V2 implementation: Dispatches actions to the orchestrator to build
+        and start an experiment.
+        """
         dataset_name, selected_models = self._get_experiment_settings()
         if not dataset_name or not selected_models:
             self.append_log_message("ERROR: Please select a dataset and at least one model.")
             return
 
-        self.update_button_states(running=True, paused=False)
-        self.append_log_message(f"INFO: Starting simple experiment on '{dataset_name}' with models: {selected_models}")
-        self.progress_bar.setValue(0)
+        self.append_log_message(f"INFO: Configuring experiment on '{dataset_name}' with models: {selected_models}")
         self._clear_previous_experiment()
-        trials = self._create_default_trials(selected_models)
-        scheduler_config = {'adaptive_scheduler': 'Successive Halving'}
-        self._setup_and_run_experiment(trials, dataset_name, scheduler_config)
+
+        # --- Dispatch Actions ---
+        # 1. Set Challenge
+        challenge_def = AVAILABLE_DATASETS[dataset_name]
+        self.orchestrator.dispatch("SET_CHALLENGE", {"name": dataset_name, "type": challenge_def.type})
+
+        # 2. Add Algorithms
+        for model_name in selected_models:
+            model_def = AVAILABLE_MODELS[model_name]
+            # Create a simplified parameter space for the simple experiment
+            param_space = {
+                k: (v['min'], v['max']) for param_type in model_def.hyperparameter_schema.values()
+                for k, v in param_type.items()
+            }
+            self.orchestrator.dispatch("ADD_ALGORITHM", {"name": model_name, "parameter_space": param_space})
+
+        # 3. Start the Run
+        self.orchestrator.dispatch("START_RUN", {})
+
 
     def open_tuning_dialog(self):
+        self.append_log_message("INFO: Tuning dialog is temporarily disabled during refactoring.")
         dataset_name, selected_models_names = self._get_experiment_settings()
         if not dataset_name or not selected_models_names:
             QMessageBox.warning(self, "Warning", "Please select a dataset and at least one model to tune.")
@@ -449,8 +438,6 @@ class MainWindow(QMainWindow):
                     if param_type not in new_hparams: new_hparams[param_type] = {}
                     new_hparams[param_type][param_name] = value
                 all_new_trials.append(Trial(id=f"{template_trial.algorithm_name[:4]}_t_{uuid.uuid4().hex[:4]}", algorithm_name=template_trial.algorithm_name, hyperparameters=new_hparams))
-        return all_new_trials
-
     def _get_experiment_settings(self):
         dataset_name = self.dataset_combo.currentText()
         selected_models = [self.model_list.item(i).text() for i in range(self.model_list.count()) if self.model_list.item(i).checkState() == Qt.CheckState.Checked]
@@ -463,51 +450,6 @@ class MainWindow(QMainWindow):
         self.plot_curve_map.clear()
         self.insights_list.clear()
         self.setup_plot()
-
-    def _create_default_trials(self, selected_models: list) -> list:
-        trials = []
-        for model_name in selected_models:
-            model_def = AVAILABLE_MODELS[model_name]
-            default_hparams = {}
-            if "model_params" in model_def.hyperparameter_schema:
-                default_hparams['model_params'] = {k: v['default'] for k, v in model_def.hyperparameter_schema['model_params'].items()}
-            if "optimizer_params" in model_def.hyperparameter_schema:
-                default_hparams['optimizer_params'] = {k: v['default'] for k, v in model_def.hyperparameter_schema['optimizer_params'].items()}
-            trials.append(Trial(id=f"{model_name[:4]}_{uuid.uuid4().hex[:4]}", algorithm_name=model_name, hyperparameters=default_hparams))
-        return trials
-
-    def _setup_and_run_experiment(self, trials: list, dataset_name: str, scheduler_config: dict):
-        if not trials:
-            self.append_log_message("ERROR: No trials were generated for the experiment.")
-            self.update_button_states(running=False, paused=False)
-            return
-        dataset_def = AVAILABLE_DATASETS[dataset_name]
-
-        scheduler_name = scheduler_config.get('adaptive_scheduler', 'Successive Halving')
-        metric = dataset_def.performance_metric_name
-        is_increasing = dataset_def.type == 'classification'
-
-        if scheduler_name == 'Hyperband':
-            max_epochs = scheduler_config.get('max_epochs', 81)
-            adaptive_scheduler = HyperbandScheduler(metric=metric, increasing=is_increasing, max_resource_per_trial=max_epochs)
-        else: # Default to Successive Halving
-            adaptive_scheduler = SuccessiveHalvingScheduler(metric=metric, increasing=is_increasing, min_epochs_per_rung=2, reduction_factor=2)
-
-        orchestrator = Orchestrator(trials=trials, dataset_name=dataset_name, adaptive_scheduler=adaptive_scheduler, max_workers=4, enable_checkpointing=self.checkpoint_checkbox.isChecked())
-
-        self.experiment_thread = QThread()
-        self.experiment_runner = ExperimentRunner(orchestrator)
-        self.experiment_runner.moveToThread(self.experiment_thread)
-
-        self.experiment_runner.log_message.connect(self.append_log_message)
-        self.experiment_runner.trial_updated.connect(self.update_trial_ui)
-        self.experiment_runner.trial_profiled.connect(self.on_trial_profiled)
-        self.experiment_runner.experiment_finished.connect(self.on_experiment_finished)
-        self.experiment_runner.insight_generated.connect(self.add_insight)
-
-        self.experiment_thread.started.connect(self.experiment_runner.run)
-        self.update_throttle(self.throttle_slider.value())
-        self.experiment_thread.start()
 
     def on_trial_selected(self):
         selected_items = self.trials_table.selectedItems()
@@ -641,13 +583,9 @@ class MainWindow(QMainWindow):
         row_color = QColor('white')
         pen = self.plot_curve_map[trial_id].opts['pen']
 
-        is_best = self.experiment_runner and self.experiment_runner.orchestrator.insight_engine.current_best_trial_id == trial_id
-
-        if is_best:
-            row_color = QColor('#FFFACD')
-            pen.setColor(pg.mkColor('#FFD700'))
-            pen.setWidth(4)
-        elif status == "PRUNED":
+        # V2 Refactor: Best trial highlighting is removed for now as it depended on the old orchestrator structure.
+        # This can be re-added later by deriving the best trial from the state.
+        if status == "PRUNED":
             row_color = QColor('#D3D3D3')
             pen.setColor(pg.mkColor('#808080'))
             pen.setStyle(Qt.PenStyle.DotLine)
