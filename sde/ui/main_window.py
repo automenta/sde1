@@ -297,11 +297,10 @@ class MainWindow(QMainWindow):
         The central handler for all state updates from the V2 Orchestrator.
         """
         self.current_state = state
-        status = state.get('status', 'DEFINING')
-        is_running = status == 'RUNNING'
-        is_paused = status == 'PAUSED'
 
-        self.update_button_states(running=(is_running or is_paused), paused=is_paused)
+        # V2 UI state management
+        valid_actions = state.get('valid_actions', {})
+        self.update_button_states(valid_actions)
 
         trials = state.get('trials', {})
 
@@ -381,13 +380,24 @@ class MainWindow(QMainWindow):
                         self.plot_curve_map[trial_id].clear()
 
 
-    def update_button_states(self, running: bool, paused: bool):
-        self.start_button.setEnabled(not running)
-        self.tune_button.setEnabled(not running)
-        self.pause_button.setEnabled(running and not paused)
-        self.resume_button.setEnabled(paused)
-        self.setup_group.setEnabled(not running)
-        self.settings_group.setEnabled(not running)
+    def update_button_states(self, valid_actions: dict):
+        """
+        Updates the enabled/disabled state of UI controls based on the
+        valid actions provided by the orchestrator.
+        """
+        global_actions = valid_actions.get('global', [])
+
+        self.start_button.setEnabled("START_RUN" in global_actions)
+        self.tune_button.setEnabled("START_RUN" in global_actions) # Tune button also starts a run
+        self.pause_button.setEnabled("PAUSE_RUN" in global_actions)
+        self.resume_button.setEnabled("RESUME_RUN" in global_actions)
+
+        # The setup group should be disabled if we can no longer set a challenge,
+        # which implies the experiment definition is locked in.
+        can_define_experiment = "SET_CHALLENGE" in global_actions or "ADD_ALGORITHM" in global_actions
+        self.setup_group.setEnabled(can_define_experiment)
+        self.settings_group.setEnabled(can_define_experiment)
+
 
     def update_throttle(self, value: int):
         self.throttle_label.setText(f"{value}%")

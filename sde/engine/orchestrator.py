@@ -218,31 +218,53 @@ class ExperimentOrchestrator:
 
         self.experiment.status = ExperimentStatus.RUNNING
 
-        # --- Trial Generation (for simple runs) ---
+        # --- V2 Trial Generation ---
         if not self.experiment.trials:
-            self.log_message.emit("INFO: No pre-existing trials found. Generating default trials.")
-            for algo_config in self.experiment.algorithms.values():
-                # For a simple run, sample one set of hyperparameters.
-                # We'll just take the midpoint of the defined parameter space.
-                hparams = {}
-                for p_name, p_space in algo_config.parameter_space.items():
-                    if isinstance(p_space, tuple) and len(p_space) == 2:
-                        # Assuming (min, max) for numeric types
-                        hparams[p_name] = (p_space[0] + p_space[1]) / 2
-                    else:
-                        # Fallback for non-numeric or fixed value spaces
-                        hparams[p_name] = p_space
+            self.log_message.emit("INFO: No pre-existing trials found. Generating initial trials.")
+            import random
+            import numpy as np
 
-                trial_id = f"trial_{algo_config.name.lower().replace(' ', '_')}_{len(self.experiment.trials)}"
-                trial = Trial(
-                    id=trial_id,
-                    algorithm_name=algo_config.name,
-                    hyperparameters=hparams,
-                )
-                self.experiment.trials[trial_id] = trial
-            self.log_message.emit(f"INFO: Generated {len(self.experiment.trials)} initial trials.")
+            num_trials_per_algo = 10 # Default number of trials for random search
+
+            for algo_config in self.experiment.algorithms.values():
+                for i in range(num_trials_per_algo):
+                    hparams = {}
+                    for p_name, p_def in algo_config.parameter_space.items():
+                        # This logic is inspired by the UI's random search generation
+                        # A more robust implementation would use a schema
+                        if isinstance(p_def, dict) and 'min' in p_def and 'max' in p_def:
+                            if p_def.get('scale') == 'log':
+                                log_min = np.log10(p_def['min'])
+                                log_max = np.log10(p_def['max'])
+                                value = 10**random.uniform(log_min, log_max)
+                            else:
+                                value = random.uniform(p_def['min'], p_def['max'])
+
+                            if p_def.get('type') == 'int':
+                                value = int(value)
+                        elif isinstance(p_def, (list, tuple)): # Simple range tuple or list of choices
+                             if all(isinstance(x, (int, float)) for x in p_def) and len(p_def) == 2:
+                                 value = random.uniform(p_def[0], p_def[1]) # Assume (min, max)
+                             else:
+                                 value = random.choice(p_def) # Assume list of choices
+                        else:
+                            value = p_def # A fixed value
+                        hparams[p_name] = value
+
+                    trial_id = f"trial_{algo_config.name.lower().replace(' ', '_')}_{len(self.experiment.trials)}"
+                    trial = Trial(
+                        id=trial_id,
+                        algorithm_name=algo_config.name,
+                        hyperparameters=hparams,
+                    )
+                    self.experiment.trials[trial_id] = trial
+            self.log_message.emit(f"INFO: Generated {len(self.experiment.trials)} initial trials via random search.")
 
         # --- Engine Initialization ---
+        self._initialize_and_start_runtime()
+
+    def _initialize_and_start_runtime(self):
+        """Creates and starts a new SdeRuntimeEngine instance."""
         try:
             challenge_name = self.experiment.challenge['name']
             challenge_def = AVAILABLE_DATASETS[challenge_name]
@@ -252,17 +274,14 @@ class ExperimentOrchestrator:
             if not scheduler_class:
                 raise ValueError(f"Unknown scheduler '{scheduler_name}' specified in adaptive_policy.")
 
-            # Note: A more robust solution would define this in the challenge definition itself.
-            # For now, we infer it based on common metric names.
             increasing = "accuracy" in challenge_def.performance_metric_name.lower()
-
-            # Instantiate the scheduler
-            # This assumes schedulers have a compatible signature. A factory pattern
-            # would be more robust for schedulers with different needs.
             scheduler = scheduler_class(metric=challenge_def.performance_metric_name, increasing=increasing)
 
+            # Important: Pass a copy of the list of trials to the engine
+            current_trials = list(self.experiment.trials.values())
+
             self.runtime_engine = SdeRuntimeEngine(
-                trials=list(self.experiment.trials.values()),
+                trials=current_trials,
                 dataset_name=challenge_name,
                 adaptive_scheduler=scheduler,
                 trial_updated_callback=self.on_trial_updated,
@@ -318,14 +337,10 @@ class ExperimentOrchestrator:
             self.log_message.emit("INFO: Experiment paused.")
 
     def handle_resume_run(self, payload: Dict[str, Any]):
-        if self.runtime_engine:
-            # The existing engine was designed to be started once.
-            # A more robust implementation would re-create it or ensure
-            # its internal state is ready for a restart. For now, we assume
-            # the _execution_loop can be re-entered.
-            self.runtime_engine.start()
-            self.experiment.status = ExperimentStatus.RUNNING
-            self.log_message.emit("INFO: Experiment resumed.")
+        self.log_message.emit("INFO: RESUME_RUN action received. Re-initializing runtime.")
+        self.experiment.status = ExperimentStatus.RUNNING
+        # Re-initialize the engine with the current state of trials
+        self._initialize_and_start_runtime()
 
     def get_valid_actions(self) -> Dict[str, Any]:
         """
