@@ -107,6 +107,7 @@ class ExperimentOrchestrator:
             "algorithms": {k: v.__dict__ for k, v in self.experiment.algorithms.items()},
             "trials": {k: v.to_dict() for k, v in self.experiment.trials.items()},
             "insights": self.experiment.insights,
+            "suggested_actions": self.experiment.suggested_actions,
             "adaptive_policy": self.experiment.adaptive_policy,
             "valid_actions": self.get_valid_actions(), # Also emit the valid actions
         }
@@ -201,12 +202,15 @@ class ExperimentOrchestrator:
             id=new_trial_id,
             algorithm_name=source_trial.algorithm_name,
             hyperparameters=new_hparams,
-            status=TrialStatus.PENDING
+            status=TrialStatus.PENDING # Start as PENDING, engine will make it ACTIVE
         )
+
+        # Add to the main state. The engine will get its own copy.
         self.experiment.trials[new_trial_id] = new_trial
 
-        if self.runtime_engine:
-            self.runtime_engine.add_trial_live(new_trial)
+        if self.runtime_engine and self.experiment.status in [ExperimentStatus.RUNNING, ExperimentStatus.PAUSED]:
+            # If the engine is live, inject the trial directly for processing.
+            self.runtime_engine.inject_trial(new_trial)
 
         self.log_message.emit(f"INFO: Spawned new trial {new_trial_id} from {source_trial_id}.")
 
@@ -277,7 +281,9 @@ class ExperimentOrchestrator:
                 dataset_name=challenge_name,
                 adaptive_scheduler=scheduler,
                 trial_updated_callback=self.on_trial_updated,
-                insights_callback=self.on_insights_generated
+                insights_callback=self.on_insights_generated,
+                run_completed_callback=self.on_run_completed,
+                patience_budget=self.experiment.patience_budget
             )
 
             self.log_message.emit(f"INFO: SdeRuntimeEngine initialized with {scheduler_name} scheduler.")
@@ -315,11 +321,52 @@ class ExperimentOrchestrator:
     def on_insights_generated(self, insights: List[Dict[str, Any]]):
         """
         Callback for the SdeRuntimeEngine to add new insights to the state.
+        This now also converts insights into suggested actions.
         """
         with self._lock:
             self.experiment.insights.extend(insights)
             for insight in insights:
                 self.log_message.emit(f"INSIGHT: {insight['message']}")
+                suggested_action = self._convert_insight_to_action(insight)
+                if suggested_action:
+                    # Avoid duplicate suggestions
+                    if suggested_action not in self.experiment.suggested_actions:
+                        self.experiment.suggested_actions.append(suggested_action)
+                        self.log_message.emit(f"SUGGESTION: {suggested_action['message']}")
+        self.emit_state_change()
+
+    def _convert_insight_to_action(self, insight: Dict[str, Any]) -> Dict[str, Any]:
+        """Converts an insight into a structured, actionable suggestion for the UI."""
+        insight_type = insight.get("type")
+        trial_ids = insight.get("trial_ids", [])
+        if not trial_ids:
+            return None
+
+        trial_id = trial_ids[0] # Most simple insights relate to one trial
+
+        if insight_type in ["PLATEAU", "POOR_INITIAL_PERFORMANCE"]:
+            return {
+                "message": f"Consider pruning trial {trial_id[:6]}, which has {insight_type.lower().replace('_', ' ')}.",
+                "action_type": "MANUAL_PRUNE_TRIAL",
+                "payload": {"trial_id": trial_id}
+            }
+        elif insight_type == "BEST_PERFORMER":
+            return {
+                "message": f"Consider prioritizing trial {trial_id[:6]}, which is the new best performer.",
+                "action_type": "MANUAL_PRIORITIZE_TRIAL",
+                "payload": {"trial_id": trial_id}
+            }
+        return None
+
+    def on_run_completed(self):
+        """
+        Callback for the SdeRuntimeEngine to signal that the run has finished,
+        either by exhausting the work queue or hitting a budget limit.
+        """
+        with self._lock:
+            if self.experiment.status == ExperimentStatus.RUNNING:
+                self.log_message.emit("INFO: Run completed.")
+                self.experiment.status = ExperimentStatus.COMPLETED
         self.emit_state_change()
 
     def handle_pause_run(self, payload: Dict[str, Any]):
@@ -332,7 +379,8 @@ class ExperimentOrchestrator:
         self.log_message.emit("INFO: RESUME_RUN action received. Restarting runtime.")
         if self.runtime_engine:
             self.experiment.status = ExperimentStatus.RUNNING
-            self.runtime_engine.start() # This restarts the loop in the existing engine
+            # Pass is_resuming=True to the engine
+            self.runtime_engine.start(is_resuming=True)
             self.log_message.emit("INFO: Experiment resumed.")
         else:
             self.log_message.emit("ERROR: Cannot resume, no runtime engine exists. Please start the run first.")

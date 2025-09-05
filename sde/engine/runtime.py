@@ -1,6 +1,7 @@
 import threading
 import logging
-from typing import List, Callable, Iterator, Tuple, Dict
+import time
+from typing import List, Callable, Iterator, Tuple, Dict, Optional
 
 from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus
 from sde.engine.datastore import DataStore
@@ -25,6 +26,8 @@ class SdeRuntimeEngine:
         adaptive_scheduler: AdaptiveScheduler,
         trial_updated_callback: Callable[[Dict], None],
         insights_callback: Callable[[List[Dict]], None],
+        run_completed_callback: Callable[[], None],
+        patience_budget: Optional[Dict[str, int]] = None,
         max_workers: int = 2,
         enable_checkpointing: bool = False,
         checkpoints_dir: str = './checkpoints'
@@ -33,6 +36,8 @@ class SdeRuntimeEngine:
         self.adaptive_scheduler = adaptive_scheduler
         self.trial_updated_callback = trial_updated_callback
         self.insights_callback = insights_callback
+        self.run_completed_callback = run_completed_callback
+        self.patience_budget = patience_budget or {}
         self.insight_engine = InsightEngine(
             self.datastore.get_all_trials(),
             primary_metric=self.adaptive_scheduler.metric,
@@ -47,10 +52,16 @@ class SdeRuntimeEngine:
         )
         self._is_running = False
         self._thread = None
+        self._is_resuming = False
+        self.work_queue: List[WorkUnit] = []
+        self.start_time: Optional[float] = None
 
-    def start(self):
+    def start(self, is_resuming: bool = False):
         """Starts the main execution loop in a background thread."""
         if not self._is_running:
+            if not self.start_time:
+                self.start_time = time.time()
+            self._is_resuming = is_resuming
             self._is_running = True
             self.scheduler.start()
             self._thread = threading.Thread(target=self._execution_loop, daemon=True)
@@ -76,68 +87,105 @@ class SdeRuntimeEngine:
         self.datastore.add_trial(trial)
         logger.info(f"Added new trial {trial.id} to the live datastore.")
 
+    def inject_trial(self, trial: Trial):
+        """
+        Injects a new trial into a live run.
+        Adds the trial to the datastore and queues its first work unit.
+        """
+        logger.info(f"Injecting new trial {trial.id} into live run.")
+        # Set status to ACTIVE since we are creating work for it immediately
+        trial.status = TrialStatus.ACTIVE
+        self.datastore.add_trial(trial)
+
+        # Create the first work unit for the new trial.
+        initial_work_unit = WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)
+
+        # Add the work unit to the live work queue. This is thread-safe enough
+        # as list.append is atomic and the consumer loop iterates on a copy.
+        self.work_queue.append(initial_work_unit)
+
     def _execution_loop(self):
         """
-        The main loop that drives the experiment. It gets work from the adaptive
-        scheduler, sends it to the compute scheduler, processes results, and
-        determines the next batch of work.
+        The main loop that drives the experiment. It populates the work queue,
+        processes work, and checks against the budget until the run is stopped,
+        the queue is empty, or the budget is exhausted.
         """
         logger.info("Runtime engine execution loop started.")
+        run_finished_naturally = False
 
-        # Get the first batch of work
-        work_queue = self.adaptive_scheduler.get_initial_work_units(self.datastore.get_all_trials())
-
-        while self._is_running and work_queue:
-            # Sort the work queue based on trial priority before submitting it.
-            # Higher priority values are processed first.
-            work_queue.sort(
-                key=lambda wu: self.datastore.get_trial(wu.trial_id).priority,
-                reverse=True
-            )
-
-            results_iterator = self.scheduler.run(work_queue)
-            work_queue = [] # Reset for the next batch
-
-            for work_unit, result in results_iterator:
-                if not self._is_running:
-                    break # Exit if stop() was called during iteration
-
-                trial = self.datastore.get_trial(work_unit.trial_id)
-                if not trial:
-                    logger.warning(f"Could not find trial {work_unit.trial_id} for completed work unit.")
-                    continue
-
-                # --- Update Trial State ---
-                if 'error' in result:
-                    logger.error(f"Work unit {work_unit.type} for trial {trial.id} failed: {result['error']}")
-                    # Optionally, mark trial as FAILED
+        try:
+            if not self.work_queue:
+                if self._is_resuming:
+                    logger.info("Resuming run. Generating work for active trials.")
+                    active_trials = [t for t in self.datastore.get_all_trials() if t.status == TrialStatus.ACTIVE]
+                    self.work_queue = [WorkUnit(trial_id=t.id, type=WorkUnitType.TRAIN_EPOCH) for t in active_trials]
                 else:
-                    if work_unit.type == WorkUnitType.TRAIN_EPOCH:
-                        # The worker returns metrics and state updates
-                        trial.current_epoch = result['state_updates']['current_epoch']
-                        trial.checkpoint_path = result['state_updates']['checkpoint_path']
-                        for metric_name, value in result['metrics'].items():
-                            trial.results.setdefault(metric_name, []).append((trial.current_epoch, value))
+                    logger.info("Fresh run. Getting initial work units.")
+                    self.work_queue = self.adaptive_scheduler.get_initial_work_units(self.datastore.get_all_trials())
 
-                    elif work_unit.type == WorkUnitType.PROFILE_SPEED:
-                        # This part of the schema might need revisiting, assuming a simple 'time' key for now
-                        trial.est_time_per_epoch = result.get('time')
+            while self._is_running:
+                # --- Budget and Termination Checks ---
+                if not self.work_queue:
+                    logger.info("Work queue is empty. Execution loop is finishing.")
+                    run_finished_naturally = True
+                    break
 
-                # Notify orchestrator about the update
-                if self.trial_updated_callback:
-                    self.trial_updated_callback(trial.to_dict())
+                max_trials = self.patience_budget.get('max_trials')
+                if max_trials and len(self.datastore.get_all_trials()) >= max_trials:
+                    logger.info(f"Budget exhausted: reached max_trials ({max_trials}).")
+                    run_finished_naturally = True
+                    break
 
-                # Analyze for insights
-                new_insights = self.insight_engine.analyze(trial)
-                if new_insights and self.insights_callback:
-                    self.insights_callback([insight.__dict__ for insight in new_insights])
+                max_time_mins = self.patience_budget.get('max_time_mins')
+                if max_time_mins and (time.time() - self.start_time) >= max_time_mins * 60:
+                    logger.info(f"Budget exhausted: reached max_time_mins ({max_time_mins}).")
+                    run_finished_naturally = True
+                    break
 
-                # Get next work units from the adaptive scheduler based on this result
-                next_work = self.adaptive_scheduler.get_next_work_units(trial, self.datastore.get_all_trials())
-                work_queue.extend(next_work)
+                # --- Work Processing ---
+                self.work_queue.sort(key=lambda wu: self.datastore.get_trial(wu.trial_id).priority, reverse=True)
+                current_batch = self.work_queue
+                self.work_queue = []
+                results_iterator = self.scheduler.run(current_batch)
 
-        self._is_running = False
-        logger.info("Runtime engine execution loop finished.")
+                for work_unit, result in results_iterator:
+                    if not self._is_running:
+                        break
+
+                    trial = self.datastore.get_trial(work_unit.trial_id)
+                    if not trial:
+                        logger.warning(f"Could not find trial {work_unit.trial_id} for completed work unit.")
+                        continue
+
+                    if 'error' in result:
+                        logger.error(f"Work unit {work_unit.type} for trial {trial.id} failed: {result['error']}")
+                    else:
+                        if work_unit.type == WorkUnitType.TRAIN_EPOCH:
+                            trial.current_epoch = result['state_updates']['current_epoch']
+                            trial.checkpoint_path = result['state_updates']['checkpoint_path']
+                            for metric, value in result['metrics'].items():
+                                trial.results.setdefault(metric, []).append((trial.current_epoch, value))
+                        elif work_unit.type == WorkUnitType.PROFILE_SPEED:
+                            trial.est_time_per_epoch = result.get('time')
+
+                    if self.trial_updated_callback:
+                        self.trial_updated_callback(trial.to_dict())
+
+                    new_insights = self.insight_engine.analyze(trial)
+                    if new_insights and self.insights_callback:
+                        self.insights_callback([insight.__dict__ for insight in new_insights])
+
+                    next_work = self.adaptive_scheduler.get_next_work_units(trial, self.datastore.get_all_trials())
+                    self.work_queue.extend(next_work)
+
+                if not self._is_running: # Check if stop was called during result iteration
+                    break
+
+        finally:
+            self._is_running = False
+            logger.info("Runtime engine execution loop finished.")
+            if run_finished_naturally and self.run_completed_callback:
+                self.run_completed_callback()
 
     def submit_work(self, work_units: List[WorkUnit]) -> Iterator[Tuple[WorkUnit, dict]]:
         """Submits a list of work units to the scheduler and yields results."""

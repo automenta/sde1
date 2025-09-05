@@ -74,6 +74,7 @@ class Experiment:
     # Runtime State
     trials: Dict[str, Trial] = field(default_factory=dict)
     insights: List[Dict[str, Any]] = field(default_factory=list)
+    suggested_actions: List[Dict[str, Any]] = field(default_factory=list)
 
     # Strategy & Constraints
     adaptive_policy: str = "SuccessiveHalving" # Default policy

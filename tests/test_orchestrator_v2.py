@@ -97,7 +97,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
 
     @patch('sde.engine.orchestrator.SdeRuntimeEngine')
     def test_runtime_calls_on_spawn(self, MockSdeRuntimeEngine, mock_emit):
-        """Test that spawning a trial calls the runtime engine to add it live."""
+        """Test that spawning a trial calls the runtime engine to inject it."""
         orchestrator = ExperimentOrchestrator()
         mock_emit.reset_mock()
         orchestrator.experiment.status = ExperimentStatus.RUNNING
@@ -106,7 +106,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.trials = {'t1': source_trial}
         orchestrator.dispatch("SPAWN_SIMILAR_TRIAL", {"source_trial_id": "t1"})
         new_trial = next(t for t in orchestrator.experiment.trials.values() if t.id != 't1')
-        orchestrator.runtime_engine.add_trial_live.assert_called_once_with(new_trial)
+        orchestrator.runtime_engine.inject_trial.assert_called_once_with(new_trial)
 
     @patch('sde.engine.orchestrator.SdeRuntimeEngine')
     def test_dispatch_start_run(self, MockSdeRuntimeEngine, mock_emit):
@@ -120,7 +120,85 @@ class TestExperimentOrchestrator(unittest.TestCase):
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         MockSdeRuntimeEngine.assert_called_once()
         mock_engine_instance = MockSdeRuntimeEngine.return_value
-        mock_engine_instance.start.assert_called_once()
+        mock_engine_instance.start.assert_called_once_with()
+
+    @patch('sde.engine.orchestrator.SdeRuntimeEngine')
+    def test_pause_and_resume_run(self, MockSdeRuntimeEngine, mock_emit):
+        """Test the PAUSE_RUN and RESUME_RUN actions and state transitions."""
+        orchestrator = ExperimentOrchestrator()
+        mock_emit.reset_mock()
+
+        # Setup for a runnable state
+        orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
+        algo = AlgorithmConfig(id='algo1', name='TestAlgo', parameter_space={'lr': (0.01, 0.1)})
+        orchestrator.experiment.algorithms['algo1'] = algo
+        orchestrator.dispatch("START_RUN", {})
+
+        mock_engine_instance = MockSdeRuntimeEngine.return_value
+        mock_engine_instance.start.assert_called_once_with()
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
+
+        # Test PAUSE
+        orchestrator.dispatch("PAUSE_RUN", {})
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.PAUSED)
+        mock_engine_instance.stop.assert_called_once()
+        mock_emit.assert_any_call("INFO: Experiment paused.")
+
+        # Test RESUME
+        orchestrator.dispatch("RESUME_RUN", {})
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
+        mock_engine_instance.start.assert_called_with(is_resuming=True)
+        mock_emit.assert_any_call("INFO: Experiment resumed.")
+
+    @patch('sde.engine.orchestrator.SdeRuntimeEngine')
+    def test_run_completes_via_callback(self, MockSdeRuntimeEngine, mock_emit):
+        """Test that the run_completed_callback correctly updates state."""
+        orchestrator = ExperimentOrchestrator()
+        mock_emit.reset_mock()
+
+        # Setup for a runnable state
+        orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
+        orchestrator.experiment.algorithms['algo1'] = AlgorithmConfig(id='a1', name='A', parameter_space={})
+        orchestrator.dispatch("START_RUN", {})
+
+        # Capture the callback passed to the engine
+        mock_engine_instance = MockSdeRuntimeEngine.return_value
+        init_kwargs = MockSdeRuntimeEngine.call_args.kwargs
+        completion_callback = init_kwargs.get("run_completed_callback")
+
+        self.assertIsNotNone(completion_callback)
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
+
+        # Simulate the engine finishing
+        completion_callback()
+
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.COMPLETED)
+        mock_emit.assert_any_call("INFO: Run completed.")
+
+    def test_insights_generate_suggested_actions(self, mock_emit):
+        """Test that insights are converted into suggested actions."""
+        orchestrator = ExperimentOrchestrator()
+        mock_emit.reset_mock()
+
+        # Test plateau insight -> prune suggestion
+        plateau_insight = {"type": "PLATEAU", "trial_ids": ["t1"], "message": "..."}
+        orchestrator.on_insights_generated([plateau_insight])
+
+        self.assertEqual(len(orchestrator.experiment.suggested_actions), 1)
+        suggestion = orchestrator.experiment.suggested_actions[0]
+        self.assertEqual(suggestion['action_type'], "MANUAL_PRUNE_TRIAL")
+        self.assertEqual(suggestion['payload']['trial_id'], "t1")
+        mock_emit.assert_any_call(f"SUGGESTION: {suggestion['message']}")
+
+        # Test best performer -> prioritize suggestion
+        orchestrator.experiment.suggested_actions = [] # Reset
+        best_perf_insight = {"type": "BEST_PERFORMER", "trial_ids": ["t2"], "message": "..."}
+        orchestrator.on_insights_generated([best_perf_insight])
+
+        self.assertEqual(len(orchestrator.experiment.suggested_actions), 1)
+        suggestion = orchestrator.experiment.suggested_actions[0]
+        self.assertEqual(suggestion['action_type'], "MANUAL_PRIORITIZE_TRIAL")
+        self.assertEqual(suggestion['payload']['trial_id'], "t2")
 
     def test_dispatch_invalid_action(self, mock_emit):
         """Test that invalid actions are logged and ignored."""
