@@ -119,7 +119,6 @@ class ExperimentOrchestrator:
         self.log_message.emit(f"INFO: Challenge set to '{payload.get('name', 'Unknown')}'")
 
     def handle_add_algorithm(self, payload: Dict[str, Any]):
-        # In a real app, this would do more validation
         from sde.core.types import AlgorithmConfig
         algo_id = f"algo_{len(self.experiment.algorithms)}"
         new_algo = AlgorithmConfig(
@@ -129,6 +128,34 @@ class ExperimentOrchestrator:
         )
         self.experiment.algorithms[algo_id] = new_algo
         self.log_message.emit(f"INFO: Added algorithm: {new_algo.name}")
+
+        # If the experiment is already running, generate trials and add them live
+        if self.experiment.status in [ExperimentStatus.RUNNING, ExperimentStatus.PAUSED]:
+            self.log_message.emit(f"INFO: Generating new trials for algorithm '{new_algo.name}' mid-run.")
+            try:
+                scheduler_name = self.experiment.adaptive_policy
+                scheduler_class = SCHEDULER_MAP.get(scheduler_name)
+                if not scheduler_class:
+                    raise ValueError(f"Unknown scheduler '{scheduler_name}' specified in adaptive_policy.")
+
+                challenge_def = AVAILABLE_DATASETS[self.experiment.challenge['name']]
+                increasing = "accuracy" in challenge_def.performance_metric_name.lower()
+                scheduler = scheduler_class(metric=challenge_def.performance_metric_name, increasing=increasing)
+
+                num_trials_per_algo = 10 # This could be part of the budget definition later
+                new_trials = scheduler.generate_initial_trials([new_algo], num_trials_per_algo)
+
+                for trial in new_trials:
+                    self.experiment.trials[trial.id] = trial
+
+                if self.runtime_engine:
+                    self.runtime_engine.add_trials_live(new_trials)
+
+                self.log_message.emit(f"INFO: Added {len(new_trials)} new trials to the running experiment.")
+
+            except Exception as e:
+                self.log_message.emit(f"ERROR: Failed to add new trials mid-run: {e}")
+                logger.error(f"Mid-run trial generation failed: {traceback.format_exc()}")
 
     def handle_remove_algorithm(self, payload: Dict[str, Any]):
         algo_id = payload['algorithm_id']
@@ -206,7 +233,8 @@ class ExperimentOrchestrator:
         self.experiment.trials[new_trial_id] = new_trial
 
         if self.runtime_engine:
-            self.runtime_engine.add_trial_live(new_trial)
+            # Use the new, more general method for adding trials live
+            self.runtime_engine.add_trials_live([new_trial])
 
         self.log_message.emit(f"INFO: Spawned new trial {new_trial_id} from {source_trial_id}.")
 
@@ -324,15 +352,14 @@ class ExperimentOrchestrator:
 
     def handle_pause_run(self, payload: Dict[str, Any]):
         if self.runtime_engine:
-            self.runtime_engine.stop()
+            self.runtime_engine.pause()
             self.experiment.status = ExperimentStatus.PAUSED
             self.log_message.emit("INFO: Experiment paused.")
 
     def handle_resume_run(self, payload: Dict[str, Any]):
-        self.log_message.emit("INFO: RESUME_RUN action received. Restarting runtime.")
         if self.runtime_engine:
+            self.runtime_engine.resume()
             self.experiment.status = ExperimentStatus.RUNNING
-            self.runtime_engine.start() # This restarts the loop in the existing engine
             self.log_message.emit("INFO: Experiment resumed.")
         else:
             self.log_message.emit("ERROR: Cannot resume, no runtime engine exists. Please start the run first.")

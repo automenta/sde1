@@ -159,6 +159,7 @@ class MainWindow(QMainWindow):
 
         self.start_button = QPushButton("Start (Defaults)")
         self.tune_button = QPushButton("Tune Hyperparameters...")
+        self.add_models_button = QPushButton("Add Selected Models to Run")
         self.pause_button = QPushButton("Pause")
         self.resume_button = QPushButton("Resume")
 
@@ -168,11 +169,14 @@ class MainWindow(QMainWindow):
         simple_run_layout.addWidget(self.start_button)
         advanced_run_layout = QHBoxLayout()
         advanced_run_layout.addWidget(self.tune_button)
+        mid_run_layout = QHBoxLayout()
+        mid_run_layout.addWidget(self.add_models_button)
         pause_resume_layout = QHBoxLayout()
         pause_resume_layout.addWidget(self.pause_button)
         pause_resume_layout.addWidget(self.resume_button)
         controls_layout.addLayout(simple_run_layout)
         controls_layout.addLayout(advanced_run_layout)
+        controls_layout.addLayout(mid_run_layout)
         controls_layout.addLayout(pause_resume_layout)
 
         # --- Assemble Left Pane ---
@@ -187,6 +191,7 @@ class MainWindow(QMainWindow):
         self.dataset_combo.currentIndexChanged.connect(self.update_model_list)
         self.start_button.clicked.connect(self.start_simple_experiment)
         self.tune_button.clicked.connect(self.open_tuning_dialog)
+        self.add_models_button.clicked.connect(self.add_models_to_run)
         self.pause_button.clicked.connect(self.pause_experiment)
         self.resume_button.clicked.connect(self.resume_experiment)
         self.throttle_slider.valueChanged.connect(self.update_throttle)
@@ -386,17 +391,26 @@ class MainWindow(QMainWindow):
         valid actions provided by the orchestrator.
         """
         global_actions = valid_actions.get('global', [])
+        status = self.current_state.get('status')
+        has_challenge = self.current_state.get('challenge') is not None
 
-        self.start_button.setEnabled("START_RUN" in global_actions)
-        self.tune_button.setEnabled("START_RUN" in global_actions) # Tune button also starts a run
+        # Buttons for starting a run
+        can_start = "START_RUN" in global_actions
+        self.start_button.setEnabled(can_start)
+        self.tune_button.setEnabled(can_start)
+
+        # Buttons for interacting with a run
         self.pause_button.setEnabled("PAUSE_RUN" in global_actions)
         self.resume_button.setEnabled("RESUME_RUN" in global_actions)
 
-        # The setup group should be disabled if we can no longer set a challenge,
-        # which implies the experiment definition is locked in.
-        can_define_experiment = "SET_CHALLENGE" in global_actions or "ADD_ALGORITHM" in global_actions
-        self.setup_group.setEnabled(can_define_experiment)
-        self.settings_group.setEnabled(can_define_experiment)
+        # Button for adding models mid-run
+        can_add_mid_run = "ADD_ALGORITHM" in global_actions and status in ["RUNNING", "PAUSED"]
+        self.add_models_button.setEnabled(can_add_mid_run)
+
+        # More granular control over the setup panel
+        self.dataset_combo.setEnabled(not has_challenge)
+        self.model_list.setEnabled("ADD_ALGORITHM" in global_actions)
+        self.settings_group.setEnabled(status == "DEFINING")
 
 
     def update_throttle(self, value: int):
@@ -441,6 +455,36 @@ class MainWindow(QMainWindow):
 
         # 3. Start the Run
         self.orchestrator.dispatch("START_RUN", {})
+
+    def add_models_to_run(self):
+        """
+        Adds newly selected models to an already running experiment.
+        """
+        # Get all currently checked models
+        all_selected_models = {self.model_list.item(i).text() for i in range(self.model_list.count()) if self.model_list.item(i).checkState() == Qt.CheckState.Checked}
+
+        # Get models that are already part of the experiment
+        if not self.current_state:
+            self.append_log_message("ERROR: No current state available to add models to.")
+            return
+        existing_algo_names = {algo['name'] for algo in self.current_state.get('algorithms', {}).values()}
+
+        # Determine which models are new
+        newly_selected_models = all_selected_models - existing_algo_names
+
+        if not newly_selected_models:
+            self.append_log_message("INFO: No new models selected to add.")
+            return
+
+        self.append_log_message(f"INFO: Adding new models to run: {', '.join(newly_selected_models)}")
+
+        for model_name in newly_selected_models:
+            model_def = AVAILABLE_MODELS[model_name]
+            param_space = {
+                k: (v['min'], v['max']) for param_type in model_def.hyperparameter_schema.values()
+                for k, v in param_type.items()
+            }
+            self.orchestrator.dispatch("ADD_ALGORITHM", {"name": model_name, "parameter_space": param_space})
 
 
     def open_tuning_dialog(self):

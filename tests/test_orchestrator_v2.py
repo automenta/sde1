@@ -106,7 +106,8 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.trials = {'t1': source_trial}
         orchestrator.dispatch("SPAWN_SIMILAR_TRIAL", {"source_trial_id": "t1"})
         new_trial = next(t for t in orchestrator.experiment.trials.values() if t.id != 't1')
-        orchestrator.runtime_engine.add_trial_live.assert_called_once_with(new_trial)
+        # We now call the more general add_trials_live method
+        orchestrator.runtime_engine.add_trials_live.assert_called_once_with([new_trial])
 
     @patch('sde.engine.orchestrator.SdeRuntimeEngine')
     def test_dispatch_start_run(self, MockSdeRuntimeEngine, mock_emit):
@@ -121,6 +122,78 @@ class TestExperimentOrchestrator(unittest.TestCase):
         MockSdeRuntimeEngine.assert_called_once()
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         mock_engine_instance.start.assert_called_once()
+
+    @patch('sde.engine.orchestrator.SdeRuntimeEngine')
+    def test_add_algorithm_mid_run(self, MockSdeRuntimeEngine, mock_emit):
+        """Test adding a new algorithm to a running experiment."""
+        # 1. Setup a running experiment
+        orchestrator = ExperimentOrchestrator()
+        orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
+        algo1 = AlgorithmConfig(id='algo1', name='TestAlgo1', parameter_space={'lr': (0.01, 0.1)})
+        orchestrator.experiment.algorithms['algo1'] = algo1
+        orchestrator.dispatch("START_RUN", {})
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
+        mock_engine_instance = MockSdeRuntimeEngine.return_value
+        orchestrator.runtime_engine = mock_engine_instance
+
+        # Get the number of trials before adding the new algorithm
+        trials_before = len(orchestrator.experiment.trials)
+        self.assertGreater(trials_before, 0)
+
+        # 2. Dispatch the ADD_ALGORITHM action
+        mock_emit.reset_mock()
+        add_payload = {"name": "TestAlgo2", "parameter_space": {"lr": (0.2, 0.9)}}
+        orchestrator.dispatch("ADD_ALGORITHM", add_payload)
+
+        # 3. Assertions
+        self.assertIn('algo_1', orchestrator.experiment.algorithms)
+        self.assertEqual(orchestrator.experiment.algorithms['algo_1'].name, "TestAlgo2")
+
+        # Check that new trials were created
+        trials_after = len(orchestrator.experiment.trials)
+        self.assertGreater(trials_after, trials_before)
+
+        # Check that the new trials were for the correct algorithm
+        newly_added_trials = [
+            t for t in orchestrator.experiment.trials.values() if t.algorithm_name == "TestAlgo2"
+        ]
+        self.assertGreater(len(newly_added_trials), 0)
+
+        # Check that the new trials were passed to the runtime engine
+        mock_engine_instance.add_trials_live.assert_called_once()
+        # The argument to the call should be the list of newly created trials
+        self.assertEqual(
+            mock_engine_instance.add_trials_live.call_args[0][0],
+            newly_added_trials
+        )
+
+    @patch('sde.engine.orchestrator.SdeRuntimeEngine')
+    def test_pause_and_resume_run(self, MockSdeRuntimeEngine, mock_emit):
+        """Test pausing and resuming a run with the new event-based mechanism."""
+        orchestrator = ExperimentOrchestrator()
+        orchestrator.experiment.challenge = {"name": "MNIST"}
+        orchestrator.experiment.algorithms['algo1'] = AlgorithmConfig(id='a1', name='A1', parameter_space={})
+
+        # Start the run
+        orchestrator.dispatch("START_RUN", {})
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
+        mock_engine_instance = MockSdeRuntimeEngine.return_value
+        orchestrator.runtime_engine = mock_engine_instance
+        mock_engine_instance.start.assert_called_once()
+
+        # Pause the run
+        orchestrator.dispatch("PAUSE_RUN", {})
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.PAUSED)
+        mock_engine_instance.pause.assert_called_once()
+
+        # Resume the run
+        orchestrator.dispatch("RESUME_RUN", {})
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
+        mock_engine_instance.resume.assert_called_once()
+
+        # Assert that start() was only ever called once
+        mock_engine_instance.start.assert_called_once()
+
 
     def test_dispatch_invalid_action(self, mock_emit):
         """Test that invalid actions are logged and ignored."""
