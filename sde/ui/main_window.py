@@ -179,12 +179,25 @@ class MainWindow(QMainWindow):
         controls_layout.addLayout(mid_run_layout)
         controls_layout.addLayout(pause_resume_layout)
 
+        # --- Algorithm Management Group ---
+        self.algorithms_group = QGroupBox("4. Active Algorithms")
+        algorithms_layout = QVBoxLayout(self.algorithms_group)
+        self.algorithms_table = QTableWidget()
+        self.algorithms_table.setColumnCount(2)
+        self.algorithms_table.setHorizontalHeaderLabels(["Name", "Actions"])
+        header = self.algorithms_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        algorithms_layout.addWidget(self.algorithms_table)
+
+
         # --- Assemble Left Pane ---
         setup_layout.addWidget(self.setup_group)
         setup_layout.addWidget(self.settings_group)
+        setup_layout.addWidget(controls_group)
+        setup_layout.addWidget(self.algorithms_group)
         setup_layout.addStretch(1)
         setup_layout.addWidget(self.progress_bar)
-        setup_layout.addWidget(controls_group)
 
         # --- Connect Signals and Slots ---
         self.populate_datasets()
@@ -201,7 +214,9 @@ class MainWindow(QMainWindow):
         self.orchestrator.state_changed.connect(self.on_state_changed)
 
         self.update_model_list()
-        self.update_button_states(running=False, paused=False)
+        # Initialize buttons to a default disabled state.
+        # The first state_changed signal will update them properly.
+        self.update_button_states({})
 
         # --- Main Content Splitter (in results_pane)---
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -309,7 +324,8 @@ class MainWindow(QMainWindow):
 
         trials = state.get('trials', {})
 
-        # Update table and plots
+        # Update tables and plots
+        self.update_algorithm_table(state.get('algorithms', {}), valid_actions)
         for trial_data in trials.values():
             self.update_trial_ui(trial_data) # This method now primarily handles the table
 
@@ -363,6 +379,29 @@ class MainWindow(QMainWindow):
                 self.add_insight(insight_obj)
                 self.displayed_insight_messages.add(insight_obj.message)
 
+    def update_algorithm_table(self, algorithms: dict, valid_actions: dict):
+        """Updates the algorithm table with names and context-sensitive actions."""
+        self.algorithms_table.setRowCount(0)
+        algo_actions = valid_actions.get('algorithms', {})
+
+        for algo_id, algo_data in algorithms.items():
+            row_position = self.algorithms_table.rowCount()
+            self.algorithms_table.insertRow(row_position)
+            self.algorithms_table.setItem(row_position, 0, QTableWidgetItem(algo_data['name']))
+
+            # --- Add action buttons ---
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(0, 0, 0, 0)
+
+            remove_button = QPushButton("Remove")
+            remove_button.setEnabled("REMOVE_ALGORITHM" in algo_actions.get(algo_id, []))
+            remove_button.clicked.connect(
+                lambda _, a_id=algo_id: self.orchestrator.dispatch("REMOVE_ALGORITHM", {"algorithm_id": a_id})
+            )
+            actions_layout.addWidget(remove_button)
+            self.algorithms_table.setCellWidget(row_position, 1, actions_widget)
+
 
     def update_plots(self, trials_data: dict):
         """Updates all plot curves based on the latest trial data."""
@@ -415,9 +454,9 @@ class MainWindow(QMainWindow):
 
     def update_throttle(self, value: int):
         self.throttle_label.setText(f"{value}%")
-        # Throttle is not implemented in the new Scheduler yet
-        # if self.experiment_runner:
-        #     self.experiment_runner.orchestrator.set_throttle(value)
+        # Dispatch a SET_BUDGET action. This is a conceptual mapping for now.
+        # A more detailed implementation might have a richer budget definition.
+        self.orchestrator.dispatch("SET_BUDGET", {"worker_throttle_percent": value})
 
     def pause_experiment(self):
         self.orchestrator.dispatch("PAUSE_RUN", {})
@@ -453,8 +492,11 @@ class MainWindow(QMainWindow):
             }
             self.orchestrator.dispatch("ADD_ALGORITHM", {"name": model_name, "parameter_space": param_space})
 
-        # 3. Start the Run
-        self.orchestrator.dispatch("START_RUN", {})
+        # 3. Start the Run, including execution settings
+        start_payload = {
+            "enable_checkpointing": self.checkpoint_checkbox.isChecked()
+        }
+        self.orchestrator.dispatch("START_RUN", start_payload)
 
     def add_models_to_run(self):
         """
@@ -488,6 +530,11 @@ class MainWindow(QMainWindow):
 
 
     def open_tuning_dialog(self):
+        """
+        V2 implementation: Opens the tuning dialog and dispatches actions
+        to configure the experiment based on the user's choices, letting the
+        backend handle trial generation.
+        """
         dataset_name, selected_models_names = self._get_experiment_settings()
         if not dataset_name or not selected_models_names:
             QMessageBox.warning(self, "Warning", "Please select a dataset and at least one model to tune.")
@@ -500,7 +547,7 @@ class MainWindow(QMainWindow):
             return
 
         config = dialog.get_configuration()
-        self.append_log_message(f"INFO: Configuring tuning experiment with scheduler '{config['adaptive_scheduler']}' and h-param strategy '{config['hparam_strategy']}'")
+        self.append_log_message(f"INFO: Configuring tuning experiment with scheduler '{config['adaptive_scheduler']}'.")
         self._clear_previous_experiment()
 
         # --- V2 Dispatch Logic ---
@@ -508,69 +555,33 @@ class MainWindow(QMainWindow):
         challenge_def = AVAILABLE_DATASETS[dataset_name]
         self.orchestrator.dispatch("SET_CHALLENGE", {"name": dataset_name, "type": challenge_def.type})
 
-        # 2. Generate parameter combinations and dispatch ADD_ALGORITHM for each
-        param_combinations = self._generate_param_combinations(config)
+        # 2. Set Adaptive Policy (Scheduler)
+        self.orchestrator.dispatch("SET_ADAPTIVE_POLICY", {"policy_name": config['adaptive_scheduler']})
 
-        if not param_combinations:
-            self.append_log_message("ERROR: Tuning configuration did not generate any parameter combinations.")
-            return
+        # 3. Add algorithms with their full parameter spaces
+        for model_name, model_params in config['models'].items():
+            # The parameter space is defined by the user in the dialog
+            full_param_space = {}
+            for param_type in model_params.values():
+                for param_name, properties in param_type.items():
+                     full_param_space[param_name] = {
+                        "type": "float", # Assuming float for now, could be extended
+                        "min": properties['min'],
+                        "max": properties['max'],
+                        "scale": properties.get('scale', 'linear')
+                     }
 
-        for model_name, hparams in param_combinations:
-             # The "parameter space" for this action is just the single, fixed point
-             # from the hyperparameter search.
             self.orchestrator.dispatch("ADD_ALGORITHM", {
                 "name": model_name,
-                "parameter_space": hparams
+                "parameter_space": full_param_space
             })
 
-        # 3. Start the run
-        self.append_log_message(f"INFO: Starting run with {len(param_combinations)} trial configurations.")
-        self.orchestrator.dispatch("START_RUN", {})
-
-    def _generate_param_combinations(self, config: dict) -> list[tuple[str, dict]]:
-        """
-        Generates a list of (model_name, hparams) tuples based on the
-        tuning configuration from the dialog.
-        """
-        strategy = config.get('hparam_strategy', 'Grid Search')
-        num_trials = config.get('num_trials', 1)
-        all_combinations = []
-
-        for model_name, model_config in config.get('models', {}).items():
-            hparam_def = {}
-            # Flatten the param definition for easier processing
-            for param_type, params in model_config.items():
-                for param_name, properties in params.items():
-                    hparam_def[param_name] = properties
-
-            if not hparam_def:
-                continue
-
-            if strategy == 'Grid Search':
-                # Create a list of value lists for grid search
-                param_grid = {
-                    k: np.linspace(v['min'], v['max'], num_trials) if v.get('scale') != 'log'
-                    else np.logspace(np.log10(v['min']), np.log10(v['max']), num_trials)
-                    for k, v in hparam_def.items()
-                }
-                keys, values = zip(*param_grid.items())
-                combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
-                for combo in combinations:
-                    all_combinations.append((model_name, combo))
-            else:  # Random Search
-                for _ in range(num_trials):
-                    combination = {}
-                    for param_name, properties in hparam_def.items():
-                        if properties.get('scale') == 'log':
-                            log_min = np.log10(properties['min'])
-                            log_max = np.log10(properties['max'])
-                            value = 10**random.uniform(log_min, log_max)
-                        else:
-                            value = random.uniform(properties['min'], properties['max'])
-                        combination[param_name] = value
-                    all_combinations.append((model_name, combination))
-
-        return all_combinations
+        # 4. Start the run
+        self.append_log_message(f"INFO: Starting run. The '{config['adaptive_scheduler']}' policy will now generate trials.")
+        start_payload = {
+            "enable_checkpointing": self.checkpoint_checkbox.isChecked()
+        }
+        self.orchestrator.dispatch("START_RUN", start_payload)
     def _get_experiment_settings(self):
         dataset_name = self.dataset_combo.currentText()
         selected_models = [self.model_list.item(i).text() for i in range(self.model_list.count()) if self.model_list.item(i).checkState() == Qt.CheckState.Checked]
@@ -640,20 +651,13 @@ class MainWindow(QMainWindow):
 
         est_time = trial_data.get('est_time_per_epoch')
         if est_time is not None:
-             self.trials_table.setItem(row, 6, QTableWidgetItem(f"{est_time:.2f}s"))
+            self.trials_table.setItem(row, 6, QTableWidgetItem(f"{est_time:.2f}s"))
+        else:
+            self.trials_table.setItem(row, 6, QTableWidgetItem("N/A"))
 
         self.trials_table.setItem(row, 7, QTableWidgetItem(json.dumps(trial_data['hyperparameters'])))
 
         self._style_trial_ui(trial_id, status)
-
-        if self.experiment_runner:
-            all_trials = self.experiment_runner.orchestrator.datastore.get_all_trials().values()
-            total_trials = len(all_trials)
-            if total_trials > 0:
-                completed_statuses = {"COMPLETED", "PRUNED"}
-                completed_trials = sum(1 for t in all_trials if t.status.value in completed_statuses)
-                progress = int((completed_trials / total_trials) * 100)
-                self.progress_bar.setValue(progress)
 
     def _setup_icons(self):
         """Pre-loads icons for different insight types."""

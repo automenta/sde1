@@ -335,10 +335,12 @@ class ExperimentOrchestrator:
                 return
 
         # --- Engine Initialization ---
-        self._initialize_and_start_runtime()
+        self._initialize_and_start_runtime(payload)
 
-    def _initialize_and_start_runtime(self):
+    def _initialize_and_start_runtime(self, start_payload: Dict[str, Any] = None):
         """Creates and starts a new SdeRuntimeEngine instance."""
+        if start_payload is None:
+            start_payload = {}
         try:
             challenge_name = self.experiment.challenge['name']
             challenge_def = AVAILABLE_DATASETS[challenge_name]
@@ -365,12 +367,16 @@ class ExperimentOrchestrator:
             # Important: Pass a copy of the list of trials to the engine
             current_trials = list(self.experiment.trials.values())
 
+            # Read execution settings from the payload
+            enable_checkpointing = start_payload.get('enable_checkpointing', False)
+
             self.runtime_engine = SdeRuntimeEngine(
                 trials=current_trials,
                 dataset_name=challenge_name,
                 adaptive_scheduler=scheduler,
                 trial_updated_callback=self.on_trial_updated,
-                insights_callback=self.on_insights_generated
+                insights_callback=self.on_insights_generated,
+                enable_checkpointing=enable_checkpointing,
             )
 
             self.log_message.emit(f"INFO: SdeRuntimeEngine initialized with {scheduler_name} scheduler.")

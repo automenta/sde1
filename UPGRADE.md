@@ -239,19 +239,19 @@ This is not a single, massive change but a series of deliberate refactoring step
 
 **Let's assume you have a partial V1 implementation where `Scheduler`, `Worker`, and `DataStore` exist.**
 
-**Phase 1: Encapsulate the "Engine Room"**
+**Phase 1: Encapsulate the "Engine Room" [COMPLETED]**
 *   **Goal:** Decouple the "doing" from the "deciding."
 *   **Action:** Create a new class, `SdeRuntimeEngine`, that wraps your existing `Scheduler`, `WorkerPool`, `WorkQueue`, and `DataStore`.
 *   **Result:** You now have a single object (`runtime_engine`) that can be given high-level commands like `engine.start()`, `engine.pause()`, `engine.add_work_units(...)`. The complex internal logic is now hidden behind a simpler API.
 
-**Phase 2: Introduce the State and Orchestrator**
+**Phase 2: Introduce the State and Orchestrator [COMPLETED]**
 *   **Goal:** Establish the new "nervous system."
 *   **Action:**
     1.  Define the canonical `Experiment` state object (as in the V2 spec).
     2.  Create the `ExperimentOrchestrator` class. It will hold the `Experiment` state and an instance of your new `SdeRuntimeEngine`.
     3.  Move the "start experiment" logic out of your old script and into the `Orchestrator`. It should now handle a `START_RUN` action, which in turn calls `self.runtime_engine.start()`.
 
-**Phase 3: Convert Interactions to Actions (The Vocabulary Shift)**
+**Phase 3: Convert Interactions to Actions (The Vocabulary Shift) [COMPLETED]**
 *   **Goal:** Systematically replace old direct calls with the new, structured `Action` system.
 *   **Action:**
     *   Take the first V1 "Interactive Choice Point" you want to implement, e.g., `Manually Prune Trial`.
@@ -259,7 +259,7 @@ This is not a single, massive change but a series of deliberate refactoring step
     *   The `Orchestrator` receives this action. It validates it, mutates its own `Experiment` state (e.g., `state.trials[id].status = PRUNED`), and then issues a command to the runtime engine (`runtime_engine.cancel_work_for_trial(id)`).
 *   **Result:** You can implement every single desired interaction, one by one, using this clean pattern. Each new feature makes the system more robust, not less.
 
-**Phase 4: Unify the UI**
+**Phase 4: Unify the UI [COMPLETED]**
 *   **Goal:** Tear down the wall between the "setup" and "run" views.
 *   **Action:** Since your backend is now modeless and driven by a single state object, your UI can be refactored to reflect this.
     *   The configuration "form" becomes a "state panel" that is always visible.

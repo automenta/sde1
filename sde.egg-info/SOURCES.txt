@@ -14,6 +14,7 @@ sde/core/types.py
 sde/engine/datastore.py
 sde/engine/insight.py
 sde/engine/orchestrator.py
+sde/engine/runtime.py
 sde/engine/scheduler.py
 sde/engine/worker.py
 sde/exploration/__init__.py
@@ -30,5 +31,6 @@ sde/ui/main_window.py
 tests/test_adaptive_scheduler.py
 tests/test_hyperband.py
 tests/test_insight_engine.py
-tests/test_scheduler.py
+tests/test_orchestrator_v2.py
+tests/test_ui_v2_integration.py
 tests/test_worker.py
