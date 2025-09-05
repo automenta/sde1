@@ -1,14 +1,47 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict
+from typing import List, Dict, Any
 import math
+import random
+import numpy as np
 
-from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus
+from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus, AlgorithmConfig
+
+
+def _generate_random_hyperparameters(parameter_space: Dict[str, Any]) -> Dict[str, Any]:
+    """Helper function to generate one set of random hyperparameters."""
+    hparams = {}
+    for p_name, p_def in parameter_space.items():
+        if isinstance(p_def, dict) and 'min' in p_def and 'max' in p_def:
+            if p_def.get('scale') == 'log':
+                log_min = np.log10(p_def['min'])
+                log_max = np.log10(p_def['max'])
+                value = 10**random.uniform(log_min, log_max)
+            else:
+                value = random.uniform(p_def['min'], p_def['max'])
+
+            if p_def.get('type') == 'int':
+                value = int(value)
+        elif isinstance(p_def, (list, tuple)):
+            if all(isinstance(x, (int, float)) for x in p_def) and len(p_def) == 2:
+                value = random.uniform(p_def[0], p_def[1])
+            else:
+                value = random.choice(p_def)
+        else:
+            value = p_def
+        hparams[p_name] = value
+    return hparams
+
 
 class AdaptiveScheduler(ABC):
     """
     Abstract base class for an adaptive scheduler policy.
     It determines what work to do next based on intermediate results.
     """
+    @abstractmethod
+    def generate_initial_trials(self, algorithms: List[AlgorithmConfig], num_trials_per_algo: int) -> List[Trial]:
+        """Creates the initial set of trials for an experiment."""
+        ...
+
     @abstractmethod
     def get_initial_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
         """Returns the first batch of WorkUnits to start an experiment."""
@@ -36,6 +69,23 @@ class SuccessiveHalvingScheduler(AdaptiveScheduler):
         self.increasing = increasing
         self.min_epochs_per_rung = min_epochs_per_rung
         self.eta = reduction_factor
+
+    def generate_initial_trials(self, algorithms: List[AlgorithmConfig], num_trials_per_algo: int) -> List[Trial]:
+        """Generates a flat list of trials using random search."""
+        trials = []
+        trial_counter = 0
+        for algo_config in algorithms:
+            for _ in range(num_trials_per_algo):
+                hparams = _generate_random_hyperparameters(algo_config.parameter_space)
+                trial_id = f"trial_{algo_config.name.lower().replace(' ', '_')}_{trial_counter}"
+                trial = Trial(
+                    id=trial_id,
+                    algorithm_name=algo_config.name,
+                    hyperparameters=hparams,
+                )
+                trials.append(trial)
+                trial_counter += 1
+        return trials
 
     def get_initial_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
         """Schedules the first epoch for all pending trials."""
@@ -131,6 +181,30 @@ class HyperbandScheduler(AdaptiveScheduler):
 
         self.brackets: List[_Bracket] = []
         self.trial_to_bracket: Dict[str, _Bracket] = {}
+
+    def generate_initial_trials(self, algorithms: List[AlgorithmConfig], num_trials_per_algo: int) -> List[Trial]:
+        """
+        Generates a flat list of trials using random search. Hyperband will later
+        assign these trials to brackets. The num_trials_per_algo may not be
+        fully respected, as Hyperband has specific requirements for the total
+        number of trials.
+        """
+        trials = []
+        trial_counter = 0
+        for algo_config in algorithms:
+            # Note: A more advanced implementation could make num_trials specific to
+            # the total needed for all brackets, but random search is a good default.
+            for _ in range(num_trials_per_algo):
+                hparams = _generate_random_hyperparameters(algo_config.parameter_space)
+                trial_id = f"trial_{algo_config.name.lower().replace(' ', '_')}_{trial_counter}"
+                trial = Trial(
+                    id=trial_id,
+                    algorithm_name=algo_config.name,
+                    hyperparameters=hparams,
+                )
+                trials.append(trial)
+                trial_counter += 1
+        return trials
 
     def get_initial_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
         """

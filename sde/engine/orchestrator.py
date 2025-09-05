@@ -218,47 +218,39 @@ class ExperimentOrchestrator:
 
         self.experiment.status = ExperimentStatus.RUNNING
 
-        # --- V2 Trial Generation ---
+        # --- V2 Trial Generation (Delegated) ---
         if not self.experiment.trials:
-            self.log_message.emit("INFO: No pre-existing trials found. Generating initial trials.")
-            import random
-            import numpy as np
+            self.log_message.emit("INFO: No pre-existing trials found. Delegating to adaptive policy for generation.")
+            try:
+                # 1. Get info needed to instantiate the scheduler
+                scheduler_name = self.experiment.adaptive_policy
+                scheduler_class = SCHEDULER_MAP.get(scheduler_name)
+                if not scheduler_class:
+                    raise ValueError(f"Unknown scheduler '{scheduler_name}' specified in adaptive_policy.")
 
-            num_trials_per_algo = 10 # Default number of trials for random search
+                challenge_def = AVAILABLE_DATASETS[self.experiment.challenge['name']]
+                increasing = "accuracy" in challenge_def.performance_metric_name.lower()
 
-            for algo_config in self.experiment.algorithms.values():
-                for i in range(num_trials_per_algo):
-                    hparams = {}
-                    for p_name, p_def in algo_config.parameter_space.items():
-                        # This logic is inspired by the UI's random search generation
-                        # A more robust implementation would use a schema
-                        if isinstance(p_def, dict) and 'min' in p_def and 'max' in p_def:
-                            if p_def.get('scale') == 'log':
-                                log_min = np.log10(p_def['min'])
-                                log_max = np.log10(p_def['max'])
-                                value = 10**random.uniform(log_min, log_max)
-                            else:
-                                value = random.uniform(p_def['min'], p_def['max'])
+                # A bit of a hack: some schedulers need more params. This should be improved
+                # with a better config system. For now, we only pass what's needed for the base case.
+                scheduler = scheduler_class(metric=challenge_def.performance_metric_name, increasing=increasing)
 
-                            if p_def.get('type') == 'int':
-                                value = int(value)
-                        elif isinstance(p_def, (list, tuple)): # Simple range tuple or list of choices
-                             if all(isinstance(x, (int, float)) for x in p_def) and len(p_def) == 2:
-                                 value = random.uniform(p_def[0], p_def[1]) # Assume (min, max)
-                             else:
-                                 value = random.choice(p_def) # Assume list of choices
-                        else:
-                            value = p_def # A fixed value
-                        hparams[p_name] = value
+                # 2. Ask the scheduler to generate trials
+                num_trials_per_algo = 10 # This could be part of the budget definition later
+                algorithms = list(self.experiment.algorithms.values())
+                new_trials = scheduler.generate_initial_trials(algorithms, num_trials_per_algo)
 
-                    trial_id = f"trial_{algo_config.name.lower().replace(' ', '_')}_{len(self.experiment.trials)}"
-                    trial = Trial(
-                        id=trial_id,
-                        algorithm_name=algo_config.name,
-                        hyperparameters=hparams,
-                    )
-                    self.experiment.trials[trial_id] = trial
-            self.log_message.emit(f"INFO: Generated {len(self.experiment.trials)} initial trials via random search.")
+                # 3. Update the experiment state with the new trials
+                for trial in new_trials:
+                    self.experiment.trials[trial.id] = trial
+
+                self.log_message.emit(f"INFO: Generated {len(self.experiment.trials)} initial trials via '{scheduler_name}' policy.")
+
+            except Exception as e:
+                self.log_message.emit(f"ERROR: Failed to generate initial trials: {e}")
+                logger.error(f"Trial generation failed: {traceback.format_exc()}")
+                self.experiment.status = ExperimentStatus.DEFINING # Revert status
+                return
 
         # --- Engine Initialization ---
         self._initialize_and_start_runtime()
@@ -337,10 +329,13 @@ class ExperimentOrchestrator:
             self.log_message.emit("INFO: Experiment paused.")
 
     def handle_resume_run(self, payload: Dict[str, Any]):
-        self.log_message.emit("INFO: RESUME_RUN action received. Re-initializing runtime.")
-        self.experiment.status = ExperimentStatus.RUNNING
-        # Re-initialize the engine with the current state of trials
-        self._initialize_and_start_runtime()
+        self.log_message.emit("INFO: RESUME_RUN action received. Restarting runtime.")
+        if self.runtime_engine:
+            self.experiment.status = ExperimentStatus.RUNNING
+            self.runtime_engine.start() # This restarts the loop in the existing engine
+            self.log_message.emit("INFO: Experiment resumed.")
+        else:
+            self.log_message.emit("ERROR: Cannot resume, no runtime engine exists. Please start the run first.")
 
     def get_valid_actions(self) -> Dict[str, Any]:
         """
