@@ -388,36 +388,41 @@ class MainWindow(QMainWindow):
     def update_button_states(self, valid_actions: dict):
         """
         Updates the enabled/disabled state of UI controls based on the
-        valid actions provided by the orchestrator.
+        valid actions provided by the orchestrator. This is the core of the
+        V2 modeless UI.
         """
         global_actions = valid_actions.get('global', [])
         status = self.current_state.get('status')
-        has_challenge = self.current_state.get('challenge') is not None
 
-        # Buttons for starting a run
-        can_start = "START_RUN" in global_actions
-        self.start_button.setEnabled(can_start)
-        self.tune_button.setEnabled(can_start)
+        # --- Setup Controls ---
+        # These controls are used to define the experiment before it starts.
+        # They are enabled based on the actions available in the DEFINING state.
+        self.dataset_combo.setEnabled("SET_CHALLENGE" in global_actions)
+        self.model_list.setEnabled("ADD_ALGORITHM" in global_actions)
+        self.start_button.setEnabled("START_RUN" in global_actions)
+        self.tune_button.setEnabled("START_RUN" in global_actions)
 
-        # Buttons for interacting with a run
+        # The settings group doesn't map to a specific action, but is only
+        # relevant before a run starts.
+        self.settings_group.setEnabled(status == "DEFINING")
+
+        # --- Mid-Run Controls ---
+        # These controls are for interacting with a live experiment.
         self.pause_button.setEnabled("PAUSE_RUN" in global_actions)
         self.resume_button.setEnabled("RESUME_RUN" in global_actions)
 
-        # Button for adding models mid-run
+        # The "Add Models" button is specifically for mid-run additions.
+        # The ADD_ALGORITHM action is also valid in the DEFINING state, but in that
+        # context, model selection is handled by the main list and start buttons.
+        # Therefore, we also check the status here to correctly map the button's intent.
         can_add_mid_run = "ADD_ALGORITHM" in global_actions and status in ["RUNNING", "PAUSED"]
         self.add_models_button.setEnabled(can_add_mid_run)
-
-        # More granular control over the setup panel
-        self.dataset_combo.setEnabled(not has_challenge)
-        self.model_list.setEnabled("ADD_ALGORITHM" in global_actions)
-        self.settings_group.setEnabled(status == "DEFINING")
 
 
     def update_throttle(self, value: int):
         self.throttle_label.setText(f"{value}%")
-        # Throttle is not implemented in the new Scheduler yet
-        # if self.experiment_runner:
-        #     self.experiment_runner.orchestrator.set_throttle(value)
+        # Throttling is not currently connected in the V2 orchestrator.
+        # This could be a future feature implemented via a SET_THROTTLE action.
 
     def pause_experiment(self):
         self.orchestrator.dispatch("PAUSE_RUN", {})
@@ -646,15 +651,6 @@ class MainWindow(QMainWindow):
 
         self._style_trial_ui(trial_id, status)
 
-        if self.experiment_runner:
-            all_trials = self.experiment_runner.orchestrator.datastore.get_all_trials().values()
-            total_trials = len(all_trials)
-            if total_trials > 0:
-                completed_statuses = {"COMPLETED", "PRUNED"}
-                completed_trials = sum(1 for t in all_trials if t.status.value in completed_statuses)
-                progress = int((completed_trials / total_trials) * 100)
-                self.progress_bar.setValue(progress)
-
     def _setup_icons(self):
         """Pre-loads icons for different insight types."""
         style = self.style()
@@ -750,21 +746,11 @@ class MainWindow(QMainWindow):
         self.log_text_edit.append(message)
         self.log_text_edit.verticalScrollBar().setValue(self.log_text_edit.verticalScrollBar().maximum())
 
-    def on_experiment_finished(self):
-        self.append_log_message("INFO: Experiment finished.")
-        self.update_button_states(running=False, paused=False)
-        self.progress_bar.setValue(100)
-        if self.experiment_thread and self.experiment_thread.isRunning():
-            self.experiment_thread.quit()
-            self.experiment_thread.wait()
-        self.experiment_runner = None
-
     def closeEvent(self, event):
-        if self.experiment_runner:
-            self.experiment_runner.stop()
-        if self.experiment_thread and self.experiment_thread.isRunning():
-            self.experiment_thread.quit()
-            self.experiment_thread.wait()
+        # V2: The orchestrator handles the lifecycle of the runtime engine.
+        # We might need a "shutdown" or "cleanup" action in the future,
+        # but for now, letting the process exit is sufficient as the
+        # engine thread is a daemon.
         event.accept()
 
 

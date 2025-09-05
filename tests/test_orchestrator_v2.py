@@ -205,6 +205,9 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.runtime_engine = mock_engine_instance
         self.assertEqual(orchestrator.experiment.adaptive_policy, "SuccessiveHalving")
 
+        # Set a budget, which is required for Hyperband
+        orchestrator.dispatch("SET_BUDGET", {"max_epochs": 81})
+
         # Change the policy
         mock_emit.reset_mock()
         orchestrator.dispatch("SET_ADAPTIVE_POLICY", {"policy_name": "Hyperband"})
@@ -259,3 +262,43 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.dispatch("ADD_ALGORITHM", {})
         self.assertEqual(len(orchestrator.experiment.algorithms), 0)
         mock_emit.assert_any_call("WARN: Action 'ADD_ALGORITHM' is not valid for the current state or payload.")
+
+    @patch('sde.engine.orchestrator.SdeRuntimeEngine')
+    def test_start_run_with_hyperband_no_budget_logs_error(self, MockSdeRuntimeEngine, mock_emit):
+        """Test START_RUN with Hyperband logs an error if no budget is set."""
+        orchestrator = ExperimentOrchestrator()
+        mock_emit.reset_mock()
+        orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
+        algo = AlgorithmConfig(id='algo1', name='TestAlgo', parameter_space={'lr': (0.01, 0.1)})
+        orchestrator.experiment.algorithms['algo1'] = algo
+        orchestrator.experiment.adaptive_policy = "Hyperband"
+
+        # Dispatch START_RUN without setting a budget, which is required for Hyperband
+        orchestrator.dispatch("START_RUN", {})
+
+        # The run should fail to start, status should be reverted, and engine should not be created.
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.DEFINING)
+        self.assertIsNone(orchestrator.runtime_engine)
+        MockSdeRuntimeEngine.assert_not_called()
+        # A specific error message should be logged. This will fail before the fix.
+        mock_emit.assert_any_call("ERROR: Failed to start runtime engine: Hyperband scheduler requires 'max_epochs' in patience_budget, but budget is not set.")
+
+    @patch('sde.engine.orchestrator.SdeRuntimeEngine')
+    def test_set_policy_to_hyperband_mid_run_no_budget_logs_error(self, MockSdeRuntimeEngine, mock_emit):
+        """Test SET_ADAPTIVE_POLICY to Hyperband mid-run logs an error if no budget is set."""
+        orchestrator = ExperimentOrchestrator()
+        orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
+        orchestrator.experiment.algorithms['algo1'] = AlgorithmConfig(id='a1', name='A1', parameter_space={})
+        orchestrator.dispatch("START_RUN", {}) # Start with default scheduler
+        mock_engine_instance = MockSdeRuntimeEngine.return_value
+        orchestrator.runtime_engine = mock_engine_instance
+        self.assertEqual(orchestrator.experiment.adaptive_policy, "SuccessiveHalving")
+
+        # Change the policy to hyperband without a budget
+        mock_emit.reset_mock()
+        orchestrator.dispatch("SET_ADAPTIVE_POLICY", {"policy_name": "Hyperband"})
+
+        # The policy should NOT change, and an error should be logged.
+        self.assertEqual(orchestrator.experiment.adaptive_policy, "SuccessiveHalving")
+        mock_engine_instance.update_adaptive_policy.assert_not_called()
+        mock_emit.assert_any_call("ERROR: Failed to hot-swap adaptive policy: Hyperband scheduler requires 'max_epochs' in patience_budget, but budget is not set.")

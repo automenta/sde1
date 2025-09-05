@@ -214,36 +214,43 @@ class ExperimentOrchestrator:
             self.log_message.emit(f"ERROR: Unknown policy name '{policy_name}'.")
             return
 
-        self.experiment.adaptive_policy = policy_name
-        self.log_message.emit(f"INFO: Adaptive policy set to '{policy_name}'.")
-
-        # If the run is live, hot-swap the scheduler in the runtime engine
+        # --- V2 Bug Fix: Validate budget *before* changing state ---
+        # If the run is live, we need to ensure the new policy can be instantiated
+        # before we commit to the change.
         if self.runtime_engine and self.experiment.status in [ExperimentStatus.RUNNING, ExperimentStatus.PAUSED]:
             self.log_message.emit("INFO: Hot-swapping adaptive policy in live runtime engine.")
             try:
+                # This block now serves as validation. We build the scheduler
+                # to make sure it's possible, then we commit the state change and update the engine.
                 challenge_def = AVAILABLE_DATASETS[self.experiment.challenge['name']]
                 increasing = "accuracy" in challenge_def.performance_metric_name.lower()
                 new_scheduler_class = SCHEDULER_MAP[policy_name]
 
-                # --- Instantiate the new scheduler with correct parameters ---
                 scheduler_args = {
                     "metric": challenge_def.performance_metric_name,
                     "increasing": increasing,
                 }
                 if policy_name == "Hyperband":
-                    # Hyperband requires max_resource_per_trial. Let's use a default or get from budget.
-                    # This part of the design could be improved with a more structured budget.
-                    max_resource = self.experiment.patience_budget.get('max_epochs', 81) if self.experiment.patience_budget else 81
+                    if not self.experiment.patience_budget or 'max_epochs' not in self.experiment.patience_budget:
+                        raise ValueError("Hyperband scheduler requires 'max_epochs' in patience_budget, but budget is not set.")
+                    max_resource = self.experiment.patience_budget['max_epochs']
                     scheduler_args['max_resource_per_trial'] = max_resource
 
                 new_scheduler = new_scheduler_class(**scheduler_args)
-                # --- End of instantiation ---
 
+                # --- Validation successful, now commit the changes ---
+                self.experiment.adaptive_policy = policy_name
+                self.log_message.emit(f"INFO: Adaptive policy set to '{policy_name}'.")
                 self.runtime_engine.update_adaptive_policy(new_scheduler)
                 self.log_message.emit("INFO: Adaptive policy updated successfully in runtime.")
+
             except Exception as e:
                 self.log_message.emit(f"ERROR: Failed to hot-swap adaptive policy: {e}")
                 logger.error(f"Failed to hot-swap adaptive policy: {traceback.format_exc()}")
+        else:
+            # If not running, just update the policy name. Validation will happen in START_RUN.
+            self.experiment.adaptive_policy = policy_name
+            self.log_message.emit(f"INFO: Adaptive policy set to '{policy_name}'.")
 
     def handle_set_budget(self, payload: Dict[str, Any]):
         self.experiment.patience_budget = payload
@@ -315,7 +322,17 @@ class ExperimentOrchestrator:
 
                 # A bit of a hack: some schedulers need more params. This should be improved
                 # with a better config system. For now, we only pass what's needed for the base case.
-                scheduler = scheduler_class(metric=challenge_def.performance_metric_name, increasing=increasing)
+                scheduler_args = {
+                    "metric": challenge_def.performance_metric_name,
+                    "increasing": increasing,
+                }
+                if scheduler_name == "Hyperband":
+                    if not self.experiment.patience_budget or 'max_epochs' not in self.experiment.patience_budget:
+                        raise ValueError("Hyperband scheduler requires 'max_epochs' in patience_budget, but budget is not set.")
+                    max_resource = self.experiment.patience_budget['max_epochs']
+                    scheduler_args['max_resource_per_trial'] = max_resource
+
+                scheduler = scheduler_class(**scheduler_args)
 
                 # 2. Ask the scheduler to generate trials
                 num_trials_per_algo = 10 # This could be part of the budget definition later
@@ -329,7 +346,8 @@ class ExperimentOrchestrator:
                 self.log_message.emit(f"INFO: Generated {len(self.experiment.trials)} initial trials via '{scheduler_name}' policy.")
 
             except Exception as e:
-                self.log_message.emit(f"ERROR: Failed to generate initial trials: {e}")
+                # Use the same error prefix as the runtime init for consistency
+                self.log_message.emit(f"ERROR: Failed to start runtime engine: {e}")
                 logger.error(f"Trial generation failed: {traceback.format_exc()}")
                 self.experiment.status = ExperimentStatus.DEFINING # Revert status
                 return
@@ -350,13 +368,15 @@ class ExperimentOrchestrator:
 
             increasing = "accuracy" in challenge_def.performance_metric_name.lower()
 
-            # --- Instantiate the scheduler with correct parameters ---
+            # --- Instantiate the scheduler with correct parameters (with V2 bug fix) ---
             scheduler_args = {
                 "metric": challenge_def.performance_metric_name,
                 "increasing": increasing,
             }
             if scheduler_name == "Hyperband":
-                max_resource = self.experiment.patience_budget.get('max_epochs', 81) if self.experiment.patience_budget else 81
+                if not self.experiment.patience_budget or 'max_epochs' not in self.experiment.patience_budget:
+                    raise ValueError("Hyperband scheduler requires 'max_epochs' in patience_budget, but budget is not set.")
+                max_resource = self.experiment.patience_budget['max_epochs']
                 scheduler_args['max_resource_per_trial'] = max_resource
 
             scheduler = scheduler_class(**scheduler_args)
