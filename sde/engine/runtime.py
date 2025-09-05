@@ -111,6 +111,22 @@ class SdeRuntimeEngine:
             self.work_queue.extend(new_work_units)
             logger.info(f"Added {len(new_work_units)} new work units to the live queue.")
 
+    def update_adaptive_policy(self, new_scheduler: AdaptiveScheduler):
+        """
+        Safely swaps the adaptive scheduler mid-run.
+        This is a thread-safe operation.
+        """
+        if not self._is_running:
+            logger.warning("Cannot update adaptive policy, engine is not running.")
+            return
+
+        # The key is that the adaptive_scheduler is only accessed inside the
+        # _execution_loop after a batch of work is completed. We don't need
+        # a lock here because the replacement is atomic. The loop will simply
+        # pick up the new scheduler instance on its next iteration.
+        self.adaptive_scheduler = new_scheduler
+        logger.info(f"Adaptive policy has been hot-swapped to {new_scheduler.__class__.__name__}.")
+
 
     def _execution_loop(self):
         """

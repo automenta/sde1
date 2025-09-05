@@ -177,19 +177,73 @@ class ExperimentOrchestrator:
     def handle_update_param_space(self, payload: Dict[str, Any]):
         algo_id = payload['algorithm_id']
         new_space = payload['new_space']
-        if algo_id in self.experiment.algorithms:
-            self.experiment.algorithms[algo_id].parameter_space = new_space
-            self.log_message.emit(f"INFO: Updated parameter space for algorithm {algo_id}.")
-        else:
+        if algo_id not in self.experiment.algorithms:
             self.log_message.emit(f"WARN: Could not find algorithm with id {algo_id} to update.")
+            return
+
+        algo = self.experiment.algorithms[algo_id]
+        algo.parameter_space = new_space
+        self.log_message.emit(f"INFO: Updated parameter space for algorithm {algo.name} ({algo_id}).")
+
+        # If the experiment is running, generate new trials based on the updated space
+        if self.runtime_engine and self.experiment.status in [ExperimentStatus.RUNNING, ExperimentStatus.PAUSED]:
+            self.log_message.emit(f"INFO: Generating new trials for '{algo.name}' due to parameter space update.")
+            try:
+                # Use the existing scheduler from the runtime engine
+                scheduler = self.runtime_engine.adaptive_scheduler
+                if not scheduler:
+                     raise ValueError("Runtime engine has no adaptive scheduler available.")
+
+                # Ask the scheduler to generate new trials for just this algorithm
+                num_new_trials = 10 # This could be a configurable setting
+                new_trials = scheduler.generate_initial_trials([algo], num_new_trials)
+
+                for trial in new_trials:
+                    self.experiment.trials[trial.id] = trial
+
+                self.runtime_engine.add_trials_live(new_trials)
+                self.log_message.emit(f"INFO: Added {len(new_trials)} new trials to the running experiment for '{algo.name}'.")
+
+            except Exception as e:
+                self.log_message.emit(f"ERROR: Failed to generate new trials after param space update: {e}")
+                logger.error(f"Failed to generate new trials after param space update: {traceback.format_exc()}")
 
     def handle_set_adaptive_policy(self, payload: Dict[str, Any]):
         policy_name = payload['policy_name']
-        if policy_name in SCHEDULER_MAP:
-            self.experiment.adaptive_policy = policy_name
-            self.log_message.emit(f"INFO: Adaptive policy set to '{policy_name}'.")
-        else:
+        if policy_name not in SCHEDULER_MAP:
             self.log_message.emit(f"ERROR: Unknown policy name '{policy_name}'.")
+            return
+
+        self.experiment.adaptive_policy = policy_name
+        self.log_message.emit(f"INFO: Adaptive policy set to '{policy_name}'.")
+
+        # If the run is live, hot-swap the scheduler in the runtime engine
+        if self.runtime_engine and self.experiment.status in [ExperimentStatus.RUNNING, ExperimentStatus.PAUSED]:
+            self.log_message.emit("INFO: Hot-swapping adaptive policy in live runtime engine.")
+            try:
+                challenge_def = AVAILABLE_DATASETS[self.experiment.challenge['name']]
+                increasing = "accuracy" in challenge_def.performance_metric_name.lower()
+                new_scheduler_class = SCHEDULER_MAP[policy_name]
+
+                # --- Instantiate the new scheduler with correct parameters ---
+                scheduler_args = {
+                    "metric": challenge_def.performance_metric_name,
+                    "increasing": increasing,
+                }
+                if policy_name == "Hyperband":
+                    # Hyperband requires max_resource_per_trial. Let's use a default or get from budget.
+                    # This part of the design could be improved with a more structured budget.
+                    max_resource = self.experiment.patience_budget.get('max_epochs', 81) if self.experiment.patience_budget else 81
+                    scheduler_args['max_resource_per_trial'] = max_resource
+
+                new_scheduler = new_scheduler_class(**scheduler_args)
+                # --- End of instantiation ---
+
+                self.runtime_engine.update_adaptive_policy(new_scheduler)
+                self.log_message.emit("INFO: Adaptive policy updated successfully in runtime.")
+            except Exception as e:
+                self.log_message.emit(f"ERROR: Failed to hot-swap adaptive policy: {e}")
+                logger.error(f"Failed to hot-swap adaptive policy: {traceback.format_exc()}")
 
     def handle_set_budget(self, payload: Dict[str, Any]):
         self.experiment.patience_budget = payload
@@ -295,7 +349,18 @@ class ExperimentOrchestrator:
                 raise ValueError(f"Unknown scheduler '{scheduler_name}' specified in adaptive_policy.")
 
             increasing = "accuracy" in challenge_def.performance_metric_name.lower()
-            scheduler = scheduler_class(metric=challenge_def.performance_metric_name, increasing=increasing)
+
+            # --- Instantiate the scheduler with correct parameters ---
+            scheduler_args = {
+                "metric": challenge_def.performance_metric_name,
+                "increasing": increasing,
+            }
+            if scheduler_name == "Hyperband":
+                max_resource = self.experiment.patience_budget.get('max_epochs', 81) if self.experiment.patience_budget else 81
+                scheduler_args['max_resource_per_trial'] = max_resource
+
+            scheduler = scheduler_class(**scheduler_args)
+            # --- End of instantiation ---
 
             # Important: Pass a copy of the list of trials to the engine
             current_trials = list(self.experiment.trials.values())
@@ -395,11 +460,16 @@ class ExperimentOrchestrator:
 
         elif status == ExperimentStatus.RUNNING:
             actions["global"].append("PAUSE_RUN")
-            actions["global"].append("ADD_ALGORITHM") # Can always add new contenders
+            actions["global"].append("ADD_ALGORITHM")
+            actions["global"].append("SET_ADAPTIVE_POLICY") # Allow changing policy mid-run
+            actions["global"].append("SET_BUDGET") # Allow changing budget mid-run
+
 
         elif status == ExperimentStatus.PAUSED:
             actions["global"].append("RESUME_RUN")
             actions["global"].append("ADD_ALGORITHM")
+            actions["global"].append("SET_ADAPTIVE_POLICY")
+            actions["global"].append("SET_BUDGET")
 
         # Per-algorithm actions
         for algo_id, algo in self.experiment.algorithms.items():
@@ -408,7 +478,8 @@ class ExperimentOrchestrator:
                 algo_actions.append("UPDATE_PARAM_SPACE")
                 algo_actions.append("REMOVE_ALGORITHM")
             elif status == ExperimentStatus.RUNNING or status == ExperimentStatus.PAUSED:
-                 algo_actions.append("REMOVE_ALGORITHM")
+                algo_actions.append("UPDATE_PARAM_SPACE") # Allow updating space mid-run
+                algo_actions.append("REMOVE_ALGORITHM")
 
             if algo_actions:
                 actions["algorithms"][algo_id] = algo_actions

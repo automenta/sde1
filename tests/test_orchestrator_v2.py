@@ -194,6 +194,63 @@ class TestExperimentOrchestrator(unittest.TestCase):
         # Assert that start() was only ever called once
         mock_engine_instance.start.assert_called_once()
 
+    @patch('sde.engine.orchestrator.SdeRuntimeEngine')
+    def test_set_adaptive_policy_mid_run(self, MockSdeRuntimeEngine, mock_emit):
+        """Test that changing the policy mid-run calls the runtime engine."""
+        orchestrator = ExperimentOrchestrator()
+        orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
+        orchestrator.experiment.algorithms['algo1'] = AlgorithmConfig(id='a1', name='A1', parameter_space={})
+        orchestrator.dispatch("START_RUN", {})
+        mock_engine_instance = MockSdeRuntimeEngine.return_value
+        orchestrator.runtime_engine = mock_engine_instance
+        self.assertEqual(orchestrator.experiment.adaptive_policy, "SuccessiveHalving")
+
+        # Change the policy
+        mock_emit.reset_mock()
+        orchestrator.dispatch("SET_ADAPTIVE_POLICY", {"policy_name": "Hyperband"})
+
+        # Assert state is updated
+        self.assertEqual(orchestrator.experiment.adaptive_policy, "Hyperband")
+        mock_emit.assert_any_call("INFO: Adaptive policy set to 'Hyperband'.")
+
+        # Assert the runtime engine was updated
+        mock_engine_instance.update_adaptive_policy.assert_called_once()
+        new_scheduler = mock_engine_instance.update_adaptive_policy.call_args[0][0]
+        from sde.exploration.schedulers import HyperbandScheduler
+        self.assertIsInstance(new_scheduler, HyperbandScheduler)
+
+    @patch('sde.engine.orchestrator.SdeRuntimeEngine')
+    def test_update_param_space_mid_run(self, MockSdeRuntimeEngine, mock_emit):
+        """Test updating parameter space for a running experiment generates new trials."""
+        orchestrator = ExperimentOrchestrator()
+        orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
+        algo1 = AlgorithmConfig(id='algo1', name='TestAlgo1', parameter_space={'lr': (0.01, 0.1)})
+        orchestrator.experiment.algorithms['algo1'] = algo1
+        orchestrator.dispatch("START_RUN", {})
+        mock_engine_instance = MockSdeRuntimeEngine.return_value
+        orchestrator.runtime_engine = mock_engine_instance
+        # Mock the scheduler on the mock engine
+        mock_scheduler = MagicMock()
+        mock_engine_instance.adaptive_scheduler = mock_scheduler
+
+        trials_before = len(orchestrator.experiment.trials)
+        mock_emit.reset_mock()
+
+        # Update the parameter space
+        new_space = {'lr': (0.1, 0.5), 'epochs': [10, 20]}
+        orchestrator.dispatch("UPDATE_PARAM_SPACE", {"algorithm_id": "algo1", "new_space": new_space})
+
+        # Assert the space was updated in the state
+        self.assertEqual(orchestrator.experiment.algorithms['algo1'].parameter_space, new_space)
+
+        # Assert that the scheduler was asked to generate new trials
+        mock_scheduler.generate_initial_trials.assert_called_once()
+        # The first argument should be a list containing the updated algorithm config
+        self.assertEqual(mock_scheduler.generate_initial_trials.call_args[0][0][0].parameter_space, new_space)
+
+        # Assert that the runtime engine was called to add the new trials
+        mock_engine_instance.add_trials_live.assert_called_once()
+
 
     def test_dispatch_invalid_action(self, mock_emit):
         """Test that invalid actions are logged and ignored."""
