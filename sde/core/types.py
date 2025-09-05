@@ -28,6 +28,7 @@ class Trial:
     algorithm_name: str
     hyperparameters: Dict[str, Any]
     status: TrialStatus = TrialStatus.PENDING
+    priority: int = 0 # Higher value means higher priority
 
     # State for pausing/resuming
     current_epoch: int = 0

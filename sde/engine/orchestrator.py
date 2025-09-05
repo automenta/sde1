@@ -58,9 +58,10 @@ class ExperimentOrchestrator:
                 self.log_message.emit(f"ERROR: No handler for action '{action_type}'")
                 return
 
-            # Use the validator to check if the action is allowed
-            if action_type not in self.get_valid_actions():
-                self.log_message.emit(f"WARN: Action '{action_type}' is not valid in state '{self.experiment.status.value}'")
+            # Use the new structured validator
+            valid_actions = self.get_valid_actions()
+            if not self._is_action_valid(action_type, payload, valid_actions):
+                self.log_message.emit(f"WARN: Action '{action_type}' is not valid for the current state or payload.")
                 return
 
             try:
@@ -69,6 +70,32 @@ class ExperimentOrchestrator:
             except Exception as e:
                 self.log_message.emit(f"ERROR: Failed to execute action {action_type}: {e}")
                 logger.error(traceback.format_exc())
+
+    def _is_action_valid(self, action_type: str, payload: Dict[str, Any], valid_actions: Dict) -> bool:
+        """Checks if a given action is present in the structured valid_actions dict."""
+        if action_type in valid_actions.get('global', []):
+            return True
+
+        if 'algorithm_id' in payload:
+            algo_id = payload['algorithm_id']
+            if action_type in valid_actions.get('algorithms', {}).get(algo_id, []):
+                return True
+
+        if 'trial_id' in payload:
+            trial_id = payload['trial_id']
+            if action_type in valid_actions.get('trials', {}).get(trial_id, []):
+                return True
+
+        # Fallback for actions that don't have a specific context object
+        # This is less specific but maintains backwards compatibility for simple checks.
+        all_actions = set(valid_actions.get('global', []))
+        for aname, alist in valid_actions.get('algorithms', {}).items():
+            all_actions.update(alist)
+        for tname, tlist in valid_actions.get('trials', {}).items():
+            all_actions.update(tlist)
+
+        return action_type in all_actions
+
 
     def emit_state_change(self):
         """Serializes the experiment state and emits it."""
@@ -81,6 +108,7 @@ class ExperimentOrchestrator:
             "trials": {k: v.to_dict() for k, v in self.experiment.trials.items()},
             "insights": self.experiment.insights,
             "adaptive_policy": self.experiment.adaptive_policy,
+            "valid_actions": self.get_valid_actions(), # Also emit the valid actions
         }
         self.state_changed.emit(state_dict)
 
@@ -101,6 +129,86 @@ class ExperimentOrchestrator:
         )
         self.experiment.algorithms[algo_id] = new_algo
         self.log_message.emit(f"INFO: Added algorithm: {new_algo.name}")
+
+    def handle_remove_algorithm(self, payload: Dict[str, Any]):
+        algo_id = payload['algorithm_id']
+        if algo_id in self.experiment.algorithms:
+            algo_name = self.experiment.algorithms[algo_id].name
+            del self.experiment.algorithms[algo_id]
+
+            # Prune associated trials
+            for trial in self.experiment.trials.values():
+                if trial.algorithm_name == algo_name:
+                    trial.status = TrialStatus.PRUNED
+                    if self.runtime_engine:
+                        self.runtime_engine.cancel_work_for_trial(trial.id)
+
+            self.log_message.emit(f"INFO: Removed algorithm '{algo_name}' and pruned its trials.")
+        else:
+            self.log_message.emit(f"WARN: Could not find algorithm with id {algo_id} to remove.")
+
+    def handle_update_param_space(self, payload: Dict[str, Any]):
+        algo_id = payload['algorithm_id']
+        new_space = payload['new_space']
+        if algo_id in self.experiment.algorithms:
+            self.experiment.algorithms[algo_id].parameter_space = new_space
+            self.log_message.emit(f"INFO: Updated parameter space for algorithm {algo_id}.")
+        else:
+            self.log_message.emit(f"WARN: Could not find algorithm with id {algo_id} to update.")
+
+    def handle_set_adaptive_policy(self, payload: Dict[str, Any]):
+        policy_name = payload['policy_name']
+        if policy_name in SCHEDULER_MAP:
+            self.experiment.adaptive_policy = policy_name
+            self.log_message.emit(f"INFO: Adaptive policy set to '{policy_name}'.")
+        else:
+            self.log_message.emit(f"ERROR: Unknown policy name '{policy_name}'.")
+
+    def handle_set_budget(self, payload: Dict[str, Any]):
+        self.experiment.patience_budget = payload
+        self.log_message.emit(f"INFO: Patience budget set to {payload}.")
+
+    def handle_manual_prune_trial(self, payload: Dict[str, Any]):
+        trial_id = payload['trial_id']
+        if trial_id in self.experiment.trials:
+            self.experiment.trials[trial_id].status = TrialStatus.PRUNED
+            if self.runtime_engine:
+                self.runtime_engine.cancel_work_for_trial(trial_id)
+            self.log_message.emit(f"INFO: Manually pruned trial {trial_id}.")
+        else:
+            self.log_message.emit(f"WARN: Could not find trial with id {trial_id} to prune.")
+
+    def handle_manual_prioritize_trial(self, payload: Dict[str, Any]):
+        trial_id = payload['trial_id']
+        if trial_id in self.experiment.trials:
+            # Increase priority by a fixed amount
+            self.experiment.trials[trial_id].priority += 10
+            self.log_message.emit(f"INFO: Increased priority for trial {trial_id}.")
+        else:
+            self.log_message.emit(f"WARN: Could not find trial with id {trial_id} to prioritize.")
+
+    def handle_spawn_similar_trial(self, payload: Dict[str, Any]):
+        source_trial_id = payload['source_trial_id']
+        if source_trial_id not in self.experiment.trials:
+            self.log_message.emit(f"WARN: Could not find source trial {source_trial_id} to spawn from.")
+            return
+
+        source_trial = self.experiment.trials[source_trial_id]
+        new_hparams = payload.get('new_hparams', source_trial.hyperparameters.copy())
+
+        new_trial_id = f"trial_{source_trial.algorithm_name.lower()}_{len(self.experiment.trials)}"
+        new_trial = Trial(
+            id=new_trial_id,
+            algorithm_name=source_trial.algorithm_name,
+            hyperparameters=new_hparams,
+            status=TrialStatus.PENDING
+        )
+        self.experiment.trials[new_trial_id] = new_trial
+
+        if self.runtime_engine:
+            self.runtime_engine.add_trial_live(new_trial)
+
+        self.log_message.emit(f"INFO: Spawned new trial {new_trial_id} from {source_trial_id}.")
 
     def handle_start_run(self, payload: Dict[str, Any]):
         self.log_message.emit("INFO: START_RUN action received. Validating and initializing runtime.")
@@ -219,27 +327,67 @@ class ExperimentOrchestrator:
             self.experiment.status = ExperimentStatus.RUNNING
             self.log_message.emit("INFO: Experiment resumed.")
 
-    def get_valid_actions(self) -> List[str]:
+    def get_valid_actions(self) -> Dict[str, Any]:
         """
         This is the Action Validator. It inspects the current state and returns
-        a list of action types that are currently valid.
+        a structured dictionary of valid actions, separated by context.
+        e.g., {
+            "global": ["ADD_ALGORITHM"],
+            "algorithms": { "algo_1": ["UPDATE_PARAM_SPACE", "REMOVE_ALGORITHM"] },
+            "trials": { "trial_abc": ["MANUAL_PRUNE_TRIAL"] }
+        }
         """
         status = self.experiment.status
-        actions = []
+        actions: Dict[str, Any] = {
+            "global": [],
+            "algorithms": {},
+            "trials": {},
+        }
+        has_challenge = self.experiment.challenge is not None
 
+        # Global actions
         if status == ExperimentStatus.DEFINING:
-            if self.experiment.challenge is None:
-                actions.append("SET_CHALLENGE")
+            if not has_challenge:
+                actions["global"].append("SET_CHALLENGE")
             else:
-                actions.append("ADD_ALGORITHM")
+                actions["global"].append("ADD_ALGORITHM")
+                actions["global"].append("SET_ADAPTIVE_POLICY")
+                actions["global"].append("SET_BUDGET")
                 if self.experiment.algorithms:
-                    actions.append("START_RUN")
+                    actions["global"].append("START_RUN")
 
         elif status == ExperimentStatus.RUNNING:
-            actions.append("PAUSE_RUN")
-            actions.append("ADD_ALGORITHM") # Example of a mid-run interaction
+            actions["global"].append("PAUSE_RUN")
+            actions["global"].append("ADD_ALGORITHM") # Can always add new contenders
 
         elif status == ExperimentStatus.PAUSED:
-            actions.append("RESUME_RUN")
+            actions["global"].append("RESUME_RUN")
+            actions["global"].append("ADD_ALGORITHM")
+
+        # Per-algorithm actions
+        for algo_id, algo in self.experiment.algorithms.items():
+            algo_actions = []
+            if status == ExperimentStatus.DEFINING:
+                algo_actions.append("UPDATE_PARAM_SPACE")
+                algo_actions.append("REMOVE_ALGORITHM")
+            elif status == ExperimentStatus.RUNNING or status == ExperimentStatus.PAUSED:
+                 algo_actions.append("REMOVE_ALGORITHM")
+
+            if algo_actions:
+                actions["algorithms"][algo_id] = algo_actions
+
+        # Per-trial actions
+        for trial_id, trial in self.experiment.trials.items():
+            trial_actions = []
+            # Can spawn from any trial that has finished at least one step
+            if trial.results:
+                 trial_actions.append("SPAWN_SIMILAR_TRIAL")
+
+            if trial.status == TrialStatus.ACTIVE:
+                trial_actions.append("MANUAL_PRUNE_TRIAL")
+                trial_actions.append("MANUAL_PRIORITIZE_TRIAL")
+
+            if trial_actions:
+                actions["trials"][trial_id] = trial_actions
 
         return actions

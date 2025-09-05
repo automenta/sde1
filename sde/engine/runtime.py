@@ -65,6 +65,17 @@ class SdeRuntimeEngine:
                 self._thread.join()
             self._thread = None
 
+    def cancel_work_for_trial(self, trial_id: str):
+        """Passes a cancellation request down to the scheduler."""
+        logger.info(f"Runtime engine received request to cancel work for trial {trial_id}.")
+        self.scheduler.cancel_work_for_trial(trial_id)
+
+    def add_trial_live(self, trial: Trial):
+        """Injects a new trial into the live datastore."""
+        # This assumes the datastore has a thread-safe method to add a trial.
+        self.datastore.add_trial(trial)
+        logger.info(f"Added new trial {trial.id} to the live datastore.")
+
     def _execution_loop(self):
         """
         The main loop that drives the experiment. It gets work from the adaptive
@@ -77,6 +88,13 @@ class SdeRuntimeEngine:
         work_queue = self.adaptive_scheduler.get_initial_work_units(self.datastore.get_all_trials())
 
         while self._is_running and work_queue:
+            # Sort the work queue based on trial priority before submitting it.
+            # Higher priority values are processed first.
+            work_queue.sort(
+                key=lambda wu: self.datastore.get_trial(wu.trial_id).priority,
+                reverse=True
+            )
+
             results_iterator = self.scheduler.run(work_queue)
             work_queue = [] # Reset for the next batch
 

@@ -19,6 +19,14 @@ class DataStore:
         with self._lock:
             return self._trials.get(trial_id)
 
+    def add_trial(self, trial: Trial):
+        """Adds a new trial to the datastore in a thread-safe manner."""
+        with self._lock:
+            if trial.id in self._trials:
+                # Or raise an error, but logging is safer for concurrency
+                return
+            self._trials[trial.id] = trial
+
     def get_all_trials(self) -> Dict[str, Trial]:
         """Returns a copy of the dictionary of all trials."""
         with self._lock:
