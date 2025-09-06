@@ -8,7 +8,7 @@ from sde.engine.runtime import SdeRuntimeEngine
 from sde.challenges import AVAILABLE_DATASETS
 from sde.engine.action_validator import ActionValidator
 from sde.engine.factory import SchedulerFactory
-from sde.utils import Signal
+from sde.events import Signal
 from sde import config
 
 

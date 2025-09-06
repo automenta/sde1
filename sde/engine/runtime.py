@@ -197,38 +197,50 @@ class SdeRuntimeEngine:
                 self._pause_event.wait()
                 if not self._is_running:
                     break
-
-                updated_trial = self.datastore.record_work_unit_result(work_unit, result)
-
-                if not updated_trial:
-                    logger.warning(f"Could not find trial {work_unit.trial_id} to record result.")
-                    continue
-
-                if updated_trial.id in self._cancelled_trials:
-                    logger.info(f"Ignoring result for cancelled trial {updated_trial.id}")
-                    continue
-
-                if "error" in result:
-                    logger.error(
-                        f"Work unit {work_unit.type} for trial {updated_trial.id} failed: {result['error']}"
-                    )
-
-                if self.trial_updated_callback:
-                    self.trial_updated_callback(updated_trial.to_dict())
-
-                new_insights = self.insight_engine.analyze(updated_trial)
-                if new_insights and self.insights_callback:
-                    self.insights_callback([insight.__dict__ for insight in new_insights])
-
-                next_work_units = self.adaptive_scheduler.get_next_work_units(
-                    updated_trial, self.datastore.get_all_trials()
-                )
-                for next_wu in next_work_units:
-                    priority = -updated_trial.priority
-                    self.work_queue.put((priority, next_wu))
+                self._process_completed_work_unit(work_unit, result)
 
         self._is_running = False
         logger.info("Runtime engine execution loop finished.")
+
+    def _process_completed_work_unit(self, work_unit: WorkUnit, result: dict):
+        """
+        Handles the result of a single completed work unit.
+
+        This involves updating the datastore, calling callbacks, analyzing for
+        insights, and scheduling the next units of work.
+        """
+        updated_trial = self.datastore.record_work_unit_result(work_unit, result)
+
+        if not updated_trial:
+            logger.warning(
+                f"Could not find trial {work_unit.trial_id} to record result."
+            )
+            return
+
+        if updated_trial.id in self._cancelled_trials:
+            logger.info(f"Ignoring result for cancelled trial {updated_trial.id}")
+            return
+
+        if "error" in result:
+            logger.error(
+                f"Work unit {work_unit.type} for trial {updated_trial.id} failed: {result['error']}"
+            )
+
+        if self.trial_updated_callback:
+            self.trial_updated_callback(updated_trial.to_dict())
+
+        new_insights = self.insight_engine.analyze(updated_trial)
+        if new_insights and self.insights_callback:
+            self.insights_callback(
+                [insight.__dict__ for insight in new_insights]
+            )
+
+        next_work_units = self.adaptive_scheduler.get_next_work_units(
+            updated_trial, self.datastore.get_all_trials()
+        )
+        for next_wu in next_work_units:
+            priority = -updated_trial.priority
+            self.work_queue.put((priority, next_wu))
 
     def submit_work(
         self, work_units: List[WorkUnit]

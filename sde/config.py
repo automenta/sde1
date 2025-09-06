@@ -1,3 +1,5 @@
+import os
+
 """
 Centralized configuration for the Scientific Discovery Engine (SDE).
 
@@ -15,8 +17,8 @@ NUM_TRIALS_PER_ALGO = 10
 # --- Runtime Engine Settings ---
 
 # The default number of parallel worker processes to run.
-# This should typically be set to the number of available CPU cores.
-MAX_WORKERS = 2
+# We default to the number of available CPU cores, falling back to 2 if it's not determinable.
+MAX_WORKERS = os.cpu_count() or 2
 
 # The default directory for storing model checkpoints.
 CHECKPOINTS_DIR = "./checkpoints"

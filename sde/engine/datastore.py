@@ -1,3 +1,4 @@
+import copy
 import threading
 from typing import Dict, List, Optional
 
@@ -15,9 +16,13 @@ class DataStore:
         self._lock = threading.Lock()
 
     def get_trial(self, trial_id: str) -> Optional[Trial]:
-        """Retrieves a single trial by its ID."""
+        """
+        Retrieves a deep copy of a single trial by its ID to ensure the
+        caller cannot mutate the datastore's state.
+        """
         with self._lock:
-            return self._trials.get(trial_id)
+            trial = self._trials.get(trial_id)
+            return copy.deepcopy(trial) if trial else None
 
     def add_trial(self, trial: Trial):
         """Adds a new trial to the datastore in a thread-safe manner."""
@@ -28,9 +33,15 @@ class DataStore:
             self._trials[trial.id] = trial
 
     def get_all_trials(self) -> Dict[str, Trial]:
-        """Returns a copy of the dictionary of all trials."""
+        """
+        Returns a deep copy of the dictionary of all trials to ensure the
+        caller cannot mutate the datastore's state.
+        """
         with self._lock:
-            return self._trials.copy()
+            return {
+                trial_id: copy.deepcopy(trial)
+                for trial_id, trial in self._trials.items()
+            }
 
     def record_work_unit_result(
         self, work_unit: WorkUnit, result: dict
