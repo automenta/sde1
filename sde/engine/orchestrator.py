@@ -72,29 +72,36 @@ class ExperimentOrchestrator:
                 logger.error(traceback.format_exc())
 
     def _is_action_valid(self, action_type: str, payload: Dict[str, Any], valid_actions: Dict) -> bool:
-        """Checks if a given action is present in the structured valid_actions dict."""
-        if action_type in valid_actions.get('global', []):
-            return True
+        """
+        Checks if a given action is present in the structured valid_actions dict,
+        enforcing context.
+        """
+        # Global actions are the simplest case. They require no specific context.
+        if 'algorithm_id' not in payload and 'trial_id' not in payload and 'source_trial_id' not in payload:
+            if action_type in valid_actions.get('global', []):
+                return True
 
+        # Algorithm-specific actions require an algorithm_id.
         if 'algorithm_id' in payload:
             algo_id = payload['algorithm_id']
             if action_type in valid_actions.get('algorithms', {}).get(algo_id, []):
                 return True
 
+        # Trial-specific actions require a trial_id.
         if 'trial_id' in payload:
             trial_id = payload['trial_id']
             if action_type in valid_actions.get('trials', {}).get(trial_id, []):
                 return True
 
-        # Fallback for actions that don't have a specific context object
-        # This is less specific but maintains backwards compatibility for simple checks.
-        all_actions = set(valid_actions.get('global', []))
-        for aname, alist in valid_actions.get('algorithms', {}).items():
-            all_actions.update(alist)
-        for tname, tlist in valid_actions.get('trials', {}).items():
-            all_actions.update(tlist)
+        # Special case for SPAWN_SIMILAR_TRIAL, which uses 'source_trial_id'
+        if 'source_trial_id' in payload:
+            source_trial_id = payload['source_trial_id']
+            if action_type in valid_actions.get('trials', {}).get(source_trial_id, []):
+                return True
 
-        return action_type in all_actions
+        # If none of the above specific checks passed, the action is not valid.
+        # The permissive fallback has been removed to enforce architectural integrity.
+        return False
 
 
     def emit_state_change(self):

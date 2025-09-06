@@ -7,7 +7,10 @@ from PyQt6.QtCore import Qt
 
 # This is a global instance needed for any PyQt application.
 # It needs to be created before any widgets are instantiated.
-app = QApplication([])
+app = QApplication.instance()
+if app is None:
+    app = QApplication([])
+
 
 # Now import the class to be tested
 from sde.ui.main_window import MainWindow
