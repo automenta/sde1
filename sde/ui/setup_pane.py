@@ -222,3 +222,7 @@ class SetupPane(QWidget):
 
     def update_progress_bar(self, progress: int):
         self.progress_bar.setValue(progress)
+
+    def clear_algorithms_table(self):
+        """Clears the algorithm table."""
+        self.algorithms_table.setRowCount(0)

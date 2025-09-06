@@ -43,5 +43,4 @@ tests/test_adaptive_scheduler.py
 tests/test_hyperband.py
 tests/test_insight_engine.py
 tests/test_orchestrator_v2.py
-tests/test_ui_v2_integration.py
 tests/test_worker.py

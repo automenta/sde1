@@ -78,10 +78,15 @@ class SdeRuntimeEngine:
         if self._is_running:
             self._is_running = False
             self._pause_event.set()  # Ensure loop isn't blocked on pause
+
+            # Stop the compute scheduler first, which will shut down the process pool
             self.compute_scheduler.stop()
+
+            # Now, wait for the main execution loop thread to finish
             if self._thread and self._thread.is_alive():
-                self._thread.join(timeout=5)  # Wait briefly for a clean exit
+                self._thread.join()  # Wait indefinitely for a clean exit
             self._thread = None
+            logger.info("SdeRuntimeEngine has been cleanly shut down.")
 
     def pause(self):
         """Pauses the execution loop."""

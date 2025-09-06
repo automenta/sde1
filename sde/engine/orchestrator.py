@@ -274,15 +274,20 @@ class ExperimentOrchestrator:
             f"INFO: Generating {num_trials_per_algo} trials for {len(algorithms)} algorithm(s)."
         )
         try:
-            # Use the existing adaptive scheduler if the engine is running, otherwise create one
+            # Get the adaptive scheduler, creating it if it doesn't exist.
+            # This is cleaner than the previous nested conditional logic.
             if self.runtime_engine and self.runtime_engine.adaptive_scheduler:
-                 scheduler = self.runtime_engine.adaptive_scheduler
+                scheduler = self.runtime_engine.adaptive_scheduler
             else:
                 scheduler = SchedulerFactory.create_scheduler(
                     policy_name=self.experiment.adaptive_policy,
                     challenge_name=self.experiment.challenge["name"],
                     patience_budget=self.experiment.patience_budget,
                 )
+
+            if not scheduler:
+                 self.log_message.emit("ERROR: Could not create or find a scheduler.")
+                 return False
 
             new_trials = scheduler.generate_initial_trials(
                 algorithms, num_trials_per_algo

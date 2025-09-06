@@ -450,8 +450,8 @@ class MainWindow(QMainWindow):
         self.trial_row_map.clear()
         self.plot_curve_map.clear()
         self.insights_list.clear()
-        self.algorithms_table.setRowCount(0)
-        self.setup_plot() # Re-add legend and titles
+        self.setup_pane.clear_algorithms_table()
+        self.setup_plot()  # Re-add legend and titles
 
     def on_trial_selected(self):
         """Handles trial selection in the table, highlighting the corresponding plot."""

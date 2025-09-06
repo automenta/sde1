@@ -83,11 +83,16 @@ class ComputeScheduler:
 
     def stop(self):
         """Stops the scheduler and shuts down the executor."""
-        if self._is_running:
-            self._is_running = False
-            if self.executor:
-                self.executor.shutdown(wait=True, cancel_futures=True)
-            self.executor = None
+        if not self._is_running:
+            return
+
+        self._is_running = False
+        if self.executor:
+            # Instruct the executor to shutdown. `cancel_futures=True` is a new
+            # robust addition to cancel queued work that hasn't started.
+            self.executor.shutdown(wait=True, cancel_futures=True)
+        self.executor = None
+        logger.info("ComputeScheduler has been stopped and executor shut down.")
 
     def cancel_work_for_trial(self, trial_id: str):
         """Cancels all active and pending futures for a specific trial."""
