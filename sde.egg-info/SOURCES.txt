@@ -33,6 +33,8 @@ sde/models/vision/resnet.py
 sde/ui/__init__.py
 sde/ui/hyperparameters.py
 sde/ui/main_window.py
+sde/ui/models.py
+sde/ui/view_model.py
 tests/test_adaptive_scheduler.py
 tests/test_hyperband.py
 tests/test_insight_engine.py

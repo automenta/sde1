@@ -9,7 +9,18 @@ from PyQt6.QtCore import Qt
 # Now import the class to be tested
 from sde.ui.main_window import MainWindow
 
-@pytest.mark.skip(reason="UI tests require a running X server and cannot be run in a headless environment without xvfb.")
+import pytest
+
+# A standalone test for basic instantiation.
+# This avoids the complexity of the TestCase's setUp method.
+def test_main_window_instantiation():
+    """Tests that the MainWindow can be instantiated without crashing."""
+    app = QApplication.instance() or QApplication([])
+    main_win = MainWindow()
+    assert main_win is not None
+    assert isinstance(main_win, MainWindow)
+
+
 class TestV2UIMainWindow(unittest.TestCase):
 
     @patch('sde.ui.main_window.ExperimentOrchestrator')

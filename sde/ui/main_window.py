@@ -1,9 +1,7 @@
 import sys
-import uuid
 import json
-import itertools
-import random
-import numpy as np
+from datetime import datetime
+
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -16,7 +14,6 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QSplitter,
     QPushButton,
-    QSizePolicy,
     QComboBox,
     QLabel,
     QListWidget,
@@ -29,50 +26,32 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QDialog,
     QStyle,
-)
-from PyQt6.QtGui import QIcon, QColor
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
-import pyqtgraph as pg
-
-# Import backend components
-from sde.engine.orchestrator import ExperimentOrchestrator
-from sde.engine.insight import Insight
-from sde.core.types import Trial
-from sde.exploration.schedulers import SuccessiveHalvingScheduler, HyperbandScheduler
-from sde.models import AVAILABLE_MODELS
-from sde.challenges import AVAILABLE_DATASETS
-from sde.ui.hyperparameters import HyperparameterDialog
-
-
-from PyQt6.QtWidgets import QAbstractItemView
-
-
-from datetime import datetime
-
-
-from PyQt6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
-    QPushButton,
+    QAbstractItemView,
     QTreeWidget,
     QTreeWidgetItem,
 )
+from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt
+import pyqtgraph as pg
+
+# Import backend and UI components
+from sde.engine.orchestrator import ExperimentOrchestrator
+from sde.models import AVAILABLE_MODELS
+from sde.challenges import AVAILABLE_DATASETS
+from sde.ui.hyperparameters import HyperparameterDialog
+from sde.ui.view_model import ExperimentViewModel
+from sde.ui.models import UIInsight
 
 
 class InsightListItem(QListWidgetItem):
-    """A custom QListWidgetItem that stores the full Insight object."""
+    """A custom QListWidgetItem that stores the full UIInsight object."""
 
-    def __init__(
-        self, insight: Insight, icon: QIcon, parent: QListWidget | None = None
-    ):
+    def __init__(self, ui_insight: UIInsight, parent: QListWidget | None = None):
         super().__init__(parent)
-        self.insight = insight
-        self.setIcon(icon)
-
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.setText(f"[{timestamp}] {self.insight.message}")
-        # The full message is now displayed, but tooltip is still good for copy/paste.
-        self.setToolTip(self.insight.message)
+        self.insight = ui_insight
+        self.setIcon(ui_insight.icon)
+        self.setText(f"[{ui_insight.timestamp}] {ui_insight.message}")
+        self.setToolTip(ui_insight.message)
 
 
 class HyperparameterViewerDialog(QDialog):
@@ -124,34 +103,44 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Scientific Discovery Engine")
         self.setGeometry(100, 100, 1400, 900)
 
-        # --- V2 Backend components ---
+        # --- Backend and ViewModel ---
         self.orchestrator = ExperimentOrchestrator()
+        self.view_model = ExperimentViewModel(self.style())
 
-        # --- Data maps for UI updates ---
+        # --- UI State and Data Maps ---
         self.trial_row_map = {}  # trial.id -> table_row_index
         self.plot_curve_map = {}  # trial.id -> plot_curve_item
         self.legend = None
         self.selected_insight_item = None
-        self.best_trial_id = None
-        self.current_state = {}
-        self._setup_icons()
 
-        # --- Main Layout ---
+        self._init_ui()
+        self._connect_signals()
+
+        # Populate initial data and states
+        self.populate_datasets()
+        self.update_model_list()
+        self.update_button_states() # Initialize button states
+        self.append_log_message(
+            "INFO: UI Initialized. Configure your experiment and click 'Start'."
+        )
+
+    def _init_ui(self):
+        """Initializes the main UI layout and sub-components."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
 
-        # --- Left Pane: Experiment Setup ---
+        left_pane = self._create_left_pane()
+        right_pane = self._create_right_pane()
+
+        main_layout.addWidget(left_pane)
+        main_layout.addWidget(right_pane, 1)
+
+    def _create_left_pane(self) -> QWidget:
+        """Creates the left-hand pane for experiment setup and controls."""
         setup_pane = QWidget()
         setup_pane.setMaximumWidth(350)
         setup_layout = QVBoxLayout(setup_pane)
-
-        # --- Right Pane: Results ---
-        results_pane = QWidget()
-        results_layout = QVBoxLayout(results_pane)
-
-        main_layout.addWidget(setup_pane)
-        main_layout.addWidget(results_pane, 1)
 
         # --- Experiment Setup Group ---
         self.setup_group = QGroupBox("1. Experiment Setup")
@@ -181,20 +170,18 @@ class MainWindow(QMainWindow):
         settings_form_layout.addRow(self.checkpoint_checkbox)
 
         # --- Execution Controls ---
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("Progress: %p%")
-
-        self.start_button = QPushButton("Start (Defaults)")
-        self.tune_button = QPushButton("Tune Hyperparameters...")
-        self.add_models_button = QPushButton("Add Selected Models to Run")
-        self.pause_button = QPushButton("Pause")
-        self.resume_button = QPushButton("Resume")
-
         controls_group = QGroupBox("3. Execution Controls")
         controls_layout = QVBoxLayout(controls_group)
+        self.start_button = QPushButton("Start (Defaults)")
+        self.start_button.setToolTip("Run the selected models with their default hyperparameter ranges.")
+        self.tune_button = QPushButton("Tune Hyperparameters...")
+        self.tune_button.setToolTip("Define custom hyperparameter spaces and select an advanced tuning policy.")
+        self.add_models_button = QPushButton("Add Selected Models to Run")
+        self.add_models_button.setToolTip("Add newly selected models to the currently running experiment.")
+        self.pause_button = QPushButton("Pause")
+        self.pause_button.setToolTip("Pause the currently running experiment.")
+        self.resume_button = QPushButton("Resume")
+        self.resume_button.setToolTip("Resume a paused experiment.")
         simple_run_layout = QHBoxLayout()
         simple_run_layout.addWidget(self.start_button)
         advanced_run_layout = QHBoxLayout()
@@ -220,6 +207,13 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         algorithms_layout.addWidget(self.algorithms_table)
 
+        # --- Progress Bar ---
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("Progress: %p%")
+
         # --- Assemble Left Pane ---
         setup_layout.addWidget(self.setup_group)
         setup_layout.addWidget(self.settings_group)
@@ -228,45 +222,40 @@ class MainWindow(QMainWindow):
         setup_layout.addStretch(1)
         setup_layout.addWidget(self.progress_bar)
 
-        # --- Connect Signals and Slots ---
-        self.populate_datasets()
-        self.dataset_combo.currentIndexChanged.connect(self.update_model_list)
-        self.start_button.clicked.connect(self.start_simple_experiment)
-        self.tune_button.clicked.connect(self.open_tuning_dialog)
-        self.add_models_button.clicked.connect(self.add_models_to_run)
-        self.pause_button.clicked.connect(self.pause_experiment)
-        self.resume_button.clicked.connect(self.resume_experiment)
-        self.throttle_slider.valueChanged.connect(self.update_throttle)
+        return setup_pane
 
-        # V2 Signal Connections
-        self.orchestrator.log_message.connect(self.append_log_message)
-        self.orchestrator.state_changed.connect(self.on_state_changed)
+    def _create_right_pane(self) -> QWidget:
+        """Creates the right-hand pane for displaying results."""
+        results_pane = QWidget()
+        results_layout = QVBoxLayout(results_pane)
 
-        self.update_model_list()
-        # Initialize buttons to a default disabled state.
-        # The first state_changed signal will update them properly.
-        self.update_button_states({})
-
-        # --- Main Content Splitter (in results_pane)---
+        # --- Main Content Splitter ---
         splitter = QSplitter(Qt.Orientation.Vertical)
         results_layout.addWidget(splitter)
+
+        # --- Plot Widget ---
         self.plot_widget = pg.PlotWidget()
         self.setup_plot()
 
+        # --- Bottom Pane (Table, Insights, Log) ---
         bottom_pane = QWidget()
         bottom_layout = QHBoxLayout(bottom_pane)
+
         self.trials_table = QTableWidget()
+        self.setup_table()
 
         right_bottom_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Insights Group
         insights_group = QGroupBox("Insights")
         insights_layout = QVBoxLayout(insights_group)
         self.insights_list = QListWidget()
-        self.insights_list.setWordWrap(
-            True
-        )  # Enable word wrapping for insight messages
+        self.insights_list.setWordWrap(True)
         insights_layout.addWidget(self.insights_list)
         insights_layout.setContentsMargins(0, 5, 0, 0)
         insights_group.setLayout(insights_layout)
+
+        # Log Group
         log_group = QGroupBox("Log")
         log_layout = QVBoxLayout(log_group)
         self.log_text_edit = QTextEdit()
@@ -274,9 +263,12 @@ class MainWindow(QMainWindow):
         log_layout.addWidget(self.log_text_edit)
         log_layout.setContentsMargins(0, 5, 0, 0)
         log_group.setLayout(log_layout)
+
         right_bottom_splitter.addWidget(insights_group)
         right_bottom_splitter.addWidget(log_group)
         right_bottom_splitter.setSizes([100, 200])
+
+        # Bottom Splitter
         bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
         bottom_splitter.addWidget(self.trials_table)
         bottom_splitter.addWidget(right_bottom_splitter)
@@ -288,10 +280,35 @@ class MainWindow(QMainWindow):
         splitter.addWidget(bottom_pane)
         splitter.setSizes([500, 300])
 
-        self.setup_table()
-        self.append_log_message(
-            "INFO: UI Initialized. Configure your experiment and click 'Start'."
-        )
+        return results_pane
+
+    def _connect_signals(self):
+        """Connects all UI signals to their corresponding slots."""
+        # Backend signals
+        self.orchestrator.log_message.connect(self.append_log_message)
+        self.orchestrator.state_changed.connect(self.on_state_changed)
+
+        # Left pane controls
+        self.dataset_combo.currentIndexChanged.connect(self.update_model_list)
+        self.start_button.clicked.connect(self.start_simple_experiment)
+        self.tune_button.clicked.connect(self.open_tuning_dialog)
+        self.add_models_button.clicked.connect(self.add_models_to_run)
+        self.pause_button.clicked.connect(self.pause_experiment)
+        self.resume_button.clicked.connect(self.resume_experiment)
+        self.throttle_slider.valueChanged.connect(self.update_throttle)
+
+        # Right pane controls
+        # Right pane controls
+        self.trials_table.itemSelectionChanged.connect(self.on_trial_selected)
+        self.insights_list.itemClicked.connect(self.on_insight_selected)
+
+    def show_hyperparameter_dialog(self, hparams: dict):
+        """Shows the hyperparameter viewer dialog for the given parameters."""
+        if not hparams:
+            QMessageBox.information(self, "Info", "No hyperparameters to display.")
+            return
+        dialog = HyperparameterViewerDialog(hparams, self)
+        dialog.exec()
 
     def populate_datasets(self):
         self.dataset_combo.addItems(AVAILABLE_DATASETS.keys())
@@ -353,119 +370,38 @@ class MainWindow(QMainWindow):
         self.trials_table.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
         )
-        self.trials_table.itemSelectionChanged.connect(self.on_trial_selected)
-        self.trials_table.cellDoubleClicked.connect(self.on_trial_double_clicked)
-        self.insights_list.itemClicked.connect(self.on_insight_selected)
-
-    def on_trial_double_clicked(self, row, column):
-        """Shows the hyperparameter viewer for the double-clicked trial."""
-        trial_id = None
-        for tid, r in self.trial_row_map.items():
-            if r == row:
-                trial_id = tid
-                break
-
-        if trial_id:
-            trials = self.current_state.get("trials", {})
-            trial_data = trials.get(trial_id)
-            if trial_data:
-                hparams = trial_data.get("hyperparameters", {})
-                dialog = HyperparameterViewerDialog(hparams, self)
-                dialog.exec()
 
     def on_state_changed(self, state: dict):
         """
-        The central handler for all state updates from the V2 Orchestrator.
+        The central handler for all state updates from the Orchestrator.
+        It delegates state processing to the ViewModel and then triggers a UI refresh.
         """
-        self.current_state = state
+        self.view_model.update_state(state)
+        self._update_all_widgets()
 
-        # V2 UI state management
-        valid_actions = state.get("valid_actions", {})
-        self.update_button_states(valid_actions)
+    def _update_all_widgets(self):
+        """Refreshes all UI components based on the current ViewModel state."""
+        self.update_button_states()
+        self.update_algorithm_table()
+        self.update_trials_and_plots()
+        self.update_progress_bar()
+        self.update_insights_list()
 
-        trials = state.get("trials", {})
-
-        # Update tables and plots
-        self.update_algorithm_table(state.get("algorithms", {}), valid_actions)
-        for trial_data in trials.values():
-            self.update_trial_ui(
-                trial_data
-            )  # This method now primarily handles the table
-
-        self.update_plots(trials)  # This new method handles updating the plots
-
-        # Update progress bar
-        if trials:
-            total_trials = len(trials)
-            completed_statuses = {"COMPLETED", "PRUNED"}
-            completed_trials = sum(
-                1 for t in trials.values() if t["status"] in completed_statuses
-            )
-            progress = int((completed_trials / total_trials) * 100)
-            self.progress_bar.setValue(progress)
-        else:
-            self.progress_bar.setValue(0)
-
-        # --- Find and store best trial ---
-        dataset_name = self.dataset_combo.currentText()
-        if dataset_name:
-            challenge_def = AVAILABLE_DATASETS[dataset_name]
-            metric_name = challenge_def.performance_metric_name
-            higher_is_better = "accuracy" in metric_name.lower()  # Simple inference
-
-            best_trial_id = None
-            best_perf = -float("inf") if higher_is_better else float("inf")
-
-            for trial_id, trial_data in trials.items():
-                if trial_data.get("results", {}).get(metric_name):
-                    latest_perf = trial_data["results"][metric_name][-1][1]
-                    if (higher_is_better and latest_perf > best_perf) or (
-                        not higher_is_better and latest_perf < best_perf
-                    ):
-                        best_perf = latest_perf
-                        best_trial_id = trial_id
-
-            self.best_trial_id = best_trial_id
-
-        # Update insights
-        insights = state.get("insights", [])
-        if not hasattr(self, "displayed_insight_messages"):
-            self.displayed_insight_messages = set()
-
-        for insight_data in insights:
-            # Use message as a unique key to avoid displaying duplicates
-            if insight_data["message"] not in self.displayed_insight_messages:
-                # The add_insight method expects an Insight object, not a dict.
-                # Re-create the object from the dictionary.
-                insight_obj = Insight(
-                    message=insight_data["message"],
-                    type=insight_data["type"],
-                    trial_ids=insight_data["trial_ids"],
-                )
-                self.add_insight(insight_obj)
-                self.displayed_insight_messages.add(insight_obj.message)
-
-    def update_algorithm_table(self, algorithms: dict, valid_actions: dict):
-        """Updates the algorithm table with names and context-sensitive actions."""
+    def update_algorithm_table(self):
+        """Updates the algorithm table from the ViewModel."""
         self.algorithms_table.setRowCount(0)
-        algo_actions = valid_actions.get("algorithms", {})
+        algo_actions = self.view_model.valid_actions.get("algorithms", {})
 
-        for algo_id, algo_data in algorithms.items():
+        for algo_id, algo_data in self.view_model.algorithms.items():
             row_position = self.algorithms_table.rowCount()
             self.algorithms_table.insertRow(row_position)
-            self.algorithms_table.setItem(
-                row_position, 0, QTableWidgetItem(algo_data["name"])
-            )
+            self.algorithms_table.setItem(row_position, 0, QTableWidgetItem(algo_data.name))
 
-            # --- Add action buttons ---
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
             actions_layout.setContentsMargins(0, 0, 0, 0)
-
             remove_button = QPushButton("Remove")
-            remove_button.setEnabled(
-                "REMOVE_ALGORITHM" in algo_actions.get(algo_id, [])
-            )
+            remove_button.setEnabled("REMOVE_ALGORITHM" in algo_actions.get(algo_id, []))
             remove_button.clicked.connect(
                 lambda _, a_id=algo_id: self.orchestrator.dispatch(
                     "REMOVE_ALGORITHM", {"algorithm_id": a_id}
@@ -474,52 +410,74 @@ class MainWindow(QMainWindow):
             actions_layout.addWidget(remove_button)
             self.algorithms_table.setCellWidget(row_position, 1, actions_widget)
 
-    def update_plots(self, trials_data: dict):
-        """Updates all plot curves based on the latest trial data."""
-        dataset_name = self.dataset_combo.currentText()
-        if not dataset_name:
-            return
+    def update_trials_and_plots(self):
+        """Updates the trials table and plot widget from the ViewModel."""
+        metric_name = self.view_model.performance_metric_name
 
-        metric_name = AVAILABLE_DATASETS[dataset_name].performance_metric_name
+        # Prune UI elements for trials that no longer exist
+        current_trial_ids = set(self.view_model.trials.keys())
+        existing_ui_trial_ids = set(self.trial_row_map.keys())
 
-        for trial_id, trial_data in trials_data.items():
+        for trial_id in existing_ui_trial_ids - current_trial_ids:
+            row = self.trial_row_map.pop(trial_id)
+            self.trials_table.removeRow(row)
             if trial_id in self.plot_curve_map:
-                metric_list = trial_data.get("results", {}).get(metric_name, [])
+                self.plot_widget.removeItem(self.plot_curve_map.pop(trial_id))
+
+        # Update existing trials and add new ones
+        for trial_id, ui_trial in self.view_model.trials.items():
+            self.update_trial_ui(ui_trial, metric_name)
+
+            # Update plot
+            if trial_id in self.plot_curve_map:
+                metric_list = ui_trial.results.get(metric_name, [])
                 if metric_list:
-                    # Ensure data is in a format that can be plotted
                     try:
                         epochs, metrics = zip(*metric_list)
                         self.plot_curve_map[trial_id].setData(epochs, metrics)
                     except ValueError:
-                        # Handle cases with empty or malformed metric_list
                         self.plot_curve_map[trial_id].clear()
 
-    def update_button_states(self, valid_actions: dict):
-        """
-        Updates the enabled/disabled state of UI controls based on the
-        valid actions provided by the orchestrator.
-        """
-        global_actions = valid_actions.get("global", [])
-        status = self.current_state.get("status")
-        has_challenge = self.current_state.get("challenge") is not None
+    def update_progress_bar(self):
+        """Updates the progress bar based on trial statuses in the ViewModel."""
+        trials = self.view_model.trials.values()
+        if not trials:
+            self.progress_bar.setValue(0)
+            return
 
-        # Buttons for starting a run
+        total_trials = len(trials)
+        completed_statuses = {"COMPLETED", "PRUNED"}
+        completed_trials = sum(1 for t in trials if t.status in completed_statuses)
+        progress = int((completed_trials / total_trials) * 100)
+        self.progress_bar.setValue(progress)
+
+    def update_insights_list(self):
+        """Updates the insights list from the ViewModel."""
+        # A simple approach: clear and redraw. More complex logic could be used
+        # to avoid flickering, but this is robust for now.
+        self.insights_list.clear()
+        for ui_insight in self.view_model.insights:
+            item = InsightListItem(ui_insight, self.insights_list)
+            self.insights_list.addItem(item)
+        self.insights_list.scrollToBottom()
+
+    def update_button_states(self):
+        """Updates button states based on the ViewModel's `valid_actions`."""
+        valid_actions = self.view_model.valid_actions
+        global_actions = valid_actions.get("global", [])
+        status = self.view_model.status
+        has_challenge = bool(self.view_model.challenge_name)
+
         can_start = "START_RUN" in global_actions
         self.start_button.setEnabled(can_start)
         self.tune_button.setEnabled(can_start)
 
-        # Buttons for interacting with a run
         self.pause_button.setEnabled("PAUSE_RUN" in global_actions)
         self.resume_button.setEnabled("RESUME_RUN" in global_actions)
 
-        # Button for adding models mid-run
-        can_add_mid_run = "ADD_ALGORITHM" in global_actions and status in [
-            "RUNNING",
-            "PAUSED",
-        ]
+        can_add_mid_run = "ADD_ALGORITHM" in global_actions and status in ["RUNNING", "PAUSED"]
         self.add_models_button.setEnabled(can_add_mid_run)
 
-        # More granular control over the setup panel
         self.dataset_combo.setEnabled(not has_challenge)
         self.model_list.setEnabled("ADD_ALGORITHM" in global_actions)
         self.settings_group.setEnabled(status == "DEFINING")
@@ -578,37 +536,22 @@ class MainWindow(QMainWindow):
         self.orchestrator.dispatch("START_RUN", start_payload)
 
     def add_models_to_run(self):
-        """
-        Adds newly selected models to an already running experiment.
-        """
-        # Get all currently checked models
+        """Adds newly selected models to an already running experiment."""
         all_selected_models = {
             self.model_list.item(i).text()
             for i in range(self.model_list.count())
             if self.model_list.item(i).checkState() == Qt.CheckState.Checked
         }
 
-        # Get models that are already part of the experiment
-        if not self.current_state:
-            self.append_log_message(
-                "ERROR: No current state available to add models to."
-            )
-            return
-        existing_algo_names = {
-            algo["name"] for algo in self.current_state.get("algorithms", {}).values()
-        }
-
-        # Determine which models are new
+        # Get existing algorithm names from the ViewModel
+        existing_algo_names = {algo.name for algo in self.view_model.algorithms.values()}
         newly_selected_models = all_selected_models - existing_algo_names
 
         if not newly_selected_models:
             self.append_log_message("INFO: No new models selected to add.")
             return
 
-        self.append_log_message(
-            f"INFO: Adding new models to run: {', '.join(newly_selected_models)}"
-        )
-
+        self.append_log_message(f"INFO: Adding new models to run: {', '.join(newly_selected_models)}")
         for model_name in newly_selected_models:
             model_def = AVAILABLE_MODELS[model_name]
             param_space = {
@@ -616,71 +559,39 @@ class MainWindow(QMainWindow):
                 for param_type in model_def.hyperparameter_schema.values()
                 for k, v in param_type.items()
             }
-            self.orchestrator.dispatch(
-                "ADD_ALGORITHM", {"name": model_name, "parameter_space": param_space}
-            )
+            self.orchestrator.dispatch("ADD_ALGORITHM", {"name": model_name, "parameter_space": param_space})
 
     def open_tuning_dialog(self):
-        """
-        V2 implementation: Opens the tuning dialog and dispatches actions
-        to configure the experiment based on the user's choices, letting the
-        backend handle trial generation.
-        """
+        """Opens the tuning dialog and configures the experiment via the orchestrator."""
         dataset_name, selected_models_names = self._get_experiment_settings()
         if not dataset_name or not selected_models_names:
-            QMessageBox.warning(
-                self,
-                "Warning",
-                "Please select a dataset and at least one model to tune.",
-            )
+            QMessageBox.warning(self, "Warning", "Please select a dataset and at least one model to tune.")
             return
 
         selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
         dialog = HyperparameterDialog(selected_model_defs, self)
-
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
         config = dialog.get_configuration()
-        self.append_log_message(
-            f"INFO: Configuring tuning experiment with scheduler '{config['adaptive_scheduler']}'."
-        )
+        self.append_log_message(f"INFO: Configuring tuning experiment with scheduler '{config['adaptive_scheduler']}'.")
         self._clear_previous_experiment()
 
-        # --- V2 Dispatch Logic ---
-        # 1. Set Challenge
         challenge_def = AVAILABLE_DATASETS[dataset_name]
-        self.orchestrator.dispatch(
-            "SET_CHALLENGE", {"name": dataset_name, "type": challenge_def.type}
-        )
+        self.orchestrator.dispatch("SET_CHALLENGE", {"name": dataset_name, "type": challenge_def.type})
+        self.orchestrator.dispatch("SET_ADAPTIVE_POLICY", {"policy_name": config["adaptive_scheduler"]})
 
-        # 2. Set Adaptive Policy (Scheduler)
-        self.orchestrator.dispatch(
-            "SET_ADAPTIVE_POLICY", {"policy_name": config["adaptive_scheduler"]}
-        )
-
-        # 3. Add algorithms with their full parameter spaces
         for model_name, model_params in config["models"].items():
-            # The parameter space is defined by the user in the dialog
             full_param_space = {}
             for param_type in model_params.values():
                 for param_name, properties in param_type.items():
                     full_param_space[param_name] = {
-                        "type": "float",  # Assuming float for now, could be extended
-                        "min": properties["min"],
-                        "max": properties["max"],
+                        "type": "float", "min": properties["min"], "max": properties["max"],
                         "scale": properties.get("scale", "linear"),
                     }
+            self.orchestrator.dispatch("ADD_ALGORITHM", {"name": model_name, "parameter_space": full_param_space})
 
-            self.orchestrator.dispatch(
-                "ADD_ALGORITHM",
-                {"name": model_name, "parameter_space": full_param_space},
-            )
-
-        # 4. Start the run
-        self.append_log_message(
-            f"INFO: Starting run. The '{config['adaptive_scheduler']}' policy will now generate trials."
-        )
+        self.append_log_message(f"INFO: Starting run. The '{config['adaptive_scheduler']}' policy will now generate trials.")
         start_payload = {"enable_checkpointing": self.checkpoint_checkbox.isChecked()}
         self.orchestrator.dispatch("START_RUN", start_payload)
 
@@ -694,110 +605,70 @@ class MainWindow(QMainWindow):
         return dataset_name, selected_models
 
     def _clear_previous_experiment(self):
+        """Clears all UI elements and the ViewModel for a new experiment."""
+        self.view_model.clear()
         self.trials_table.setRowCount(0)
         self.plot_widget.clear()
         self.trial_row_map.clear()
         self.plot_curve_map.clear()
         self.insights_list.clear()
-        self.setup_plot()
+        self.algorithms_table.setRowCount(0)
+        self.setup_plot() # Re-add legend and titles
 
     def on_trial_selected(self):
+        """Handles trial selection in the table, highlighting the corresponding plot."""
         selected_items = self.trials_table.selectedItems()
         if not selected_items:
-            for curve in self.plot_curve_map.values():
-                original_pen = curve.opts["pen"]
-                original_color = original_pen.color()
-                original_color.setAlpha(255)
-                curve.setPen(pg.mkPen(color=original_color, width=2))
-                curve.setZValue(0)
+            self._update_plot_highlight(set()) # Empty set clears all highlights
             return
+
         selected_row = self.trials_table.currentRow()
         selected_trial_id = None
         for tid, r in self.trial_row_map.items():
             if r == selected_row:
                 selected_trial_id = tid
                 break
+
         if selected_trial_id:
             self._update_plot_highlight({selected_trial_id})
 
-    def on_trial_profiled(self, trial_id: str, est_time: float):
-        if trial_id in self.trial_row_map:
-            row = self.trial_row_map[trial_id]
-            self.trials_table.setItem(row, 6, QTableWidgetItem(f"{est_time:.2f}s"))
-
-    def update_trial_ui(self, trial_data: dict):
-        trial_id = trial_data["id"]
+    def update_trial_ui(self, ui_trial, metric_name: str):
+        """Updates or creates a row in the trials table for a given UITrial."""
+        trial_id = ui_trial.id
         if trial_id not in self.trial_row_map:
             row_position = self.trials_table.rowCount()
             self.trials_table.insertRow(row_position)
             self.trial_row_map[trial_id] = row_position
-            color = pg.intColor(len(self.plot_curve_map), hues=9, values=1)
-            name = f"{trial_data['algorithm_name']} ({trial_id})"
-            if self.legend and self.legend.isVisible():
-                curve_name = name
-            else:
-                curve_name = None
-            pen = pg.mkPen(color=color, width=2)
+
+            # Create plot curve item
+            name = f"{ui_trial.algorithm_name} ({trial_id[:6]})"
+            pen = ui_trial.pen
             self.plot_curve_map[trial_id] = self.plot_widget.plot(
-                [],
-                [],
-                name=curve_name,
-                pen=pen,
-                symbol="o",
-                symbolSize=6,
-                symbolBrush=pen.color(),
+                [], [], name=name, pen=pen, symbol="o", symbolSize=6, symbolBrush=pen.color()
             )
 
         row = self.trial_row_map[trial_id]
+        # Update plot pen and row color based on status (e.g., best, pruned)
+        self.plot_curve_map[trial_id].setPen(ui_trial.pen)
+        background_color = ui_trial.row_background_color
+
+        # Populate table cells
         self.trials_table.setItem(row, 0, QTableWidgetItem(trial_id))
-        self.trials_table.setItem(
-            row, 1, QTableWidgetItem(trial_data["algorithm_name"])
-        )
-        status = trial_data["status"]
-        self.trials_table.setItem(row, 2, QTableWidgetItem(status))
-        self.trials_table.setItem(
-            row, 3, QTableWidgetItem(str(trial_data["current_epoch"]))
-        )
-        dataset_name = self.dataset_combo.currentText()
-        metric_name = AVAILABLE_DATASETS[dataset_name].performance_metric_name
-        metric_list = trial_data["results"].get(metric_name, [])
-        loss_list = trial_data["results"].get("loss", [])
-        latest_metric = f"{metric_list[-1][1]:.4f}" if metric_list else "N/A"
-        latest_loss = f"{loss_list[-1][1]:.4f}" if loss_list else "N/A"
-        self.trials_table.setItem(row, 4, QTableWidgetItem(latest_metric))
-        self.trials_table.setItem(row, 5, QTableWidgetItem(latest_loss))
+        self.trials_table.setItem(row, 1, QTableWidgetItem(ui_trial.algorithm_name))
+        self.trials_table.setItem(row, 2, QTableWidgetItem(ui_trial.status))
+        self.trials_table.setItem(row, 3, QTableWidgetItem(ui_trial.display_epoch))
+        self.trials_table.setItem(row, 4, QTableWidgetItem(ui_trial.get_latest_metric(metric_name)))
+        self.trials_table.setItem(row, 5, QTableWidgetItem(ui_trial.get_latest_metric("loss")))
+        self.trials_table.setItem(row, 6, QTableWidgetItem(ui_trial.display_est_time))
 
-        est_time = trial_data.get("est_time_per_epoch")
-        if est_time is not None:
-            self.trials_table.setItem(row, 6, QTableWidgetItem(f"{est_time:.2f}s"))
-        else:
-            self.trials_table.setItem(row, 6, QTableWidgetItem("N/A"))
+        # Add a button to view hyperparameters
+        view_button = QPushButton("View")
+        view_button.clicked.connect(lambda: self.show_hyperparameter_dialog(ui_trial.hyperparameters))
+        self.trials_table.setCellWidget(row, 7, view_button)
 
-        self.trials_table.setItem(
-            row, 7, QTableWidgetItem(json.dumps(trial_data["hyperparameters"]))
-        )
-
-        self._style_trial_ui(trial_id, status)
-
-    def _setup_icons(self):
-        """Pre-loads icons for different insight types."""
-        style = self.style()
-        self.insight_icons = {
-            "BEST_PERFORMER": style.standardIcon(QStyle.StandardPixmap.SP_ArrowUp),
-            "PLATEAU": style.standardIcon(QStyle.StandardPixmap.SP_ArrowRight),
-            "POOR_INITIAL_PERFORMANCE": style.standardIcon(
-                QStyle.StandardPixmap.SP_MessageBoxWarning
-            ),
-            "PERFORMANCE_CROSSOVER": style.standardIcon(
-                QStyle.StandardPixmap.SP_MediaSeekForward
-            ),
-            "HYPERPARAM_CORRELATION": style.standardIcon(
-                QStyle.StandardPixmap.SP_DialogHelpButton
-            ),
-            "DEFAULT": style.standardIcon(
-                QStyle.StandardPixmap.SP_MessageBoxInformation
-            ),
-        }
+        for col in range(self.trials_table.columnCount()):
+            if self.trials_table.item(row, col): # Only color items, not widgets
+                self.trials_table.item(row, col).setBackground(background_color)
 
     def on_insight_selected(self, item: InsightListItem):
         """Highlights the trials relevant to the selected insight."""
@@ -807,33 +678,31 @@ class MainWindow(QMainWindow):
         if self.selected_insight_item == item:
             self.insights_list.clearSelection()
             self.selected_insight_item = None
-            self.on_trial_selected()
+            self._update_plot_highlight(set())
             return
 
         self.selected_insight_item = item
         highlight_ids = set(item.insight.trial_ids)
-        if not highlight_ids:
-            return
+        self._update_plot_highlight(highlight_ids)
 
+        # Also select the rows in the table
         self.trials_table.clearSelection()
-        self.trials_table.setSelectionMode(
-            QAbstractItemView.SelectionMode.MultiSelection
-        )
-
+        self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
         for trial_id, row in self.trial_row_map.items():
             if trial_id in highlight_ids:
                 self.trials_table.selectRow(row)
-
-        self.trials_table.setSelectionMode(
-            QAbstractItemView.SelectionMode.SingleSelection
-        )
-        self._update_plot_highlight(highlight_ids)
+        self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
 
     def _update_plot_highlight(self, highlight_ids: set):
         """Highlights a specific set of trials on the plot."""
         for trial_id, curve in self.plot_curve_map.items():
-            pen = curve.opts["pen"]
+            ui_trial = self.view_model.trials.get(trial_id)
+            if not ui_trial:
+                continue
+
+            pen = ui_trial.pen
             color = pen.color()
+
             if trial_id in highlight_ids:
                 color.setAlpha(255)
                 curve.setPen(pg.mkPen(color=color, width=4))
@@ -843,68 +712,17 @@ class MainWindow(QMainWindow):
                 curve.setPen(pg.mkPen(color=color, width=1))
                 curve.setZValue(0)
 
-    def _style_trial_ui(self, trial_id: str, status: str):
-        """Applies coloring and styling to a trial's row and plot based on its status."""
-        row_color = QColor("white")
-        pen = self.plot_curve_map[trial_id].opts["pen"]
-
-        is_best = self.best_trial_id == trial_id
-
-        if is_best:
-            row_color = QColor("#FFFACD")  # LemonChiffon
-            pen.setColor(pg.mkColor("#FFD700"))  # Gold
-            pen.setWidth(4)
-            pen.setStyle(Qt.PenStyle.SolidLine)
-        elif status == "PRUNED":
-            row_color = QColor("#D3D3D3")
-            pen.setColor(pg.mkColor("#808080"))
-            pen.setStyle(Qt.PenStyle.DotLine)
-        elif status == "COMPLETED":
-            row_color = QColor("#ADD8E6")
-            pen.setColor(pg.mkColor("#0000FF"))
-            pen.setWidth(2)
-            pen.setStyle(Qt.PenStyle.SolidLine)
-        else:  # ACTIVE
-            original_color = pg.intColor(
-                list(self.plot_curve_map.keys()).index(trial_id), hues=9, values=1
-            )
-            pen.setColor(original_color)
-            pen.setWidth(2)
-            pen.setStyle(Qt.PenStyle.SolidLine)
-
-        self.plot_curve_map[trial_id].setPen(pen)
-
-        row = self.trial_row_map[trial_id]
-        for col in range(self.trials_table.columnCount()):
-            self.trials_table.item(row, col).setBackground(row_color)
-
-    def add_insight(self, insight: Insight):
-        icon = self.insight_icons.get(insight.type, self.insight_icons["DEFAULT"])
-        item = InsightListItem(insight, icon, self.insights_list)
-        self.insights_list.addItem(item)
-        self.insights_list.scrollToBottom()
-
     def append_log_message(self, message: str):
         self.log_text_edit.append(message)
         self.log_text_edit.verticalScrollBar().setValue(
             self.log_text_edit.verticalScrollBar().maximum()
         )
 
-    def on_experiment_finished(self):
-        self.append_log_message("INFO: Experiment finished.")
-        self.update_button_states(running=False, paused=False)
-        self.progress_bar.setValue(100)
-        if self.experiment_thread and self.experiment_thread.isRunning():
-            self.experiment_thread.quit()
-            self.experiment_thread.wait()
-        self.experiment_runner = None
-
     def closeEvent(self, event):
-        if self.experiment_runner:
-            self.experiment_runner.stop()
-        if self.experiment_thread and self.experiment_thread.isRunning():
-            self.experiment_thread.quit()
-            self.experiment_thread.wait()
+        # The SdeRuntimeEngine runs in a daemon thread, so it will be
+        # automatically terminated when the main application exits.
+        # A more advanced implementation could add a shutdown hook here
+        # to tell the orchestrator to gracefully stop the engine.
         event.accept()
 
 
