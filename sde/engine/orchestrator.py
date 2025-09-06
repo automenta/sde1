@@ -4,6 +4,7 @@ import threading
 from typing import List, Dict, Any
 
 from sde.core.types import Experiment, ExperimentStatus, Trial, TrialStatus
+from sde.core.actions import ActionType
 from sde.engine.runtime import SdeRuntimeEngine
 from sde.challenges import AVAILABLE_DATASETS
 from sde.engine.action_validator import ActionValidator
@@ -35,24 +36,25 @@ class ExperimentOrchestrator:
         self._lock = threading.Lock()
         self.log_message.emit("INFO: Orchestrator initialized in DEFINING state.")
 
-    def dispatch(self, action_type: str, payload: Dict[str, Any]):
+    def dispatch(self, action_type: ActionType, payload: Dict[str, Any]):
         """
         Receives an action, validates it, mutates the state,
         and triggers side effects.
         """
         with self._lock:
-            handler = getattr(self, f"handle_{action_type.lower()}", None)
+            handler_name = f"handle_{action_type.value.lower()}"
+            handler = getattr(self, handler_name, None)
             if not handler:
-                self.log_message.emit(f"ERROR: No handler for action '{action_type}'")
+                self.log_message.emit(f"ERROR: No handler for action '{action_type.value}'")
                 return
 
             # Use the new structured validator
             valid_actions = ActionValidator.get_valid_actions(self.experiment)
             if not ActionValidator.is_action_valid(
-                action_type, payload, valid_actions
+                action_type.value, payload, valid_actions
             ):
                 self.log_message.emit(
-                    f"WARN: Action '{action_type}' is not valid for the current state or payload."
+                    f"WARN: Action '{action_type.value}' is not valid for the current state or payload."
                 )
                 return
 
@@ -61,7 +63,7 @@ class ExperimentOrchestrator:
                 self.emit_state_change()
             except Exception as e:
                 self.log_message.emit(
-                    f"ERROR: Failed to execute action {action_type}: {e}"
+                    f"ERROR: Failed to execute action {action_type.value}: {e}"
                 )
                 logger.error(traceback.format_exc())
 
@@ -352,20 +354,13 @@ class ExperimentOrchestrator:
         """
         with self._lock:
             trial_id = trial_data.get("id")
-            if not trial_id or trial_id not in self.experiment.trials:
-                logger.warning(
-                    f"Orchestrator received update for unknown trial_id: {trial_id}"
-                )
+            if not trial_id:
+                logger.warning(f"Orchestrator received update without a trial_id.")
                 return
 
-            # Update the trial object in our central state
-            trial = self.experiment.trials[trial_id]
-            trial.status = TrialStatus(trial_data["status"])
-            trial.current_epoch = trial_data["current_epoch"]
-            trial.est_time_per_epoch = trial_data["est_time_per_epoch"]
-            trial.results = trial_data["results"]
-            # Note: A more robust implementation might use a proper deserializer
-            # that reconstructs the Trial object fully.
+            # Use the new robust deserialization method
+            updated_trial = Trial.from_dict(trial_data)
+            self.experiment.trials[updated_trial.id] = updated_trial
 
         # Emit state change to notify UI
         self.emit_state_change()
@@ -396,3 +391,9 @@ class ExperimentOrchestrator:
                 "ERROR: Cannot resume, no runtime engine exists. Please start the run first."
             )
 
+    def shutdown(self):
+        """Safely shuts down the runtime engine."""
+        if self.runtime_engine:
+            self.log_message.emit("INFO: Orchestrator shutting down runtime engine...")
+            self.runtime_engine.stop()
+            self.log_message.emit("INFO: Runtime engine shut down.")

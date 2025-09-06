@@ -1,0 +1,2 @@
+[gui_scripts]
+sde-ui = sde.run_ui:main

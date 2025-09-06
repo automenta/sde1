@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch, ANY
 from sde.engine.orchestrator import ExperimentOrchestrator
 from sde.engine.action_validator import ActionValidator
 from sde.core.types import ExperimentStatus, Trial, TrialStatus, AlgorithmConfig
+from sde.core.actions import ActionType
 
 @patch('sde.engine.orchestrator.Signal.emit')
 class TestExperimentOrchestrator(unittest.TestCase):
@@ -46,7 +47,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator = ExperimentOrchestrator()
         mock_emit.reset_mock()
         orchestrator.experiment.challenge = {"name": "Test"}
-        orchestrator.dispatch("SET_ADAPTIVE_POLICY", {"policy_name": "Hyperband"})
+        orchestrator.dispatch(ActionType.SET_ADAPTIVE_POLICY, {"policy_name": "Hyperband"})
         self.assertEqual(orchestrator.experiment.adaptive_policy, "Hyperband")
         mock_emit.assert_any_call("INFO: Adaptive policy set to 'Hyperband'.")
 
@@ -58,7 +59,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.algorithms['algo1'] = algo
         t1 = Trial(id='t1', algorithm_name='TestAlgo', hyperparameters={})
         orchestrator.experiment.trials = {'t1': t1}
-        orchestrator.dispatch("REMOVE_ALGORITHM", {"algorithm_id": "algo1"})
+        orchestrator.dispatch(ActionType.REMOVE_ALGORITHM, {"algorithm_id": "algo1"})
         self.assertNotIn('algo1', orchestrator.experiment.algorithms)
         self.assertEqual(orchestrator.experiment.trials['t1'].status, TrialStatus.PRUNED)
 
@@ -69,7 +70,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         t1 = Trial(id='t1', algorithm_name='TestAlgo', hyperparameters={}, status=TrialStatus.ACTIVE)
         orchestrator.experiment.trials = {'t1': t1}
         orchestrator.experiment.status = ExperimentStatus.RUNNING
-        orchestrator.dispatch("MANUAL_PRUNE_TRIAL", {"trial_id": "t1"})
+        orchestrator.dispatch(ActionType.MANUAL_PRUNE_TRIAL, {"trial_id": "t1"})
         self.assertEqual(orchestrator.experiment.trials['t1'].status, TrialStatus.PRUNED)
 
     def test_dispatch_spawn_similar_trial(self, mock_emit):
@@ -79,7 +80,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         source_trial = Trial(id='t1', algorithm_name='TestAlgo', hyperparameters={'lr': 0.1}, results=[(1, 0.9)])
         orchestrator.experiment.trials = {'t1': source_trial}
         orchestrator.experiment.status = ExperimentStatus.RUNNING
-        orchestrator.dispatch("SPAWN_SIMILAR_TRIAL", {"source_trial_id": "t1"})
+        orchestrator.dispatch(ActionType.SPAWN_SIMILAR_TRIAL, {"source_trial_id": "t1"})
         self.assertEqual(len(orchestrator.experiment.trials), 2)
         new_trial = next(t for t in orchestrator.experiment.trials.values() if t.id != 't1')
         self.assertEqual(new_trial.hyperparameters['lr'], 0.1)
@@ -93,7 +94,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.runtime_engine = MockSdeRuntimeEngine()
         t1 = Trial(id='t1', algorithm_name='TestAlgo', hyperparameters={}, status=TrialStatus.ACTIVE)
         orchestrator.experiment.trials = {'t1': t1}
-        orchestrator.dispatch("MANUAL_PRUNE_TRIAL", {"trial_id": "t1"})
+        orchestrator.dispatch(ActionType.MANUAL_PRUNE_TRIAL, {"trial_id": "t1"})
         orchestrator.runtime_engine.cancel_work_for_trial.assert_called_once_with("t1")
 
     @patch('sde.engine.orchestrator.SdeRuntimeEngine')
@@ -105,7 +106,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.runtime_engine = MockSdeRuntimeEngine()
         source_trial = Trial(id='t1', algorithm_name='TestAlgo', hyperparameters={'lr': 0.1}, results=[(1, 0.9)])
         orchestrator.experiment.trials = {'t1': source_trial}
-        orchestrator.dispatch("SPAWN_SIMILAR_TRIAL", {"source_trial_id": "t1"})
+        orchestrator.dispatch(ActionType.SPAWN_SIMILAR_TRIAL, {"source_trial_id": "t1"})
         new_trial = next(t for t in orchestrator.experiment.trials.values() if t.id != 't1')
         # We now call the more general add_trials_live method
         orchestrator.runtime_engine.add_trials_live.assert_called_once_with([new_trial])
@@ -118,7 +119,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         algo = AlgorithmConfig(id='algo1', name='TestAlgo', parameter_space={'lr': (0.01, 0.1)})
         orchestrator.experiment.algorithms['algo1'] = algo
-        orchestrator.dispatch("START_RUN", {})
+        orchestrator.dispatch(ActionType.START_RUN, {})
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         MockSdeRuntimeEngine.assert_called_once()
         mock_engine_instance = MockSdeRuntimeEngine.return_value
@@ -132,7 +133,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         algo1 = AlgorithmConfig(id='algo1', name='TestAlgo1', parameter_space={'lr': (0.01, 0.1)})
         orchestrator.experiment.algorithms['algo1'] = algo1
-        orchestrator.dispatch("START_RUN", {})
+        orchestrator.dispatch(ActionType.START_RUN, {})
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
@@ -150,7 +151,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         # 2. Dispatch the ADD_ALGORITHM action
         mock_emit.reset_mock()
         add_payload = {"name": "TestAlgo2", "parameter_space": {"lr": (0.2, 0.9)}}
-        orchestrator.dispatch("ADD_ALGORITHM", add_payload)
+        orchestrator.dispatch(ActionType.ADD_ALGORITHM, add_payload)
 
         # 3. Assertions
         self.assertIn('algo_1', orchestrator.experiment.algorithms)
@@ -182,19 +183,19 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.algorithms['algo1'] = AlgorithmConfig(id='a1', name='A1', parameter_space={})
 
         # Start the run
-        orchestrator.dispatch("START_RUN", {})
+        orchestrator.dispatch(ActionType.START_RUN, {})
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
         mock_engine_instance.start.assert_called_once()
 
         # Pause the run
-        orchestrator.dispatch("PAUSE_RUN", {})
+        orchestrator.dispatch(ActionType.PAUSE_RUN, {})
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.PAUSED)
         mock_engine_instance.pause.assert_called_once()
 
         # Resume the run
-        orchestrator.dispatch("RESUME_RUN", {})
+        orchestrator.dispatch(ActionType.RESUME_RUN, {})
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         mock_engine_instance.resume.assert_called_once()
 
@@ -207,14 +208,14 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator = ExperimentOrchestrator()
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         orchestrator.experiment.algorithms['algo1'] = AlgorithmConfig(id='a1', name='A1', parameter_space={})
-        orchestrator.dispatch("START_RUN", {})
+        orchestrator.dispatch(ActionType.START_RUN, {})
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
         self.assertEqual(orchestrator.experiment.adaptive_policy, "SuccessiveHalving")
 
         # Change the policy
         mock_emit.reset_mock()
-        orchestrator.dispatch("SET_ADAPTIVE_POLICY", {"policy_name": "Hyperband"})
+        orchestrator.dispatch(ActionType.SET_ADAPTIVE_POLICY, {"policy_name": "Hyperband"})
 
         # Assert state is updated
         self.assertEqual(orchestrator.experiment.adaptive_policy, "Hyperband")
@@ -233,7 +234,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         algo1 = AlgorithmConfig(id='algo1', name='TestAlgo1', parameter_space={'lr': (0.01, 0.1)})
         orchestrator.experiment.algorithms['algo1'] = algo1
-        orchestrator.dispatch("START_RUN", {})
+        orchestrator.dispatch(ActionType.START_RUN, {})
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
         # Mock the scheduler on the mock engine
@@ -245,7 +246,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
 
         # Update the parameter space
         new_space = {'lr': (0.1, 0.5), 'epochs': [10, 20]}
-        orchestrator.dispatch("UPDATE_PARAM_SPACE", {"algorithm_id": "algo1", "new_space": new_space})
+        orchestrator.dispatch(ActionType.UPDATE_PARAM_SPACE, {"algorithm_id": "algo1", "new_space": new_space})
 
         # Assert the space was updated in the state
         self.assertEqual(orchestrator.experiment.algorithms['algo1'].parameter_space, new_space)
@@ -263,7 +264,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         """Test that invalid actions are logged and ignored."""
         orchestrator = ExperimentOrchestrator()
         mock_emit.reset_mock()
-        orchestrator.dispatch("ADD_ALGORITHM", {})
+        orchestrator.dispatch(ActionType.ADD_ALGORITHM, {})
         self.assertEqual(len(orchestrator.experiment.algorithms), 0)
         mock_emit.assert_any_call("WARN: Action 'ADD_ALGORITHM' is not valid for the current state or payload.")
 
@@ -283,7 +284,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         # 'MANUAL_PRUNE_TRIAL' is a valid action type, but it requires a 'trial_id'.
         # Providing it with an 'algorithm_id' makes it invalid in this context.
         # The old permissive validator might have let this pass the check.
-        orchestrator.dispatch("MANUAL_PRUNE_TRIAL", {"algorithm_id": "algo1"})
+        orchestrator.dispatch(ActionType.MANUAL_PRUNE_TRIAL, {"algorithm_id": "algo1"})
 
         # The trial should NOT be pruned.
         self.assertEqual(orchestrator.experiment.trials['trial1'].status, TrialStatus.ACTIVE)
@@ -296,5 +297,5 @@ class TestExperimentOrchestrator(unittest.TestCase):
         mock_emit.reset_mock()
 
         # This action doesn't exist and should be rejected by the handler check.
-        orchestrator.dispatch("DO_A_BARREL_ROLL", {})
-        mock_emit.assert_any_call("ERROR: No handler for action 'DO_A_BARREL_ROLL'")
+        with self.assertRaises(AttributeError):
+            orchestrator.dispatch(ActionType.DO_A_BARREL_ROLL, {})

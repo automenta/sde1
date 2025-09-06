@@ -53,6 +53,16 @@ class Trial:
         d["status"] = self.status.value
         return d
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "Trial":
+        """Creates a Trial instance from a dictionary."""
+        d["status"] = TrialStatus(d["status"])
+        # This will ignore any extra keys in the dict, which is robust
+        return cls(**{
+            k: v for k, v in d.items()
+            if k in dataclasses.asdict(cls(id="", algorithm_name="", hyperparameters={}))
+        })
+
 
 # --- V2 Unified Specification Types ---
 

@@ -3,3 +3,6 @@ pyqtgraph
 torch
 torchvision
 numpy
+
+[dev]
+pytest

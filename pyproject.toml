@@ -4,10 +4,41 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sde"
-version = "0.1.0"
-description = "Scientific Discovery Engine"
+version = "0.2.0"
+description = "A Scientific Discovery Engine for accelerated ML research."
 readme = "README.md"
 requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "SDE Contributor", email = "contributor@example.com" }
+]
+keywords = ["machine learning", "research", "automation", "visualization"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "PyQt6",
+    "pyqtgraph",
+    "torch",
+    "torchvision",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[project.gui-scripts]
+sde-ui = "sde.run_ui:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

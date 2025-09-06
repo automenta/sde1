@@ -6,6 +6,8 @@ sde/events.py
 sde.egg-info/PKG-INFO
 sde.egg-info/SOURCES.txt
 sde.egg-info/dependency_links.txt
+sde.egg-info/entry_points.txt
+sde.egg-info/requires.txt
 sde.egg-info/top_level.txt
 sde/challenges/__init__.py
 sde/challenges/cifar10.py
@@ -13,6 +15,7 @@ sde/challenges/factory.py
 sde/challenges/fashion_mnist.py
 sde/challenges/mnist.py
 sde/challenges/utils.py
+sde/core/actions.py
 sde/core/types.py
 sde/engine/action_validator.py
 sde/engine/compute_scheduler.py
@@ -34,6 +37,7 @@ sde/ui/__init__.py
 sde/ui/hyperparameters.py
 sde/ui/main_window.py
 sde/ui/models.py
+sde/ui/setup_pane.py
 sde/ui/view_model.py
 tests/test_adaptive_scheduler.py
 tests/test_hyperband.py

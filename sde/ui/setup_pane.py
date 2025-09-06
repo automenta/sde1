@@ -1,0 +1,224 @@
+import sys
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFormLayout,
+    QGroupBox,
+    QComboBox,
+    QListWidget,
+    QPushButton,
+    QSlider,
+    QLabel,
+    QCheckBox,
+    QTableWidget,
+    QHeaderView,
+    QProgressBar,
+    QListWidgetItem,
+)
+from PyQt6.QtCore import Qt, pyqtSignal
+
+from sde.models import AVAILABLE_MODELS
+from sde.challenges import AVAILABLE_DATASETS
+
+
+class SetupPane(QWidget):
+    """
+    The left-hand pane for experiment setup and controls.
+    It encapsulates all the widgets and logic for configuring and
+    controlling an experiment run.
+    """
+
+    # Signals to communicate user actions to the main window
+    start_simple_run_requested = pyqtSignal(dict)
+    tune_run_requested = pyqtSignal()
+    add_models_requested = pyqtSignal()
+    pause_run_requested = pyqtSignal()
+    resume_run_requested = pyqtSignal()
+    dataset_changed = pyqtSignal(str)
+    throttle_changed = pyqtSignal(int)
+    remove_algorithm_requested = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMaximumWidth(350)
+        self._init_ui()
+        self._connect_signals()
+        self.populate_datasets()
+
+    def _init_ui(self):
+        """Initializes the UI layout and sub-components."""
+        main_layout = QVBoxLayout(self)
+
+        # --- Experiment Setup Group ---
+        self.setup_group = QGroupBox("1. Experiment Setup")
+        setup_form_layout = QFormLayout(self.setup_group)
+        self.dataset_combo = QComboBox()
+        self.model_list = QListWidget()
+        self.model_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.model_list.setMinimumHeight(150)
+        setup_form_layout.addRow("Dataset:", self.dataset_combo)
+        setup_form_layout.addRow("Models:", self.model_list)
+
+        # --- Execution Settings Group ---
+        self.settings_group = QGroupBox("2. Execution Settings")
+        settings_form_layout = QFormLayout(self.settings_group)
+        self.throttle_slider = QSlider(Qt.Orientation.Horizontal)
+        self.throttle_slider.setRange(1, 100)
+        self.throttle_slider.setValue(100)
+        self.throttle_label = QLabel("100%")
+        throttle_widget = QWidget()
+        throttle_layout = QHBoxLayout(throttle_widget)
+        throttle_layout.addWidget(self.throttle_slider)
+        throttle_layout.addWidget(self.throttle_label)
+        throttle_layout.setContentsMargins(0, 0, 0, 0)
+        self.checkpoint_checkbox = QCheckBox("Enable Checkpointing")
+        self.checkpoint_checkbox.setChecked(False)
+        settings_form_layout.addRow("Worker Throttle:", throttle_widget)
+        settings_form_layout.addRow(self.checkpoint_checkbox)
+
+        # --- Execution Controls ---
+        controls_group = QGroupBox("3. Execution Controls")
+        controls_layout = QVBoxLayout(controls_group)
+        self.start_button = QPushButton("Start (Defaults)")
+        self.tune_button = QPushButton("Tune Hyperparameters...")
+        self.add_models_button = QPushButton("Add Selected Models to Run")
+        self.pause_button = QPushButton("Pause")
+        self.resume_button = QPushButton("Resume")
+
+        simple_run_layout = QHBoxLayout()
+        simple_run_layout.addWidget(self.start_button)
+        advanced_run_layout = QHBoxLayout()
+        advanced_run_layout.addWidget(self.tune_button)
+        mid_run_layout = QHBoxLayout()
+        mid_run_layout.addWidget(self.add_models_button)
+        pause_resume_layout = QHBoxLayout()
+        pause_resume_layout.addWidget(self.pause_button)
+        pause_resume_layout.addWidget(self.resume_button)
+
+        controls_layout.addLayout(simple_run_layout)
+        controls_layout.addLayout(advanced_run_layout)
+        controls_layout.addLayout(mid_run_layout)
+        controls_layout.addLayout(pause_resume_layout)
+
+        # --- Algorithm Management Group ---
+        self.algorithms_group = QGroupBox("4. Active Algorithms")
+        algorithms_layout = QVBoxLayout(self.algorithms_group)
+        self.algorithms_table = QTableWidget()
+        self.algorithms_table.setColumnCount(2)
+        self.algorithms_table.setHorizontalHeaderLabels(["Name", "Actions"])
+        header = self.algorithms_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        algorithms_layout.addWidget(self.algorithms_table)
+
+        # --- Progress Bar ---
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("Progress: %p%")
+
+        # --- Assemble Pane ---
+        main_layout.addWidget(self.setup_group)
+        main_layout.addWidget(self.settings_group)
+        main_layout.addWidget(controls_group)
+        main_layout.addWidget(self.algorithms_group)
+        main_layout.addStretch(1)
+        main_layout.addWidget(self.progress_bar)
+
+    def _connect_signals(self):
+        """Connects internal UI signals to the pane's public signals."""
+        self.dataset_combo.currentIndexChanged.connect(self.dataset_changed)
+        self.start_button.clicked.connect(self._on_start_simple_run)
+        self.tune_button.clicked.connect(self.tune_run_requested)
+        self.add_models_button.clicked.connect(self.add_models_requested)
+        self.pause_button.clicked.connect(self.pause_run_requested)
+        self.resume_button.clicked.connect(self.resume_run_requested)
+        self.throttle_slider.valueChanged.connect(self.throttle_changed)
+        self.throttle_slider.valueChanged.connect(lambda v: self.throttle_label.setText(f"{v}%"))
+
+    def _on_start_simple_run(self):
+        """Gathers settings and emits the start signal."""
+        settings = {
+            "enable_checkpointing": self.checkpoint_checkbox.isChecked()
+        }
+        self.start_simple_run_requested.emit(settings)
+
+    # --- Public Methods to Update UI State ---
+
+    def populate_datasets(self):
+        self.dataset_combo.addItems(AVAILABLE_DATASETS.keys())
+
+    def update_model_list(self, selected_dataset_name: str):
+        self.model_list.clear()
+        if not selected_dataset_name:
+            return
+        dataset_def = AVAILABLE_DATASETS[selected_dataset_name]
+        supported_models = [
+            name
+            for name, model_def in AVAILABLE_MODELS.items()
+            if dataset_def.type in model_def.supported_dataset_types
+        ]
+        for model_name in supported_models:
+            item = QListWidgetItem(model_name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.model_list.addItem(item)
+
+    def get_experiment_settings(self):
+        dataset_name = self.dataset_combo.currentText()
+        selected_models = [
+            self.model_list.item(i).text()
+            for i in range(self.model_list.count())
+            if self.model_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+        return dataset_name, selected_models
+
+    def get_newly_selected_models(self, existing_algo_names: set):
+        all_selected_models = {
+            self.model_list.item(i).text()
+            for i in range(self.model_list.count())
+            if self.model_list.item(i).checkState() == Qt.CheckState.Checked
+        }
+        return all_selected_models - existing_algo_names
+
+    def update_button_states(self, valid_actions: dict, status: str, has_challenge: bool):
+        global_actions = valid_actions.get("global", [])
+
+        can_start = "START_RUN" in global_actions
+        self.start_button.setEnabled(can_start)
+        self.tune_button.setEnabled(can_start)
+
+        self.pause_button.setEnabled("PAUSE_RUN" in global_actions)
+        self.resume_button.setEnabled("RESUME_RUN" in global_actions)
+
+        can_add_mid_run = "ADD_ALGORITHM" in global_actions and status in ["RUNNING", "PAUSED"]
+        self.add_models_button.setEnabled(can_add_mid_run)
+
+        self.dataset_combo.setEnabled(not has_challenge)
+        self.model_list.setEnabled("ADD_ALGORITHM" in global_actions)
+        self.settings_group.setEnabled(status == "DEFINING")
+
+    def update_algorithm_table(self, algorithms: dict, valid_actions: dict):
+        self.algorithms_table.setRowCount(0)
+        algo_actions = valid_actions.get("algorithms", {})
+
+        for algo_id, algo_data in algorithms.items():
+            row_position = self.algorithms_table.rowCount()
+            self.algorithms_table.insertRow(row_position)
+            self.algorithms_table.setItem(row_position, 0, QListWidgetItem(algo_data.name))
+
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(0, 0, 0, 0)
+            remove_button = QPushButton("Remove")
+            remove_button.setEnabled("REMOVE_ALGORITHM" in algo_actions.get(algo_id, []))
+            remove_button.clicked.connect(
+                lambda _, a_id=algo_id: self.remove_algorithm_requested.emit(a_id)
+            )
+            actions_layout.addWidget(remove_button)
+            self.algorithms_table.setCellWidget(row_position, 1, actions_widget)
+
+    def update_progress_bar(self, progress: int):
+        self.progress_bar.setValue(progress)

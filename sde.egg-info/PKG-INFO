@@ -1,9 +1,28 @@
 Metadata-Version: 2.4
 Name: sde
-Version: 0.1.0
-Summary: Scientific Discovery Engine
+Version: 0.2.0
+Summary: A Scientific Discovery Engine for accelerated ML research.
+Author-email: SDE Contributor <contributor@example.com>
+License: MIT
+Keywords: machine learning,research,automation,visualization
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
+Requires-Dist: PyQt6
+Requires-Dist: pyqtgraph
+Requires-Dist: torch
+Requires-Dist: torchvision
+Requires-Dist: numpy
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
 
 # **Scientific Discovery Engine (SDE): Software Spec**
 
