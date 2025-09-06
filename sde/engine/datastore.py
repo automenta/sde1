@@ -24,7 +24,7 @@ class DataStore:
             trial = self._trials.get(trial_id)
             return copy.deepcopy(trial) if trial else None
 
-    def add_trial(self, trial: Trial):
+    def add_trial(self, trial: Trial) -> None:
         """Adds a new trial to the datastore in a thread-safe manner."""
         with self._lock:
             if trial.id in self._trials:
@@ -79,7 +79,7 @@ class DataStore:
 
             return trial
 
-    def update_trial_status(self, trial_id: str, status: TrialStatus):
+    def update_trial_status(self, trial_id: str, status: TrialStatus) -> None:
         """Updates the status of a single trial."""
         with self._lock:
             trial = self._trials.get(trial_id)

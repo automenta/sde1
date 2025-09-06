@@ -35,6 +35,8 @@ class SetupPane(QWidget):
     add_models_requested = pyqtSignal()
     pause_run_requested = pyqtSignal()
     resume_run_requested = pyqtSignal()
+    save_run_requested = pyqtSignal()
+    load_run_requested = pyqtSignal()
     dataset_changed = pyqtSignal(str)
     throttle_changed = pyqtSignal(int)
     remove_algorithm_requested = pyqtSignal(str)
@@ -93,6 +95,8 @@ class SetupPane(QWidget):
         )
         self.pause_button = QPushButton("Pause")
         self.resume_button = QPushButton("Resume")
+        self.save_button = QPushButton("Save Run")
+        self.load_button = QPushButton("Load Run")
 
         simple_run_layout = QHBoxLayout()
         simple_run_layout.addWidget(self.start_button)
@@ -103,11 +107,15 @@ class SetupPane(QWidget):
         pause_resume_layout = QHBoxLayout()
         pause_resume_layout.addWidget(self.pause_button)
         pause_resume_layout.addWidget(self.resume_button)
+        persistence_layout = QHBoxLayout()
+        persistence_layout.addWidget(self.save_button)
+        persistence_layout.addWidget(self.load_button)
 
         controls_layout.addLayout(simple_run_layout)
         controls_layout.addLayout(advanced_run_layout)
         controls_layout.addLayout(mid_run_layout)
         controls_layout.addLayout(pause_resume_layout)
+        controls_layout.addLayout(persistence_layout)
 
         # --- Algorithm Management Group ---
         self.algorithms_group = QGroupBox("4. Active Algorithms")
@@ -143,6 +151,8 @@ class SetupPane(QWidget):
         self.add_models_button.clicked.connect(self.add_models_requested)
         self.pause_button.clicked.connect(self.pause_run_requested)
         self.resume_button.clicked.connect(self.resume_run_requested)
+        self.save_button.clicked.connect(self.save_run_requested)
+        self.load_button.clicked.connect(self.load_run_requested)
         self.throttle_slider.valueChanged.connect(self.throttle_changed)
         self.throttle_slider.valueChanged.connect(lambda v: self.throttle_label.setText(f"{v}%"))
 
@@ -200,6 +210,10 @@ class SetupPane(QWidget):
 
         self.pause_button.setEnabled("PAUSE_RUN" in global_actions)
         self.resume_button.setEnabled("RESUME_RUN" in global_actions)
+
+        # Persistence buttons
+        self.save_button.setEnabled(has_challenge)  # Can save as soon as there's something to save
+        self.load_button.setEnabled(status == "DEFINING") # Can only load when not running
 
         can_add_mid_run = "ADD_ALGORITHM" in global_actions and status in ["RUNNING", "PAUSED"]
         self.add_models_button.setEnabled(can_add_mid_run)

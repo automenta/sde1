@@ -40,6 +40,10 @@ dev = [
 [project.gui-scripts]
 sde-ui = "sde.run_ui:main"
 
+[project.urls]
+Homepage = "https://github.com/example/sde"
+Repository = "https://github.com/example/sde"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["sde*"]

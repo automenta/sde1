@@ -7,6 +7,7 @@ pyproject.toml
 sde/__main__.py
 sde/config.py
 sde/events.py
+sde/persistence.py
 sde.egg-info/PKG-INFO
 sde.egg-info/SOURCES.txt
 sde.egg-info/dependency_links.txt

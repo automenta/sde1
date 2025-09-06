@@ -22,3 +22,9 @@ MAX_WORKERS = os.cpu_count() or 2
 
 # The default directory for storing model checkpoints.
 CHECKPOINTS_DIR = "./checkpoints"
+
+
+# --- Initialization ---
+
+# Ensure the checkpoints directory exists.
+os.makedirs(CHECKPOINTS_DIR, exist_ok=True)

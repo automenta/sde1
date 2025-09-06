@@ -55,13 +55,24 @@ class Trial:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Trial":
-        """Creates a Trial instance from a dictionary."""
-        d["status"] = TrialStatus(d["status"])
-        # This will ignore any extra keys in the dict, which is robust
-        return cls(**{
-            k: v for k, v in d.items()
-            if k in dataclasses.asdict(cls(id="", algorithm_name="", hyperparameters={}))
-        })
+        """
+        Creates a Trial instance from a dictionary.
+
+        This method is robust to extra keys in the input dictionary,
+        which allows for forward compatibility if the Trial class is
+        extended with new fields.
+        """
+        # Ensure status is converted from string to Enum
+        if "status" in d and isinstance(d["status"], str):
+            d["status"] = TrialStatus(d["status"])
+
+        # Get the names of the fields defined in the Trial dataclass
+        known_fields = {f.name for f in dataclasses.fields(cls)}
+
+        # Filter the input dictionary to only include known fields
+        filtered_dict = {k: v for k, v in d.items() if k in known_fields}
+
+        return cls(**filtered_dict)
 
 
 # --- V2 Unified Specification Types ---
@@ -83,6 +94,11 @@ class AlgorithmConfig:
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AlgorithmConfig":
+        """Creates an AlgorithmConfig instance from a dictionary."""
+        return cls(**d)
 
 
 @dataclass
@@ -116,3 +132,25 @@ class Experiment:
             "adaptive_policy": self.adaptive_policy,
             "patience_budget": self.patience_budget,
         }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Experiment":
+        """Creates an Experiment instance from a dictionary."""
+        # First, create the simple fields
+        exp = cls(
+            id=d["id"],
+            status=ExperimentStatus(d["status"]),
+            challenge=d.get("challenge"),
+            insights=d.get("insights", []),
+            adaptive_policy=d.get("adaptive_policy", "SuccessiveHalving"),
+            patience_budget=d.get("patience_budget"),
+        )
+
+        # Then, deserialize the nested objects
+        exp.algorithms = {
+            k: AlgorithmConfig.from_dict(v) for k, v in d.get("algorithms", {}).items()
+        }
+        exp.trials = {
+            k: Trial.from_dict(v) for k, v in d.get("trials", {}).items()
+        }
+        return exp

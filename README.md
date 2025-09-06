@@ -6,6 +6,33 @@ This document serves a _dual_ purpose:
 
 ---
 
+## **Quick Start**
+
+1.  **Installation:**
+    ```bash
+    # Clone the repository (or download the source)
+    git clone https://github.com/example/sde.git
+    cd sde
+
+    # Install the package and its dependencies
+    pip install .
+    ```
+
+2.  **Running the Application:**
+    ```bash
+    # The installation provides a command-line entry point:
+    sde-ui
+    ```
+
+3.  **Basic Usage:**
+    -   Select a dataset (e.g., `CIFAR10`).
+    -   Select one or more models from the list that appears.
+    -   Click "Start (Defaults)" to begin the experiment.
+    -   Watch the results appear in real-time in the plot and table.
+    -   Use the "Pause", "Save Run", and "Load Run" buttons to control and persist your experiment.
+
+---
+
 ## **1.0 Mission & Manifesto: The Currency of Insight**
 
 We believe that **scientific progress is an optimization problem**. The primary limited resource is not compute, nor data, but **human patience**. Patience is the finite currency researchers invest in the pursuit of knowledge. Every moment spent waiting for a result, debugging a model, or exploring a dead-end is an expenditure from this precious budget.

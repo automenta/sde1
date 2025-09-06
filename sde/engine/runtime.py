@@ -1,7 +1,7 @@
 import threading
 import logging
 import queue
-from typing import List, Callable, Iterator, Dict, Tuple
+from typing import List, Callable, Iterator, Dict, Tuple, Optional
 
 from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus
 from sde.engine.datastore import DataStore
@@ -31,6 +31,19 @@ class SdeRuntimeEngine:
         enable_checkpointing: bool = False,
         checkpoints_dir: str = config.CHECKPOINTS_DIR,
     ):
+        """
+        Initializes the SdeRuntimeEngine.
+
+        Args:
+            trials: The initial list of Trial objects to manage.
+            dataset_name: The name of the challenge dataset to use (e.g., 'CIFAR10').
+            adaptive_scheduler: The policy for scheduling work and pruning trials.
+            trial_updated_callback: A function to call when a trial's state is updated.
+            insights_callback: A function to call when new insights are generated.
+            max_workers: The number of parallel processes for computation.
+            enable_checkpointing: Whether to save model checkpoints after training steps.
+            checkpoints_dir: The directory to store model checkpoints.
+        """
         self.datastore = DataStore(trials)
         self.adaptive_scheduler = adaptive_scheduler
         self.trial_updated_callback = trial_updated_callback
@@ -47,13 +60,14 @@ class SdeRuntimeEngine:
             enable_checkpointing=enable_checkpointing,
             checkpoints_dir=checkpoints_dir,
         )
-        self._is_running = False
-        self._thread = None
-        self.work_queue = queue.PriorityQueue()
-        self._pause_event = threading.Event()
-        self._cancelled_trials = set()
+        # --- Threading and State Control ---
+        self._is_running = False  # Flag to signal the main loop to terminate.
+        self._thread: Optional[threading.Thread] = None  # The main execution thread.
+        self.work_queue = queue.PriorityQueue()  # Thread-safe queue for pending work.
+        self._pause_event = threading.Event()  # Used to pause and resume the loop.
+        self._cancelled_trials = set()  # A set of trial_ids to ignore.
 
-    def start(self):
+    def start(self) -> None:
         """Starts the main execution loop in a background thread."""
         if self._thread is None:
             self._is_running = True
@@ -73,7 +87,7 @@ class SdeRuntimeEngine:
             self._thread = threading.Thread(target=self._execution_loop, daemon=True)
             self._thread.start()
 
-    def stop(self):
+    def stop(self) -> None:
         """Signals the execution loop to stop and cleans up."""
         if self._is_running:
             self._is_running = False
@@ -88,22 +102,22 @@ class SdeRuntimeEngine:
             self._thread = None
             logger.info("SdeRuntimeEngine has been cleanly shut down.")
 
-    def pause(self):
+    def pause(self) -> None:
         """Pauses the execution loop."""
         if self._is_running:
             self._pause_event.clear()  # Clearing the event causes the loop to block
             logger.info("Runtime engine execution paused.")
 
-    def resume(self):
+    def resume(self) -> None:
         """Resumes the execution loop."""
         if self._is_running:
             self._pause_event.set()  # Setting the event unblocks the loop
             logger.info("Runtime engine execution resumed.")
 
-    def cancel_work_for_trial(self, trial_id: str):
+    def cancel_work_for_trial(self, trial_id: str) -> None:
         """
         Passes a cancellation request down to the scheduler and marks the trial
-        so any pending work units for it are ignored.
+        so any pending work units for it are ignored. This is thread-safe.
         """
         logger.info(
             f"Runtime engine received request to cancel work for trial {trial_id}."
@@ -111,7 +125,7 @@ class SdeRuntimeEngine:
         self._cancelled_trials.add(trial_id)
         self.compute_scheduler.cancel_work_for_trial(trial_id)
 
-    def add_trials_live(self, trials: List[Trial]):
+    def add_trials_live(self, trials: List[Trial]) -> None:
         """
         Injects new trials into the live datastore and generates work units for them,
         adding them to the active work queue. This is thread-safe.
@@ -137,7 +151,7 @@ class SdeRuntimeEngine:
             f"Added {len(new_work_units)} new work units to the live queue."
         )
 
-    def update_adaptive_policy(self, new_scheduler: AdaptiveScheduler):
+    def update_adaptive_policy(self, new_scheduler: AdaptiveScheduler) -> None:
         """
         Safely swaps the adaptive scheduler mid-run.
         This is a thread-safe operation.
@@ -269,7 +283,12 @@ class SdeRuntimeEngine:
     def submit_work(
         self, work_units: List[WorkUnit]
     ) -> Iterator[Tuple[WorkUnit, dict]]:
-        """Submits a list of work units to the scheduler and yields results."""
+        """
+        Submits a list of work units to the scheduler and yields results.
+
+        Note: This is a lower-level API that bypasses the adaptive scheduler.
+        It's intended for specific use cases, not general experiment execution.
+        """
         if not self._is_running:
             raise RuntimeError("Runtime Engine is not running.")
         return self.compute_scheduler.run(work_units)

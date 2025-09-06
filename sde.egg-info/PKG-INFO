@@ -4,6 +4,8 @@ Version: 0.2.0
 Summary: A Scientific Discovery Engine for accelerated ML research.
 Author-email: SDE Contributor <contributor@example.com>
 License: MIT
+Project-URL: Homepage, https://github.com/example/sde
+Project-URL: Repository, https://github.com/example/sde
 Keywords: machine learning,research,automation,visualization
 Classifier: Development Status :: 3 - Alpha
 Classifier: Intended Audience :: Science/Research
@@ -31,6 +33,33 @@ Dynamic: license-file
 This document serves a _dual_ purpose:
 1.  **A Manifesto:** To articulate the core philosophy and guiding principles behind the Scientific Discovery Engine. It defines *why* we are building this and what we believe about the nature of discovery.
 2.  **A Technical Specification:** To provide a complete, language-agnostic blueprint for the system's architecture, components, and functionality. It defines *what* we are building and *how* it will behave.
+
+---
+
+## **Quick Start**
+
+1.  **Installation:**
+    ```bash
+    # Clone the repository (or download the source)
+    git clone https://github.com/example/sde.git
+    cd sde
+
+    # Install the package and its dependencies
+    pip install .
+    ```
+
+2.  **Running the Application:**
+    ```bash
+    # The installation provides a command-line entry point:
+    sde-ui
+    ```
+
+3.  **Basic Usage:**
+    -   Select a dataset (e.g., `CIFAR10`).
+    -   Select one or more models from the list that appears.
+    -   Click "Start (Defaults)" to begin the experiment.
+    -   Watch the results appear in real-time in the plot and table.
+    -   Use the "Pause", "Save Run", and "Load Run" buttons to control and persist your experiment.
 
 ---
 

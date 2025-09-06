@@ -25,6 +25,14 @@ class Worker:
         dataset_def: DatasetDefinition,
         checkpoints_dir: str = "./checkpoints",
     ):
+        """
+        Initializes the Worker.
+
+        Args:
+            model_def: The definition for the model to be trained/evaluated.
+            dataset_def: The definition for the dataset to be used.
+            checkpoints_dir: The directory for saving/loading model checkpoints.
+        """
         logger.info(f"Worker process initialized. Using device: {DEVICE}")
         self.model_def = model_def
         self.dataset_def = dataset_def

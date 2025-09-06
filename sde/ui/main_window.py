@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QTreeWidget,
     QTreeWidgetItem,
+    QFileDialog,
 )
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt
@@ -217,6 +218,8 @@ class MainWindow(QMainWindow):
         self.setup_pane.add_models_requested.connect(self.add_models_to_run)
         self.setup_pane.pause_run_requested.connect(self.pause_experiment)
         self.setup_pane.resume_run_requested.connect(self.resume_experiment)
+        self.setup_pane.save_run_requested.connect(self.save_experiment)
+        self.setup_pane.load_run_requested.connect(self.load_experiment)
         self.setup_pane.throttle_changed.connect(self.update_throttle)
         self.setup_pane.remove_algorithm_requested.connect(self.remove_algorithm)
 
@@ -384,6 +387,28 @@ class MainWindow(QMainWindow):
 
     def resume_experiment(self):
         self.orchestrator.dispatch(ActionType.RESUME_RUN, {})
+
+    def save_experiment(self):
+        """Opens a file dialog to save the current experiment state."""
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, "Save Experiment", "", "SDE JSON Files (*.sde.json)"
+        )
+        if filepath:
+            self.orchestrator.dispatch(
+                ActionType.SAVE_EXPERIMENT, {"filepath": filepath}
+            )
+
+    def load_experiment(self):
+        """Opens a file dialog to load an experiment state."""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Load Experiment", "", "SDE JSON Files (*.sde.json)"
+        )
+        if filepath:
+            # Clear the UI before dispatching the load action
+            self._clear_previous_experiment()
+            self.orchestrator.dispatch(
+                ActionType.LOAD_EXPERIMENT, {"filepath": filepath}
+            )
 
     def remove_algorithm(self, algorithm_id: str):
         self.orchestrator.dispatch(ActionType.REMOVE_ALGORITHM, {"algorithm_id": algorithm_id})

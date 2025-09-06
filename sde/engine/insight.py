@@ -18,11 +18,23 @@ class Insight:
 class InsightEngine:
     """
     Analyzes the state of an experiment to find and report insights.
+
+    This engine contains a suite of "detector" methods that are run at
+    different points in a trial's lifecycle (e.g., after each epoch,
+    or upon completion) to discover meaningful patterns in the results.
     """
 
     def __init__(
         self, trials: Dict[str, Trial], primary_metric: str, higher_is_better: bool
     ):
+        """
+        Initializes the InsightEngine.
+
+        Args:
+            trials: A reference to the dictionary of all trials in the experiment.
+            primary_metric: The name of the metric to use for comparisons (e.g., "accuracy").
+            higher_is_better: True if a higher value of the primary metric is better.
+        """
         self.trials = trials
         self.primary_metric = primary_metric
         self.higher_is_better = higher_is_better
@@ -35,8 +47,13 @@ class InsightEngine:
 
     def analyze_on_epoch(self, active_trial: Trial) -> List[Insight]:
         """
-        Runs detectors that should be checked after every single epoch.
-        These are lightweight and provide real-time feedback.
+        Runs lightweight detectors that should be checked after every single epoch.
+
+        Args:
+            active_trial: The trial that has just completed a training epoch.
+
+        Returns:
+            A list of any new insights that were discovered.
         """
         detectors = [
             self._detect_best_performer,
@@ -48,8 +65,14 @@ class InsightEngine:
 
     def analyze_on_finish(self, finished_trial: Trial) -> List[Insight]:
         """
-        Runs detectors that should only be checked when a trial terminates.
-        These are more computationally expensive, summary-level analyses.
+        Runs more computationally expensive, summary-level analyses that should
+        only be checked when a trial terminates (is completed or pruned).
+
+        Args:
+            finished_trial: The trial that has just finished its lifecycle.
+
+        Returns:
+            A list of any new insights that were discovered.
         """
         detectors = [
             self._detect_hyperparameter_correlation,
@@ -70,12 +93,21 @@ class InsightEngine:
                     all_insights.append(result)
         return all_insights
 
-    def _detect_best_performer(self, finished_trial: Trial) -> Optional[Insight]:
+    def _detect_best_performer(self, trial: Trial) -> Optional[Insight]:
         """
-        Checks if the finished trial is now the best-performing trial overall.
+        Checks if the given trial is now the best-performing trial overall.
+
+        An insight is generated only if this trial surpasses the current best,
+        and only for the trial that becomes the new leader.
+
+        Args:
+            trial: The trial to evaluate.
+
+        Returns:
+            A "BEST_PERFORMER" insight if this trial is the new best, else None.
         """
         try:
-            finished_trial_perf = finished_trial.results[self.primary_metric][-1][1]
+            finished_trial_perf = trial.results[self.primary_metric][-1][1]
         except (KeyError, IndexError):
             return None  # Not enough data for this trial
 
@@ -94,12 +126,12 @@ class InsightEngine:
         elif not self.higher_is_better and finished_trial_perf < current_best_perf:
             is_new_best = True
 
-        if is_new_best and finished_trial.id != self.current_best_trial_id:
-            self.current_best_trial_id = finished_trial.id
+        if is_new_best and trial.id != self.current_best_trial_id:
+            self.current_best_trial_id = trial.id
             return Insight(
-                message=f"New best performer! Trial {finished_trial.id[:6]} has reached {finished_trial_perf:.4f} {self.primary_metric}.",
+                message=f"New best performer! Trial {trial.id[:6]} has reached {finished_trial_perf:.4f} {self.primary_metric}.",
                 type="BEST_PERFORMER",
-                trial_ids=[finished_trial.id],
+                trial_ids=[trial.id],
             )
         return None
 
@@ -119,10 +151,18 @@ class InsightEngine:
 
     def _detect_performance_crossover(self, active_trial: Trial) -> List[Insight]:
         """
-        Checks if the active trial has just overtaken another trial in performance.
-        This is checked any time a trial completes an epoch. A crossover is only
-        fired once per pair and winner, allowing for "cross-back" events to be
-        reported.
+        Checks if the active trial has just overtaken another trial.
+
+        This is checked any time a trial completes an epoch. A crossover is
+        detected if the sign of the performance delta between two trials flips.
+        An insight is fired only once per pair and winner, allowing for
+        "cross-back" events to be reported if the lead changes again.
+
+        Args:
+            active_trial: The trial that just completed an epoch.
+
+        Returns:
+            A list of "PERFORMANCE_CROSSOVER" insights, which may be empty.
         """
         insights = []
         try:
@@ -190,8 +230,20 @@ class InsightEngine:
         self, trial: Trial, lookback: int = 4, relative_tolerance: float = 0.005
     ) -> Optional[Insight]:
         """
-        Checks if a trial's performance has not improved significantly over recent epochs.
-        Uses a relative tolerance to be robust to different metric scales.
+        Checks if a trial's performance has stalled.
+
+        A plateau is detected if the relative improvement over a 'lookback'
+        window is less than a given tolerance. To avoid spam, the insight is
+        only fired once per trial until its performance improves again.
+
+        Args:
+            trial: The trial to check for a plateau.
+            lookback: The number of epochs to look back for comparison.
+            relative_tolerance: The minimum relative improvement required to not
+                                be considered a plateau.
+
+        Returns:
+            A "PLATEAU" insight if detected, else None.
         """
         try:
             history = [val for _, val in trial.results[self.primary_metric]]
@@ -320,7 +372,27 @@ class InsightEngine:
         min_group_size: int = 3,
         significance_threshold: float = 0.1,
     ) -> List[Insight]:
-        """Analyzes completed trials to find correlations between hyperparameters and performance."""
+        """
+        Analyzes completed trials to find correlations between hyperparameters and performance.
+
+        This method is called when a trial finishes. It groups trials by their
+        hyperparameter values and compares the average performance of these
+        groups. If one group's performance is significantly better than another's,
+        an insight is generated.
+
+        Args:
+            finished_trial: The trial that just finished (used as a trigger).
+            min_trials_for_correlation: The minimum number of completed trials
+                                        required to run the analysis.
+            min_group_size: The minimum number of trials required in a group
+                            to be considered in the analysis.
+            significance_threshold: The minimum relative performance difference
+                                    between the best and worst groups to be
+                                    considered significant.
+
+        Returns:
+            A list of "HYPERPARAM_CORRELATION" insights, which may be empty.
+        """
         completed_trials = self._get_completed_trials_with_results(
             min_trials_for_correlation
         )
@@ -379,7 +451,19 @@ class InsightEngine:
         self, trial: Trial, z_score_threshold: float = 2.0
     ) -> Optional[Insight]:
         """
-        Checks if a trial's performance after its first epoch is a significant outlier.
+        Checks if a trial's performance after its first epoch is a significant
+        outlier compared to its peers.
+
+        This helps identify trials that are unlikely to succeed early on. An
+        outlier is detected if the Z-score of its performance relative to its
+        peers exceeds a threshold.
+
+        Args:
+            trial: The trial to check (must have just completed epoch 1).
+            z_score_threshold: The Z-score limit to be considered an outlier.
+
+        Returns:
+            A "POOR_INITIAL_PERFORMANCE" insight if detected, else None.
         """
         try:
             # Only run this check for the first epoch result
