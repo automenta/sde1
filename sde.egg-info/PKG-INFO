@@ -16,6 +16,7 @@ Classifier: Operating System :: OS Independent
 Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
+License-File: LICENSE
 Requires-Dist: PyQt6
 Requires-Dist: pyqtgraph
 Requires-Dist: torch
@@ -23,6 +24,7 @@ Requires-Dist: torchvision
 Requires-Dist: numpy
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
+Dynamic: license-file
 
 # **Scientific Discovery Engine (SDE): Software Spec**
 

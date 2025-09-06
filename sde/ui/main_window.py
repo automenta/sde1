@@ -169,12 +169,22 @@ class MainWindow(QMainWindow):
 
         # Log Group
         log_group = QGroupBox("Log")
-        log_layout = QVBoxLayout(log_group)
+        log_outer_layout = QVBoxLayout()
+        log_group.setLayout(log_outer_layout)
+
+        log_header_layout = QHBoxLayout()
+        log_header_layout.addStretch()
+        clear_log_button = QPushButton("Clear Log")
+        log_header_layout.addWidget(clear_log_button)
+
         self.log_text_edit = QTextEdit()
         self.log_text_edit.setReadOnly(True)
-        log_layout.addWidget(self.log_text_edit)
-        log_layout.setContentsMargins(0, 5, 0, 0)
-        log_group.setLayout(log_layout)
+
+        log_outer_layout.addLayout(log_header_layout)
+        log_outer_layout.addWidget(self.log_text_edit)
+        log_outer_layout.setContentsMargins(0, 5, 0, 0)
+
+        self.clear_log_button = clear_log_button
 
         right_bottom_splitter.addWidget(insights_group)
         right_bottom_splitter.addWidget(log_group)
@@ -212,7 +222,25 @@ class MainWindow(QMainWindow):
 
         # Right pane controls
         self.trials_table.itemSelectionChanged.connect(self.on_trial_selected)
+        self.trials_table.itemDoubleClicked.connect(self.on_trial_double_clicked)
         self.insights_list.itemClicked.connect(self.on_insight_selected)
+        self.clear_log_button.clicked.connect(self.clear_log)
+
+    def on_trial_double_clicked(self, item: QTableWidgetItem):
+        """Handles double-clicking a trial in the table to show its hyperparameters."""
+        row = item.row()
+        # Find the trial_id corresponding to this row
+        for tid, r in self.trial_row_map.items():
+            if r == row:
+                trial = self.view_model.trials.get(tid)
+                if trial:
+                    self.show_hyperparameter_dialog(trial.hyperparameters)
+                break
+
+    def clear_log(self):
+        """Clears the log text edit."""
+        self.log_text_edit.clear()
+        self.append_log_message("INFO: Log cleared.")
 
     def show_hyperparameter_dialog(self, hparams: dict):
         """Shows the hyperparameter viewer dialog for the given parameters."""
@@ -237,7 +265,7 @@ class MainWindow(QMainWindow):
         self.legend = self.plot_widget.addLegend()
 
     def setup_table(self):
-        self.trials_table.setColumnCount(8)
+        self.trials_table.setColumnCount(7)
         self.trials_table.setHorizontalHeaderLabels(
             [
                 "Trial ID",
@@ -247,12 +275,19 @@ class MainWindow(QMainWindow):
                 "Accuracy",
                 "Loss",
                 "Est. Time/Epoch",
-                "Hyperparameters",
             ]
         )
+        # Make the table non-editable and enable double-click to view hparams
+        self.trials_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self.trials_table.setToolTip(
+            "Double-click a row to view its hyperparameters."
+        )
+
         header = self.trials_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
+        header.setStretchLastSection(False) # Let the last column auto-resize
         self.trials_table.setColumnWidth(0, 100)
         self.trials_table.setColumnWidth(1, 120)
         self.trials_table.setColumnWidth(2, 100)
@@ -499,14 +534,14 @@ class MainWindow(QMainWindow):
         self.trials_table.setItem(row, 5, QTableWidgetItem(ui_trial.get_latest_metric("loss")))
         self.trials_table.setItem(row, 6, QTableWidgetItem(ui_trial.display_est_time))
 
-        # Add a button to view hyperparameters
-        view_button = QPushButton("View")
-        view_button.clicked.connect(lambda: self.show_hyperparameter_dialog(ui_trial.hyperparameters))
-        self.trials_table.setCellWidget(row, 7, view_button)
+        # The hyperparameter button is removed in favor of double-clicking the row.
 
         for col in range(self.trials_table.columnCount()):
-            if self.trials_table.item(row, col): # Only color items, not widgets
-                self.trials_table.item(row, col).setBackground(background_color)
+            item = self.trials_table.item(row, col)
+            if not item:  # Create item if it doesn't exist
+                item = QTableWidgetItem()
+                self.trials_table.setItem(row, col, item)
+            item.setBackground(background_color)
 
     def on_insight_selected(self, item: InsightListItem):
         """Highlights the trials relevant to the selected insight."""

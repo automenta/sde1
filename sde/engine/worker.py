@@ -3,6 +3,7 @@ import torch.optim as optim
 import os
 import time
 import logging
+import traceback
 from typing import Tuple
 
 from sde.core.types import WorkUnit, Trial, WorkUnitType
@@ -55,13 +56,26 @@ class Worker:
     ) -> dict:
         """
         Executes the given work unit for the given trial.
+        This method is wrapped in a try-except block to gracefully handle
+        errors during model training or evaluation (e.g., CUDA OOM).
         """
-        if work_unit.type == WorkUnitType.TRAIN_EPOCH:
-            return self._train_one_epoch(work_unit, trial, enable_checkpointing)
-        elif work_unit.type == WorkUnitType.PROFILE_SPEED:
-            return self._profile_speed(work_unit, trial)
-        else:
-            raise ValueError(f"Unsupported WorkUnitType: {work_unit.type}")
+        try:
+            if work_unit.type == WorkUnitType.TRAIN_EPOCH:
+                return self._train_one_epoch(work_unit, trial, enable_checkpointing)
+            elif work_unit.type == WorkUnitType.PROFILE_SPEED:
+                return self._profile_speed(work_unit, trial)
+            else:
+                # This case is for unsupported work unit types, which is a
+                # programming error, so we still raise.
+                raise ValueError(f"Unsupported WorkUnitType: {work_unit.type}")
+        except Exception as e:
+            logger.error(
+                f"WORKER FAILED for trial {trial.id} on work unit {work_unit.type}.\n"
+                f"Error: {e}\n"
+                f"Traceback: {traceback.format_exc()}"
+            )
+            # Return an error message that can be displayed in the UI log.
+            return {"error": f"Execution failed in worker: {e}"}
 
     def _setup_model_and_optimizer(
         self, trial: Trial

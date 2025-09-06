@@ -1,4 +1,8 @@
+CONTRIBUTING.md
+LICENSE
+MANIFEST.in
 README.md
+UPGRADE.md
 pyproject.toml
 sde/__main__.py
 sde/config.py

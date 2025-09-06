@@ -214,6 +214,8 @@ class SdeRuntimeEngine:
         This involves updating the datastore, calling callbacks, analyzing for
         insights, and scheduling the next units of work.
         """
+        # Get the trial's status *before* the update to detect transitions.
+        original_status = self.datastore.get_trial(work_unit.trial_id).status
         updated_trial = self.datastore.record_work_unit_result(work_unit, result)
 
         if not updated_trial:
@@ -231,15 +233,32 @@ class SdeRuntimeEngine:
                 f"Work unit {work_unit.type} for trial {updated_trial.id} failed: {result['error']}"
             )
 
+        # --- Insight Generation ---
+        # We need to know if the trial just finished to decide which analyses to run.
+        is_newly_finished = (
+            updated_trial.status in (TrialStatus.COMPLETED, TrialStatus.PRUNED)
+            and original_status
+            not in (TrialStatus.COMPLETED, TrialStatus.PRUNED)
+        )
+
+        # Always run the lightweight, per-epoch analysis.
+        insights = self.insight_engine.analyze_on_epoch(updated_trial)
+
+        # If the trial just finished, also run the expensive, summary analysis.
+        if is_newly_finished:
+            logger.info(
+                f"Trial {updated_trial.id} has finished. Running final analysis."
+            )
+            insights.extend(self.insight_engine.analyze_on_finish(updated_trial))
+
+        if insights and self.insights_callback:
+            self.insights_callback([insight.__dict__ for insight in insights])
+
+        # --- UI Callback ---
         if self.trial_updated_callback:
             self.trial_updated_callback(updated_trial.to_dict())
 
-        new_insights = self.insight_engine.analyze(updated_trial)
-        if new_insights and self.insights_callback:
-            self.insights_callback(
-                [insight.__dict__ for insight in new_insights]
-            )
-
+        # --- Scheduling Next Work ---
         next_work_units = self.adaptive_scheduler.get_next_work_units(
             updated_trial, self.datastore.get_all_trials()
         )

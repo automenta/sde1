@@ -33,22 +33,36 @@ class InsightEngine:
         self._fired_crossover_insights = set()
         self._fired_correlation_insights = set()
 
-    def analyze(self, finished_trial: Trial) -> List[Insight]:
+    def analyze_on_epoch(self, active_trial: Trial) -> List[Insight]:
         """
-        Runs all insight detectors and returns a list of new insights.
+        Runs detectors that should be checked after every single epoch.
+        These are lightweight and provide real-time feedback.
         """
         detectors = [
             self._detect_best_performer,
             self._detect_performance_crossover,
             self._detect_performance_plateau,
             self._detect_poor_initial_performance,
+        ]
+        return self._run_detectors(detectors, active_trial)
+
+    def analyze_on_finish(self, finished_trial: Trial) -> List[Insight]:
+        """
+        Runs detectors that should only be checked when a trial terminates.
+        These are more computationally expensive, summary-level analyses.
+        """
+        detectors = [
             self._detect_hyperparameter_correlation,
         ]
+        return self._run_detectors(detectors, finished_trial)
 
+    def _run_detectors(
+        self, detectors: list, trial: Trial
+    ) -> List[Insight]:
+        """Helper to run a list of detector methods on a given trial."""
         all_insights = []
         for detector in detectors:
-            # Detectors can return a single insight, a list of insights, or None
-            result = detector(finished_trial)
+            result = detector(trial)
             if result:
                 if isinstance(result, list):
                     all_insights.extend(result)

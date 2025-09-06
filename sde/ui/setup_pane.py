@@ -57,6 +57,10 @@ class SetupPane(QWidget):
         self.model_list = QListWidget()
         self.model_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         self.model_list.setMinimumHeight(150)
+        self.model_list.setToolTip(
+            "Select one or more models to include in the experiment.\n"
+            "Models compatible with the selected dataset will appear here."
+        )
         setup_form_layout.addRow("Dataset:", self.dataset_combo)
         setup_form_layout.addRow("Models:", self.model_list)
 
@@ -83,6 +87,10 @@ class SetupPane(QWidget):
         self.start_button = QPushButton("Start (Defaults)")
         self.tune_button = QPushButton("Tune Hyperparameters...")
         self.add_models_button = QPushButton("Add Selected Models to Run")
+        self.add_models_button.setToolTip(
+            "While a run is active, select new models from the list above\n"
+            "and click here to add them to the experiment."
+        )
         self.pause_button = QPushButton("Pause")
         self.resume_button = QPushButton("Resume")
 
