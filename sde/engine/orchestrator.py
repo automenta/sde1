@@ -1,38 +1,17 @@
 import logging
 import traceback
 import threading
-from typing import List, Callable, Dict, Any
+from typing import List, Dict, Any
 
 from sde.core.types import Experiment, ExperimentStatus, Trial, TrialStatus
 from sde.engine.runtime import SdeRuntimeEngine
-from sde.exploration.schedulers import SuccessiveHalvingScheduler, HyperbandScheduler
 from sde.challenges import AVAILABLE_DATASETS
+from sde.engine.action_validator import ActionValidator
+from sde.engine.factory import SchedulerFactory
+from sde.utils import Signal
 
 
 logger = logging.getLogger(__name__)
-
-
-SCHEDULER_MAP = {
-    "SuccessiveHalving": SuccessiveHalvingScheduler,
-    "Hyperband": HyperbandScheduler,
-}
-
-
-class Signal:
-    """A simple signal implementation to remove Qt dependency from the core engine."""
-
-    def __init__(self, *arg_types):
-        self._callbacks: List[Callable] = []
-
-    def connect(self, callback: Callable):
-        self._callbacks.append(callback)
-
-    def emit(self, *args, **kwargs):
-        for callback in self._callbacks:
-            try:
-                callback(*args, **kwargs)
-            except Exception:
-                logger.error(f"Error in signal callback: {traceback.format_exc()}")
 
 
 class ExperimentOrchestrator:
@@ -67,8 +46,10 @@ class ExperimentOrchestrator:
                 return
 
             # Use the new structured validator
-            valid_actions = self.get_valid_actions()
-            if not self._is_action_valid(action_type, payload, valid_actions):
+            valid_actions = ActionValidator.get_valid_actions(self.experiment)
+            if not ActionValidator.is_action_valid(
+                action_type, payload, valid_actions
+            ):
                 self.log_message.emit(
                     f"WARN: Action '{action_type}' is not valid for the current state or payload."
                 )
@@ -83,45 +64,6 @@ class ExperimentOrchestrator:
                 )
                 logger.error(traceback.format_exc())
 
-    def _is_action_valid(
-        self, action_type: str, payload: Dict[str, Any], valid_actions: Dict
-    ) -> bool:
-        """
-        Checks if a given action is present in the structured valid_actions dict.
-
-        This is a strict validator. An action is only considered valid if it
-        is explicitly listed in the `valid_actions` dictionary for the correct
-        context (global, per-algorithm, or per-trial). It follows a
-        "default-deny" policy.
-        """
-        # Global actions have no specific context key in their payload.
-        if (
-            "algorithm_id" not in payload
-            and "trial_id" not in payload
-            and "source_trial_id" not in payload
-        ):
-            return action_type in valid_actions.get("global", [])
-
-        # Algorithm-specific actions are scoped by 'algorithm_id'.
-        if "algorithm_id" in payload:
-            algo_id = payload["algorithm_id"]
-            return action_type in valid_actions.get("algorithms", {}).get(algo_id, [])
-
-        # Trial-specific actions are scoped by 'trial_id'.
-        if "trial_id" in payload:
-            trial_id = payload["trial_id"]
-            return action_type in valid_actions.get("trials", {}).get(trial_id, [])
-
-        # The 'SPAWN_SIMILAR_TRIAL' action is a special case scoped by 'source_trial_id'.
-        if "source_trial_id" in payload:
-            source_trial_id = payload["source_trial_id"]
-            return action_type in valid_actions.get("trials", {}).get(
-                source_trial_id, []
-            )
-
-        # If the payload format is unrecognized or the action is not found, deny it.
-        return False
-
     def emit_state_change(self):
         """Serializes the experiment state and emits it."""
         # A real implementation would have a more robust serializer
@@ -135,7 +77,9 @@ class ExperimentOrchestrator:
             "trials": {k: v.to_dict() for k, v in self.experiment.trials.items()},
             "insights": self.experiment.insights,
             "adaptive_policy": self.experiment.adaptive_policy,
-            "valid_actions": self.get_valid_actions(),  # Also emit the valid actions
+            "valid_actions": ActionValidator.get_valid_actions(
+                self.experiment
+            ),  # Also emit the valid actions
         }
         self.state_changed.emit(state_dict)
 
@@ -166,17 +110,10 @@ class ExperimentOrchestrator:
                 f"INFO: Generating new trials for algorithm '{new_algo.name}' mid-run."
             )
             try:
-                scheduler_name = self.experiment.adaptive_policy
-                scheduler_class = SCHEDULER_MAP.get(scheduler_name)
-                if not scheduler_class:
-                    raise ValueError(
-                        f"Unknown scheduler '{scheduler_name}' specified in adaptive_policy."
-                    )
-
-                challenge_def = AVAILABLE_DATASETS[self.experiment.challenge["name"]]
-                increasing = "accuracy" in challenge_def.performance_metric_name.lower()
-                scheduler = scheduler_class(
-                    metric=challenge_def.performance_metric_name, increasing=increasing
+                scheduler = SchedulerFactory.create_scheduler(
+                    policy_name=self.experiment.adaptive_policy,
+                    challenge_name=self.experiment.challenge["name"],
+                    patience_budget=self.experiment.patience_budget,
                 )
 
                 num_trials_per_algo = (
@@ -276,10 +213,8 @@ class ExperimentOrchestrator:
 
     def handle_set_adaptive_policy(self, payload: Dict[str, Any]):
         policy_name = payload["policy_name"]
-        if policy_name not in SCHEDULER_MAP:
-            self.log_message.emit(f"ERROR: Unknown policy name '{policy_name}'.")
-            return
-
+        # The factory will raise an error if the policy name is invalid,
+        # which is caught by the main dispatch loop.
         self.experiment.adaptive_policy = policy_name
         self.log_message.emit(f"INFO: Adaptive policy set to '{policy_name}'.")
 
@@ -292,28 +227,11 @@ class ExperimentOrchestrator:
                 "INFO: Hot-swapping adaptive policy in live runtime engine."
             )
             try:
-                challenge_def = AVAILABLE_DATASETS[self.experiment.challenge["name"]]
-                increasing = "accuracy" in challenge_def.performance_metric_name.lower()
-                new_scheduler_class = SCHEDULER_MAP[policy_name]
-
-                # --- Instantiate the new scheduler with correct parameters ---
-                scheduler_args = {
-                    "metric": challenge_def.performance_metric_name,
-                    "increasing": increasing,
-                }
-                if policy_name == "Hyperband":
-                    # Hyperband requires max_resource_per_trial. Let's use a default or get from budget.
-                    # This part of the design could be improved with a more structured budget.
-                    max_resource = (
-                        self.experiment.patience_budget.get("max_epochs", 81)
-                        if self.experiment.patience_budget
-                        else 81
-                    )
-                    scheduler_args["max_resource_per_trial"] = max_resource
-
-                new_scheduler = new_scheduler_class(**scheduler_args)
-                # --- End of instantiation ---
-
+                new_scheduler = SchedulerFactory.create_scheduler(
+                    policy_name=policy_name,
+                    challenge_name=self.experiment.challenge["name"],
+                    patience_budget=self.experiment.patience_budget,
+                )
                 self.runtime_engine.update_adaptive_policy(new_scheduler)
                 self.log_message.emit(
                     "INFO: Adaptive policy updated successfully in runtime."
@@ -400,20 +318,10 @@ class ExperimentOrchestrator:
             )
             try:
                 # 1. Get info needed to instantiate the scheduler
-                scheduler_name = self.experiment.adaptive_policy
-                scheduler_class = SCHEDULER_MAP.get(scheduler_name)
-                if not scheduler_class:
-                    raise ValueError(
-                        f"Unknown scheduler '{scheduler_name}' specified in adaptive_policy."
-                    )
-
-                challenge_def = AVAILABLE_DATASETS[self.experiment.challenge["name"]]
-                increasing = "accuracy" in challenge_def.performance_metric_name.lower()
-
-                # A bit of a hack: some schedulers need more params. This should be improved
-                # with a better config system. For now, we only pass what's needed for the base case.
-                scheduler = scheduler_class(
-                    metric=challenge_def.performance_metric_name, increasing=increasing
+                scheduler = SchedulerFactory.create_scheduler(
+                    policy_name=self.experiment.adaptive_policy,
+                    challenge_name=self.experiment.challenge["name"],
+                    patience_budget=self.experiment.patience_budget,
                 )
 
                 # 2. Ask the scheduler to generate trials
@@ -430,7 +338,7 @@ class ExperimentOrchestrator:
                     self.experiment.trials[trial.id] = trial
 
                 self.log_message.emit(
-                    f"INFO: Generated {len(self.experiment.trials)} initial trials via '{scheduler_name}' policy."
+                    f"INFO: Generated {len(self.experiment.trials)} initial trials via '{self.experiment.adaptive_policy}' policy."
                 )
 
             except Exception as e:
@@ -448,32 +356,12 @@ class ExperimentOrchestrator:
             start_payload = {}
         try:
             challenge_name = self.experiment.challenge["name"]
-            challenge_def = AVAILABLE_DATASETS[challenge_name]
 
-            scheduler_name = self.experiment.adaptive_policy
-            scheduler_class = SCHEDULER_MAP.get(scheduler_name)
-            if not scheduler_class:
-                raise ValueError(
-                    f"Unknown scheduler '{scheduler_name}' specified in adaptive_policy."
-                )
-
-            increasing = "accuracy" in challenge_def.performance_metric_name.lower()
-
-            # --- Instantiate the scheduler with correct parameters ---
-            scheduler_args = {
-                "metric": challenge_def.performance_metric_name,
-                "increasing": increasing,
-            }
-            if scheduler_name == "Hyperband":
-                max_resource = (
-                    self.experiment.patience_budget.get("max_epochs", 81)
-                    if self.experiment.patience_budget
-                    else 81
-                )
-                scheduler_args["max_resource_per_trial"] = max_resource
-
-            scheduler = scheduler_class(**scheduler_args)
-            # --- End of instantiation ---
+            scheduler = SchedulerFactory.create_scheduler(
+                policy_name=self.experiment.adaptive_policy,
+                challenge_name=challenge_name,
+                patience_budget=self.experiment.patience_budget,
+            )
 
             # Important: Pass a copy of the list of trials to the engine
             current_trials = list(self.experiment.trials.values())
@@ -491,7 +379,7 @@ class ExperimentOrchestrator:
             )
 
             self.log_message.emit(
-                f"INFO: SdeRuntimeEngine initialized with {scheduler_name} scheduler."
+                f"INFO: SdeRuntimeEngine initialized with {self.experiment.adaptive_policy} scheduler."
             )
             self.runtime_engine.start()
             self.log_message.emit("INFO: SdeRuntimeEngine started successfully.")
@@ -554,78 +442,3 @@ class ExperimentOrchestrator:
                 "ERROR: Cannot resume, no runtime engine exists. Please start the run first."
             )
 
-    def get_valid_actions(self) -> Dict[str, Any]:
-        """
-        This is the Action Validator. It inspects the current state and returns
-        a structured dictionary of valid actions, separated by context.
-        e.g., {
-            "global": ["ADD_ALGORITHM"],
-            "algorithms": { "algo_1": ["UPDATE_PARAM_SPACE", "REMOVE_ALGORITHM"] },
-            "trials": { "trial_abc": ["MANUAL_PRUNE_TRIAL"] }
-        }
-        """
-        status = self.experiment.status
-        actions: Dict[str, Any] = {
-            "global": [],
-            "algorithms": {},
-            "trials": {},
-        }
-        has_challenge = self.experiment.challenge is not None
-
-        # Global actions
-        if status == ExperimentStatus.DEFINING:
-            if not has_challenge:
-                actions["global"].append("SET_CHALLENGE")
-            else:
-                actions["global"].append("ADD_ALGORITHM")
-                actions["global"].append("SET_ADAPTIVE_POLICY")
-                actions["global"].append("SET_BUDGET")
-                if self.experiment.algorithms:
-                    actions["global"].append("START_RUN")
-
-        elif status == ExperimentStatus.RUNNING:
-            actions["global"].append("PAUSE_RUN")
-            actions["global"].append("ADD_ALGORITHM")
-            actions["global"].append(
-                "SET_ADAPTIVE_POLICY"
-            )  # Allow changing policy mid-run
-            actions["global"].append("SET_BUDGET")  # Allow changing budget mid-run
-
-        elif status == ExperimentStatus.PAUSED:
-            actions["global"].append("RESUME_RUN")
-            actions["global"].append("ADD_ALGORITHM")
-            actions["global"].append("SET_ADAPTIVE_POLICY")
-            actions["global"].append("SET_BUDGET")
-
-        # Per-algorithm actions
-        for algo_id, algo in self.experiment.algorithms.items():
-            algo_actions = []
-            if status == ExperimentStatus.DEFINING:
-                algo_actions.append("UPDATE_PARAM_SPACE")
-                algo_actions.append("REMOVE_ALGORITHM")
-            elif (
-                status == ExperimentStatus.RUNNING or status == ExperimentStatus.PAUSED
-            ):
-                algo_actions.append(
-                    "UPDATE_PARAM_SPACE"
-                )  # Allow updating space mid-run
-                algo_actions.append("REMOVE_ALGORITHM")
-
-            if algo_actions:
-                actions["algorithms"][algo_id] = algo_actions
-
-        # Per-trial actions
-        for trial_id, trial in self.experiment.trials.items():
-            trial_actions = []
-            # Can spawn from any trial that has finished at least one step
-            if trial.results:
-                trial_actions.append("SPAWN_SIMILAR_TRIAL")
-
-            if trial.status == TrialStatus.ACTIVE:
-                trial_actions.append("MANUAL_PRUNE_TRIAL")
-                trial_actions.append("MANUAL_PRIORITIZE_TRIAL")
-
-            if trial_actions:
-                actions["trials"][trial_id] = trial_actions
-
-        return actions

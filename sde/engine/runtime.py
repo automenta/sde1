@@ -1,5 +1,6 @@
 import threading
 import logging
+import queue
 from typing import List, Callable, Iterator, Dict, Tuple
 
 from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus
@@ -47,15 +48,26 @@ class SdeRuntimeEngine:
         )
         self._is_running = False
         self._thread = None
-        self._work_queue_lock = threading.Lock()
-        self.work_queue: List[WorkUnit] = []
+        self.work_queue = queue.PriorityQueue()
         self._pause_event = threading.Event()
+        self._cancelled_trials = set()
 
     def start(self):
         """Starts the main execution loop in a background thread."""
         if self._thread is None:
             self._is_running = True
             self._pause_event.set()  # Start in a "not paused" state
+
+            # Initial work population
+            initial_work_units = self.adaptive_scheduler.get_initial_work_units(
+                self.datastore.get_all_trials()
+            )
+            for work_unit in initial_work_units:
+                trial = self.datastore.get_trial(work_unit.trial_id)
+                # Priority is negative because PriorityQueue is a min-heap
+                priority = -trial.priority
+                self.work_queue.put((priority, work_unit))
+
             self.scheduler.start()
             self._thread = threading.Thread(target=self._execution_loop, daemon=True)
             self._thread.start()
@@ -83,14 +95,15 @@ class SdeRuntimeEngine:
             logger.info("Runtime engine execution resumed.")
 
     def cancel_work_for_trial(self, trial_id: str):
-        """Passes a cancellation request down to the scheduler."""
+        """
+        Passes a cancellation request down to the scheduler and marks the trial
+        so any pending work units for it are ignored.
+        """
         logger.info(
             f"Runtime engine received request to cancel work for trial {trial_id}."
         )
+        self._cancelled_trials.add(trial_id)
         self.scheduler.cancel_work_for_trial(trial_id)
-        with self._work_queue_lock:
-            # Also remove any pending work units for this trial
-            self.work_queue = [wu for wu in self.work_queue if wu.trial_id != trial_id]
 
     def add_trials_live(self, trials: List[Trial]):
         """
@@ -108,11 +121,15 @@ class SdeRuntimeEngine:
         # Generate work units for the new trials
         new_work_units = self.adaptive_scheduler.get_initial_work_units(trials)
 
-        with self._work_queue_lock:
-            self.work_queue.extend(new_work_units)
-            logger.info(
-                f"Added {len(new_work_units)} new work units to the live queue."
-            )
+        for work_unit in new_work_units:
+            trial = self.datastore.get_trial(work_unit.trial_id)
+            # Priority is negative because PriorityQueue is a min-heap
+            priority = -trial.priority
+            self.work_queue.put((priority, work_unit))
+
+        logger.info(
+            f"Added {len(new_work_units)} new work units to the live queue."
+        )
 
     def update_adaptive_policy(self, new_scheduler: AdaptiveScheduler):
         """
@@ -140,96 +157,74 @@ class SdeRuntimeEngine:
         """
         logger.info("Runtime engine execution loop started.")
 
-        # Get the first batch of work
-        with self._work_queue_lock:
-            self.work_queue = self.adaptive_scheduler.get_initial_work_units(
-                self.datastore.get_all_trials()
-            )
+        # The work queue is populated in start()
 
         while self._is_running:
             self._pause_event.wait()  # This will block if the event is cleared (paused)
-
-            if not self._is_running:  # Re-check after pause, in case stop() was called
+            if not self._is_running:  # Re-check after pause
                 break
 
+            # --- Build a batch of work from the queue ---
             current_batch = []
-            with self._work_queue_lock:
-                if self.work_queue:
-                    # Sort the work queue based on trial priority before submitting it.
-                    self.work_queue.sort(
-                        key=lambda wu: self.datastore.get_trial(wu.trial_id).priority,
-                        reverse=True,
-                    )
-                    current_batch = self.work_queue
-                    self.work_queue = []  # Reset for the next batch
+            while not self.work_queue.empty() and len(current_batch) < self.scheduler.max_workers:
+                try:
+                    # Get a work unit, ignoring priority, as the queue handles it
+                    _, work_unit = self.work_queue.get_nowait()
+
+                    # Discard work for cancelled trials
+                    if work_unit.trial_id in self._cancelled_trials:
+                        logger.info(f"Discarding cancelled work unit for trial {work_unit.trial_id}")
+                        continue
+
+                    current_batch.append(work_unit)
+                except queue.Empty:
+                    break  # Should not happen due to the while condition, but for safety
 
             if not current_batch:
-                # If no work, check if all trials are done.
                 if all(
                     t.status in (TrialStatus.COMPLETED, TrialStatus.PRUNED)
                     for t in self.datastore.get_all_trials().values()
                 ):
-                    logger.info(
-                        "All trials are completed or pruned. Shutting down engine."
-                    )
+                    logger.info("All trials are completed or pruned. Shutting down.")
                     break
-                # Otherwise, sleep for a bit to avoid busy-waiting
-                threading.Event().wait(0.5)  # Shorter wait time
+                threading.Event().wait(0.5)
                 continue
 
+            # --- Execute the batch and process results ---
             results_iterator = self.scheduler.run(current_batch)
-
             for work_unit, result in results_iterator:
-                self._pause_event.wait()  # Also check for pause between work units
+                self._pause_event.wait()
                 if not self._is_running:
-                    break  # Exit if stop() was called during iteration
+                    break
 
-                trial = self.datastore.get_trial(work_unit.trial_id)
-                if not trial:
-                    logger.warning(
-                        f"Could not find trial {work_unit.trial_id} for completed work unit."
-                    )
+                updated_trial = self.datastore.record_work_unit_result(work_unit, result)
+
+                if not updated_trial:
+                    logger.warning(f"Could not find trial {work_unit.trial_id} to record result.")
                     continue
 
-                # --- Update Trial State ---
+                if updated_trial.id in self._cancelled_trials:
+                    logger.info(f"Ignoring result for cancelled trial {updated_trial.id}")
+                    continue
+
                 if "error" in result:
                     logger.error(
-                        f"Work unit {work_unit.type} for trial {trial.id} failed: {result['error']}"
+                        f"Work unit {work_unit.type} for trial {updated_trial.id} failed: {result['error']}"
                     )
-                    # Optionally, mark trial as FAILED
-                else:
-                    if work_unit.type == WorkUnitType.TRAIN_EPOCH:
-                        # The worker returns metrics and state updates
-                        trial.current_epoch = result["state_updates"]["current_epoch"]
-                        trial.checkpoint_path = result["state_updates"][
-                            "checkpoint_path"
-                        ]
-                        for metric_name, value in result["metrics"].items():
-                            trial.results.setdefault(metric_name, []).append(
-                                (trial.current_epoch, value)
-                            )
 
-                    elif work_unit.type == WorkUnitType.PROFILE_SPEED:
-                        # This part of the schema might need revisiting, assuming a simple 'time' key for now
-                        trial.est_time_per_epoch = result.get("time")
-
-                # Notify orchestrator about the update
                 if self.trial_updated_callback:
-                    self.trial_updated_callback(trial.to_dict())
+                    self.trial_updated_callback(updated_trial.to_dict())
 
-                # Analyze for insights
-                new_insights = self.insight_engine.analyze(trial)
+                new_insights = self.insight_engine.analyze(updated_trial)
                 if new_insights and self.insights_callback:
-                    self.insights_callback(
-                        [insight.__dict__ for insight in new_insights]
-                    )
+                    self.insights_callback([insight.__dict__ for insight in new_insights])
 
-                # Get next work units from the adaptive scheduler based on this result
-                next_work = self.adaptive_scheduler.get_next_work_units(
-                    trial, self.datastore.get_all_trials()
+                next_work_units = self.adaptive_scheduler.get_next_work_units(
+                    updated_trial, self.datastore.get_all_trials()
                 )
-                with self._work_queue_lock:
-                    self.work_queue.extend(next_work)
+                for next_wu in next_work_units:
+                    priority = -updated_trial.priority
+                    self.work_queue.put((priority, next_wu))
 
         self._is_running = False
         logger.info("Runtime engine execution loop finished.")

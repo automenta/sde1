@@ -38,103 +38,111 @@ The architecture is built around a granular, asynchronous model.
 
 ---
 
-## **3.0 System Architecture: Asynchronous & Event-Driven**
+## **3.0 System Architecture (Refactored)**
 
-The SDE operates on a continuous, reactive loop, not a linear sequence. Parallelism is fundamental.
+The SDE's architecture is layered and asynchronous, designed to separate concerns and manage the experiment lifecycle efficiently.
 
 **Conceptual Flow Diagram:**
 
 ```
-                               +---------------------+
-                               | User Interface (UI) |
-                               +---------------------+
-                                         | (Defines Experiment)
-                                         v
-+-----------------------------------------------------------------------+
-|                                                                       |
-|                       SCHEDULER (The Lab Manager)                       |
-|                                                                       |
-|   +------------------------+      +------------------------------+    |
-|   | Adaptive Scheduler     |----->| Work Queue (Prioritized)     |<---+
-|   | (Policy: e.g.Hyperband)|      +------------------------------+    |
-|   +------------------------+                  | (Dispatches WorkUnits) |
-|            ^                                  v                        |
-|            | (Informs of Results)   +----------------------+           |
-|            |                        |                      |           |
-|   +--------------------+            |   Worker Pool        |           |
-|   | Data Store         |<----------(   (Parallel GPUs)    )-----------+
-|   | (Trial State,      | (Reports   |                      |
-|   |  Time-series Data) |  Results)  +----------------------+
-|   +--------------------+            
-|            ^                                                           
-|            | (Reads Data)                                              
-|   +------------------------+                                          
-|   | Insight Engine         |                                          
-|   | (Real-time Analysis)   |                                          
-|   +------------------------+                                          
-|                                                                       |
-+-----------------------------------------------------------------------+
++---------------------+      (User Actions)      +-----------------------------+
+| User Interface (UI) | <----------------------> |  Experiment Orchestrator    |
++---------------------+      (State Updates)     |   (The Central State Mgr)   |
+                                                 +-----------------------------+
+                                                           | (Start, Pause, etc.)
+                                                           v
++----------------------------------------------------------------------------------+
+|                                                                                  |
+|                          SDE RUNTIME ENGINE (The Engine Room)                      |
+|                                (Runs in a background thread)                       |
+|                                                                                  |
+|   +------------------------+      +------------------------------+               |
+|   | Adaptive Scheduler     |----->| Work Queue (PriorityQueue)   |               |
+|   | (Policy: e.g.Hyperband)|      +------------------------------+               |
+|   +------------------------+                  | (Dispatches WorkUnits)           |
+|            ^                                  v                                  |
+|            | (Informs of Results)   +----------------------+                     |
+|            |                        |   Compute Scheduler  |                     |
+|   +--------------------+            |    (Manages Pool)    |                     |
+|   | Data Store         |<----------(                      )---------------------+
+|   | (Trial State,      | (Reports   +----------------------+ (Dispatches to...) |
+|   |  Time-series Data) |  Results)   |   Worker Processes   |                     |
+|   +--------------------+            +----------------------+                     |
+|            ^                                                                     |
+|            | (Reads Data)                                                        |
+|   +------------------------+                                                     |
+|   | Insight Engine         |                                                     |
+|   | (Real-time Analysis)   |                                                     |
+|   +------------------------+                                                     |
+|                                                                                  |
++----------------------------------------------------------------------------------+
+
 ```
 
 ### **Component Responsibilities:**
 
-1.  **Scheduler:**
-    *   Manages the lifecycle of an `Experiment`.
-    *   Maintains a priority queue of `WorkUnit`s.
-    *   Manages a pool of parallel `Computational Workers`.
-    *   Dispatches `WorkUnit`s to available workers.
-    *   Asynchronously receives intermediate results from workers.
-    *   Updates the `Data Store` with new results and state changes.
-    *   Triggers the `Insight Engine` upon receiving new data.
-    *   Consults the `Adaptive Scheduler` to prioritize work and prune trials.
-    *   Monitors the `Patience Budget` and terminates the experiment.
+1.  **Experiment Orchestrator:**
+    *   The "central nervous system" of the application, living in the main thread.
+    *   Receives all actions from the UI (e.g., "add algorithm", "start run").
+    *   Manages the canonical `Experiment` state object. It is the single source of truth for the experiment's configuration.
+    *   Uses an `ActionValidator` to determine if an incoming action is valid for the current state.
+    *   Issues high-level commands (e.g., `start`, `pause`, `add_trials_live`) to the `SdeRuntimeEngine`.
+    *   Listens for state updates from the runtime engine and signals them to the UI.
 
-2.  **Computational Workers:**
-    *   Execute a single, stateless `WorkUnit`.
-    *   Before execution, load the required state (e.g., model checkpoint) for the `Trial` from the `Data Store`.
-    *   After execution, report back the results (metrics) and any state changes (e.g., path to a new checkpoint).
-    *   Operate in parallel, maximizing hardware utilization.
+2.  **SdeRuntimeEngine:**
+    *   The "engine room" that runs the entire experiment lifecycle in a background thread, keeping the UI responsive.
+    *   Owns and manages all the core computational components.
+    *   Maintains a `PriorityQueue` of `WorkUnit`s to be executed.
+    *   Runs the main execution loop: pulling work from the queue, sending it to the Compute Scheduler, and processing results.
 
-3.  **Adaptive Scheduler (Policy):**
-    *   The "brains" behind resource allocation.
-    *   Receives intermediate results from the main `Scheduler`.
-    *   Implements a specific exploration/pruning strategy (e.g., Successive Halving).
-    *   Provides the main `Scheduler` with a prioritized list of the next `WorkUnit`s to execute.
-    *   Decides when to terminate (prune) unpromising `Trial`s.
+3.  **Compute Scheduler:**
+    *   Manages a pool of parallel `Computational Workers` (processes).
+    *   Receives a batch of `WorkUnit`s from the `SdeRuntimeEngine`.
+    *   Dispatches a single `WorkUnit` to each available worker.
+    *   Returns an iterator of results to the `SdeRuntimeEngine` as they are completed.
 
-4.  **Data Store:**
-    *   Stores all experiment data.
-    *   Crucially, it must support storing and appending to **time-series data** (e.g., loss/accuracy per epoch).
+4.  **Computational Workers:**
+    *   A separate process that executes a single, stateless `WorkUnit`.
+    *   Loads the required state (e.g., model checkpoint) for the `Trial` from the `Data Store`.
+    *   After execution, reports back the results (metrics) and any state changes.
+
+5.  **Adaptive Scheduler (Policy):**
+    *   The pluggable "brains" behind resource allocation (e.g., `SuccessiveHalvingScheduler`).
+    *   Consulted by the `SdeRuntimeEngine` after each result.
+    *   Analyzes the current state of all trials and decides what `WorkUnit`(s) should be executed next.
+    *   This is where strategies like pruning and promotion are implemented.
+
+6.  **Data Store:**
+    *   A thread-safe container for all trial data.
+    *   Provides methods to manipulate trial state (e.g., `record_work_unit_result`). It is the **sole component responsible for mutating trial objects**, ensuring data consistency.
     *   Stores `Trial` state, including paths to model checkpoints, allowing for stateless workers.
 
-5.  **Insight Engine:**
-    *   Continuously monitors the `Data Store` for new data points (intermediate results).
-    *   Generates `ScientificInsight`s based on the evolving time-series data, not just final outcomes.
+7.  **Insight Engine:**
+    *   Continuously analyzes the stream of results for a given trial to generate `ScientificInsight`s in real-time.
+
+8.  **Factories & Validators:**
+    *   **SchedulerFactory:** Centralizes the logic for creating different `AdaptiveScheduler` instances based on the experiment configuration.
+    *   **ActionValidator:** A stateless utility that centralizes the complex logic for determining which user actions are valid in any given experiment state.
 
 ---
 
-## **4.0 The Core Reactive Lifecycle**
+## **4.0 The Core Reactive Lifecycle (Refactored)**
 
 This step-by-step process is the "heartbeat" of the SDE:
 
-1.  **Initialization:** A user defines an `Experiment`. The `Scheduler` consults the `Adaptive Scheduler` to create an initial set of `Trial`s and populates the `Work Queue` with the first `WorkUnit` for each (e.g., `TRAIN_EPOCH 1`).
-
-2.  **Dispatch:** The `Scheduler` takes the highest-priority `WorkUnit` from the queue and assigns it to a free `Worker` from its pool.
-
-3.  **Execute:** The `Worker` executes the `WorkUnit` (e.g., trains one epoch), loads the necessary state beforehand, and saves the new state afterward.
-
-4.  **Report:** The `Worker` sends the results (e.g., `{'validation_accuracy': 0.65}`) and state updates (e.g., `{'checkpoint_path': '...'}`) back to the `Scheduler`.
-
-5.  **Update:** The `Scheduler` receives the result and updates the corresponding `Trial` in the `Data Store`, appending the new metric to its time-series data.
-
-6.  **Analyze & Insight:** The `Scheduler` notifies the `Insight Engine` that new data is available. The `Insight Engine` runs its detectors on the updated data streams to find patterns, crossovers, or anomalies in real-time.
-
-7.  **Decide & Reschedule:** The `Scheduler` passes the new result to the `Adaptive Scheduler`. The `Adaptive Scheduler` analyzes the performance of all active trials and determines the next set of prioritized actions. This may include:
-    *   **Promoting:** Creating a `WorkUnit` for the next epoch of a well-performing trial.
-    *   **Pruning:** Deciding to terminate an underperforming trial, saving the Patience Budget.
-    *   **Exploring:** Creating a `WorkUnit` to start a brand new trial.
-
-8.  **Loop:** The new `WorkUnit`s are added to the `Scheduler`'s priority queue. The cycle returns to Step 2. This loop continues until the `Patience Budget` is exhausted.
+1.  **Action:** A user performs an action in the UI (e.g., clicks "Start Run").
+2.  **Dispatch:** The UI sends a corresponding action (e.g., `{'type': 'START_RUN', ...}`) to the `ExperimentOrchestrator`.
+3.  **Validation:** The `Orchestrator` uses the `ActionValidator` to check if the action is valid. If not, it logs a warning and stops.
+4.  **Command:** The `Orchestrator` mutates its state (e.g., sets `experiment.status` to `RUNNING`) and issues a command to the `SdeRuntimeEngine` (e.g., `runtime.start()`).
+5.  **Initialization:** The `RuntimeEngine`, on starting its background thread, consults the `AdaptiveScheduler` to generate the initial set of `WorkUnit`s and adds them to its `PriorityQueue`.
+6.  **Dispatch:** The `RuntimeEngine`'s loop pulls a batch of the highest-priority `WorkUnit`s from the queue and sends them to the `Compute Scheduler`.
+7.  **Execute:** The `Compute Scheduler` assigns each `WorkUnit` to a free `Worker` process, which executes the task (e.g., trains one epoch).
+8.  **Report:** The `Worker` returns the results to the `Compute Scheduler`, which yields them back to the `RuntimeEngine`.
+9.  **Update:** The `RuntimeEngine` receives the result and passes it to the `DataStore`'s `record_work_unit_result` method, which updates the relevant `Trial` object. The `RuntimeEngine` then sends the updated trial data to the `Orchestrator` via a callback.
+10. **Analyze & Reschedule:** The `RuntimeEngine` does two things in parallel:
+    *   It passes the updated trial to the `InsightEngine` to check for new discoveries.
+    *   It passes the updated trial to the `AdaptiveScheduler`, which decides what `WorkUnit`(s) to do next and adds them to the `RuntimeEngine`'s `PriorityQueue`.
+11. **Loop:** The cycle returns to Step 6. This continues until the budget is exhausted or all trials are complete.
 
 ---
 

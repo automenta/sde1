@@ -1,6 +1,7 @@
 README.md
 pyproject.toml
 sde/__main__.py
+sde/utils.py
 sde.egg-info/PKG-INFO
 sde.egg-info/SOURCES.txt
 sde.egg-info/dependency_links.txt
@@ -11,7 +12,9 @@ sde/challenges/fashion_mnist.py
 sde/challenges/mnist.py
 sde/challenges/utils.py
 sde/core/types.py
+sde/engine/action_validator.py
 sde/engine/datastore.py
+sde/engine/factory.py
 sde/engine/insight.py
 sde/engine/orchestrator.py
 sde/engine/runtime.py

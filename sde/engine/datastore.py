@@ -1,13 +1,13 @@
 import threading
 from typing import Dict, List, Optional
 
-from sde.core.types import Trial, TrialStatus, WorkUnit
+from sde.core.types import Trial, TrialStatus, WorkUnit, WorkUnitType
 
 
 class DataStore:
     """
     A thread-safe container for all experiment-related data, primarily the state
-    of all trials.
+    of all trials. It is the sole component responsible for mutating trial state.
     """
 
     def __init__(self, trials: List[Trial]):
@@ -32,27 +32,41 @@ class DataStore:
         with self._lock:
             return self._trials.copy()
 
-    def update_trial_state(self, work_unit: WorkUnit, result: dict):
+    def record_work_unit_result(
+        self, work_unit: WorkUnit, result: dict
+    ) -> Optional[Trial]:
         """
         Updates a trial's state based on the results from a work unit.
-        This includes metrics, epoch count, and checkpoint paths.
+        This includes metrics, epoch count, checkpoint paths, and profile info.
+        This is the single entry point for mutating trial state from work results.
         """
         with self._lock:
             trial = self._trials.get(work_unit.trial_id)
             if not trial:
-                return
+                return None
 
-            # Update state from worker (epoch, checkpoint)
-            state_updates = result.get("state_updates", {})
-            trial.current_epoch = state_updates.get(
-                "current_epoch", trial.current_epoch
-            )
-            if state_updates.get("checkpoint_path") is not None:
-                trial.checkpoint_path = state_updates["checkpoint_path"]
+            if "error" in result:
+                # In the future, we might set a 'FAILED' status here.
+                # For now, we just don't process the result.
+                return trial  # Return the unchanged trial
 
-            # Append new metrics
-            for name, value in result.get("metrics", {}).items():
-                trial.results.setdefault(name, []).append((trial.current_epoch, value))
+            if work_unit.type == WorkUnitType.TRAIN_EPOCH:
+                state_updates = result.get("state_updates", {})
+                trial.current_epoch = state_updates.get(
+                    "current_epoch", trial.current_epoch
+                )
+                if state_updates.get("checkpoint_path") is not None:
+                    trial.checkpoint_path = state_updates["checkpoint_path"]
+
+                for name, value in result.get("metrics", {}).items():
+                    trial.results.setdefault(name, []).append(
+                        (trial.current_epoch, value)
+                    )
+
+            elif work_unit.type == WorkUnitType.PROFILE_SPEED:
+                trial.est_time_per_epoch = result.get("time")
+
+            return trial
 
     def update_trial_status(self, trial_id: str, status: TrialStatus):
         """Updates the status of a single trial."""
@@ -60,10 +74,3 @@ class DataStore:
             trial = self._trials.get(trial_id)
             if trial:
                 trial.status = status
-
-    def update_algorithm_profile(self, algorithm_name: str, est_time_per_epoch: float):
-        """Updates the estimated time per epoch for all trials of a given algorithm."""
-        with self._lock:
-            for trial in self._trials.values():
-                if trial.algorithm_name == algorithm_name:
-                    trial.est_time_per_epoch = est_time_per_epoch

@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch, ANY
 
 from sde.engine.orchestrator import ExperimentOrchestrator
+from sde.engine.action_validator import ActionValidator
 from sde.core.types import ExperimentStatus, Trial, TrialStatus, AlgorithmConfig
 
 @patch('sde.engine.orchestrator.Signal.emit')
@@ -20,23 +21,23 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator = ExperimentOrchestrator()
         mock_emit.reset_mock()
 
-        actions = orchestrator.get_valid_actions()
+        actions = ActionValidator.get_valid_actions(orchestrator.experiment)
         self.assertEqual(actions['global'], ["SET_CHALLENGE"])
 
         orchestrator.experiment.challenge = {"name": "Test Challenge"}
-        actions = orchestrator.get_valid_actions()
+        actions = ActionValidator.get_valid_actions(orchestrator.experiment)
         self.assertIn("ADD_ALGORITHM", actions['global'])
 
         algo_config = AlgorithmConfig(id='algo1', name='TestAlgo', parameter_space={})
         orchestrator.experiment.algorithms['algo1'] = algo_config
-        actions = orchestrator.get_valid_actions()
+        actions = ActionValidator.get_valid_actions(orchestrator.experiment)
         self.assertIn("START_RUN", actions['global'])
         self.assertIn("UPDATE_PARAM_SPACE", actions['algorithms']['algo1'])
 
         orchestrator.experiment.status = ExperimentStatus.RUNNING
         trial = Trial(id='trial1', algorithm_name='TestAlgo', hyperparameters={}, status=TrialStatus.ACTIVE, results=[(1, 0.5)])
         orchestrator.experiment.trials['trial1'] = trial
-        actions = orchestrator.get_valid_actions()
+        actions = ActionValidator.get_valid_actions(orchestrator.experiment)
         self.assertIn("PAUSE_RUN", actions['global'])
         self.assertIn("MANUAL_PRUNE_TRIAL", actions['trials']['trial1'])
 
