@@ -1,6 +1,6 @@
 import concurrent.futures
 import multiprocessing
-import uuid
+import threading
 import traceback
 from typing import List, Dict, Tuple, Iterator
 import logging
@@ -12,13 +12,14 @@ from sde.engine.datastore import DataStore
 
 logger = logging.getLogger(__name__)
 
+
 def execute_work_unit_in_process(
     work_unit: WorkUnit,
     trial: Trial,
     model_name: str,
     dataset_name: str,
     enable_checkpointing: bool,
-    checkpoints_dir: str
+    checkpoints_dir: str,
 ) -> Tuple[WorkUnit, dict]:
     """
     A wrapper function that initializes a Worker in a new process, executes
@@ -26,18 +27,19 @@ def execute_work_unit_in_process(
     It's a top-level function to be pickleable.
     """
     try:
-        from sde.engine.worker import Worker # Import inside for pickling
+        from sde.engine.worker import Worker  # Import inside for pickling
+
         model_def = AVAILABLE_MODELS[model_name]
         dataset_def = AVAILABLE_DATASETS[dataset_name]
         worker = Worker(
             model_def=model_def,
             dataset_def=dataset_def,
-            checkpoints_dir=checkpoints_dir
+            checkpoints_dir=checkpoints_dir,
         )
         result = worker.execute_work_unit(work_unit, trial, enable_checkpointing)
         return work_unit, result
     except Exception:
-        return work_unit, {'error': traceback.format_exc()}
+        return work_unit, {"error": traceback.format_exc()}
 
 
 class Scheduler:
@@ -53,7 +55,7 @@ class Scheduler:
         dataset_name: str,
         max_workers: int = 2,
         enable_checkpointing: bool = False,
-        checkpoints_dir: str = './checkpoints'
+        checkpoints_dir: str = "./checkpoints",
     ):
         self.datastore = datastore
         self.dataset_name = dataset_name
@@ -69,14 +71,12 @@ class Scheduler:
         self.active_futures: Dict[concurrent.futures.Future, WorkUnit] = {}
         self.trial_to_futures: Dict[str, List[concurrent.futures.Future]] = {}
 
-
     def start(self):
         """Initializes the process pool executor."""
         if not self._is_running:
-            ctx = multiprocessing.get_context('spawn')
+            ctx = multiprocessing.get_context("spawn")
             self.executor = concurrent.futures.ProcessPoolExecutor(
-                max_workers=self.max_workers,
-                mp_context=ctx
+                max_workers=self.max_workers, mp_context=ctx
             )
             self._is_running = True
 
@@ -100,8 +100,9 @@ class Scheduler:
                     # Also remove from the primary map
                     if future in self.active_futures:
                         del self.active_futures[future]
-                logger.info(f"Cancelled {cancelled_count}/{len(futures_to_cancel)} futures for trial {trial_id}.")
-
+                logger.info(
+                    f"Cancelled {cancelled_count}/{len(futures_to_cancel)} futures for trial {trial_id}."
+                )
 
     def run(self, work_units: List[WorkUnit]) -> Iterator[Tuple[WorkUnit, dict]]:
         """
@@ -119,8 +120,12 @@ class Scheduler:
 
                 future = self.executor.submit(
                     execute_work_unit_in_process,
-                    work_unit, trial, trial.algorithm_name,
-                    self.dataset_name, self.enable_checkpointing, self.checkpoints_dir
+                    work_unit,
+                    trial,
+                    trial.algorithm_name,
+                    self.dataset_name,
+                    self.enable_checkpointing,
+                    self.checkpoints_dir,
                 )
                 self.active_futures[future] = work_unit
                 self.trial_to_futures.setdefault(trial.id, []).append(future)
@@ -135,17 +140,21 @@ class Scheduler:
             work_unit = self.active_futures.get(future)
             if not work_unit:
                 # This can happen if the future was cancelled and removed
-                logger.warning(f"Future {future} completed but was not in the active map, likely cancelled.")
+                logger.warning(
+                    f"Future {future} completed but was not in the active map, likely cancelled."
+                )
                 continue
 
             try:
                 _, result = future.result()
                 yield work_unit, result
             except concurrent.futures.CancelledError:
-                logger.warning(f"Work unit for trial {work_unit.trial_id} was cancelled.")
+                logger.warning(
+                    f"Work unit for trial {work_unit.trial_id} was cancelled."
+                )
                 continue
             except Exception:
-                yield work_unit, {'error': traceback.format_exc()}
+                yield work_unit, {"error": traceback.format_exc()}
             finally:
                 # Clean up finished future from our tracking maps
                 with self._lock:

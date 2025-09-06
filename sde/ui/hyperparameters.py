@@ -2,17 +2,30 @@ import itertools
 import random
 import numpy as np
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QPushButton, QComboBox,
-    QSpinBox, QDoubleSpinBox, QGroupBox, QScrollArea, QWidget, QDialogButtonBox
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFormLayout,
+    QLabel,
+    QPushButton,
+    QComboBox,
+    QSpinBox,
+    QDoubleSpinBox,
+    QGroupBox,
+    QScrollArea,
+    QWidget,
+    QDialogButtonBox,
 )
 from PyQt6.QtCore import Qt
 
 from sde.models.types import ModelDefinition
 
+
 class HyperparameterDialog(QDialog):
     """
     A dialog for configuring a hyperparameter tuning experiment.
     """
+
     def __init__(self, models: list[ModelDefinition], parent=None):
         super().__init__(parent)
         self.models = models
@@ -62,13 +75,15 @@ class HyperparameterDialog(QDialog):
         params_main_layout.addWidget(scroll_area)
 
         # --- Dialog Buttons ---
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
 
         main_layout.addWidget(ada_sched_group)
         main_layout.addWidget(strategy_group)
-        main_layout.addWidget(params_group, 1) # Give more space to params
+        main_layout.addWidget(params_group, 1)  # Give more space to params
         main_layout.addWidget(button_box)
 
         self._populate_hyperparameters()
@@ -82,7 +97,7 @@ class HyperparameterDialog(QDialog):
         if strategy == "Grid Search":
             self.num_trials_label.setText("Steps per Hyperparameter:")
             self.num_trials_spinbox.setValue(3)
-        else: # Random Search
+        else:  # Random Search
             self.num_trials_label.setText("Total Number of Trials:")
             self.num_trials_spinbox.setValue(20)
 
@@ -103,8 +118,8 @@ class HyperparameterDialog(QDialog):
                     self.param_widgets[model_def.name][param_type][param_name] = {}
 
                     # Create widgets based on parameter type
-                    if properties['type'] == 'float':
-                        min_val, max_val = properties['min'], properties['max']
+                    if properties["type"] == "float":
+                        min_val, max_val = properties["min"], properties["max"]
 
                         min_box = QDoubleSpinBox()
                         min_box.setRange(min_val, max_val)
@@ -130,31 +145,37 @@ class HyperparameterDialog(QDialog):
 
                         model_layout.addRow(f"{param_name}:", widget_layout)
 
-                        self.param_widgets[model_def.name][param_type][param_name]['min'] = min_box
-                        self.param_widgets[model_def.name][param_type][param_name]['max'] = max_box
-                        self.param_widgets[model_def.name][param_type][param_name]['scale'] = scale_combo
+                        self.param_widgets[model_def.name][param_type][param_name][
+                            "min"
+                        ] = min_box
+                        self.param_widgets[model_def.name][param_type][param_name][
+                            "max"
+                        ] = max_box
+                        self.param_widgets[model_def.name][param_type][param_name][
+                            "scale"
+                        ] = scale_combo
 
             self.params_layout.addWidget(model_group)
 
     def get_configuration(self):
         """Constructs the configuration dictionary from the UI widgets."""
-        self.config['adaptive_scheduler'] = self.ada_sched_combo.currentText()
-        if self.config['adaptive_scheduler'] == 'Hyperband':
-            self.config['max_epochs'] = self.max_epochs_spinbox.value()
+        self.config["adaptive_scheduler"] = self.ada_sched_combo.currentText()
+        if self.config["adaptive_scheduler"] == "Hyperband":
+            self.config["max_epochs"] = self.max_epochs_spinbox.value()
 
-        self.config['hparam_strategy'] = self.strategy_combo.currentText()
-        self.config['num_trials'] = self.num_trials_spinbox.value()
-        self.config['models'] = {}
+        self.config["hparam_strategy"] = self.strategy_combo.currentText()
+        self.config["num_trials"] = self.num_trials_spinbox.value()
+        self.config["models"] = {}
 
         for model_name, param_types in self.param_widgets.items():
-            self.config['models'][model_name] = {}
+            self.config["models"][model_name] = {}
             for param_type, params in param_types.items():
-                self.config['models'][model_name][param_type] = {}
+                self.config["models"][model_name][param_type] = {}
                 for param_name, widgets in params.items():
-                    self.config['models'][model_name][param_type][param_name] = {
-                        'min': widgets['min'].value(),
-                        'max': widgets['max'].value(),
-                        'scale': widgets['scale'].currentText().lower()
+                    self.config["models"][model_name][param_type][param_name] = {
+                        "min": widgets["min"].value(),
+                        "max": widgets["max"].value(),
+                        "scale": widgets["scale"].currentText().lower(),
                     }
         return self.config
 

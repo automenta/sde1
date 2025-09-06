@@ -259,3 +259,35 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.dispatch("ADD_ALGORITHM", {})
         self.assertEqual(len(orchestrator.experiment.algorithms), 0)
         mock_emit.assert_any_call("WARN: Action 'ADD_ALGORITHM' is not valid for the current state or payload.")
+
+    def test_dispatch_action_with_invalid_context(self, mock_emit):
+        """
+        Test that an action that exists but is invalid for the given context
+        is correctly rejected by the strict validator.
+        """
+        orchestrator = ExperimentOrchestrator()
+        orchestrator.experiment.status = ExperimentStatus.RUNNING
+        algo = AlgorithmConfig(id='algo1', name='TestAlgo', parameter_space={})
+        orchestrator.experiment.algorithms['algo1'] = algo
+        trial = Trial(id='trial1', algorithm_name='TestAlgo', hyperparameters={}, status=TrialStatus.ACTIVE)
+        orchestrator.experiment.trials['trial1'] = trial
+        mock_emit.reset_mock()
+
+        # 'MANUAL_PRUNE_TRIAL' is a valid action type, but it requires a 'trial_id'.
+        # Providing it with an 'algorithm_id' makes it invalid in this context.
+        # The old permissive validator might have let this pass the check.
+        orchestrator.dispatch("MANUAL_PRUNE_TRIAL", {"algorithm_id": "algo1"})
+
+        # The trial should NOT be pruned.
+        self.assertEqual(orchestrator.experiment.trials['trial1'].status, TrialStatus.ACTIVE)
+        # A warning should have been logged.
+        mock_emit.assert_any_call("WARN: Action 'MANUAL_PRUNE_TRIAL' is not valid for the current state or payload.")
+
+    def test_dispatch_fictitious_action(self, mock_emit):
+        """Test that a completely non-existent action is rejected."""
+        orchestrator = ExperimentOrchestrator()
+        mock_emit.reset_mock()
+
+        # This action doesn't exist and should be rejected by the handler check.
+        orchestrator.dispatch("DO_A_BARREL_ROLL", {})
+        mock_emit.assert_any_call("ERROR: No handler for action 'DO_A_BARREL_ROLL'")

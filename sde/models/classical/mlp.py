@@ -1,15 +1,22 @@
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 
-from sde.models.types import ModelDefinition, ModelType, DatasetType
+from sde.models.types import ModelDefinition, DatasetType
 
 # --- 1. The PyTorch Model ---
 
+
 class MLP(nn.Module):
     """A simple Multi-Layer Perceptron (MLP) for image classification."""
-    def __init__(self, hidden_sizes=[512, 256], dropout_rate=0.2, input_shape=None, output_shape=None, **kwargs):
+
+    def __init__(
+        self,
+        hidden_sizes=[512, 256],
+        dropout_rate=0.2,
+        input_shape=None,
+        output_shape=None,
+        **kwargs,
+    ):
         super().__init__()
 
         if input_shape:
@@ -18,7 +25,7 @@ class MLP(nn.Module):
             input_size = 28 * 28  # Default for MNIST
 
         if not output_shape:
-            output_shape = 10 # Default for MNIST
+            output_shape = 10  # Default for MNIST
 
         self.input_size = input_size
         layers = []
@@ -36,6 +43,7 @@ class MLP(nn.Module):
         x = x.view(-1, self.input_size)
         return self.layers(x)
 
+
 # --- 2. The Model Definition ---
 
 MLP_MODEL = ModelDefinition(
@@ -46,17 +54,17 @@ MLP_MODEL = ModelDefinition(
     hyperparameter_schema={
         "model_params": {
             "hidden_sizes": {
-                "type": "list_int", # This is a custom type, will need to be handled by UI
+                "type": "list_int",  # This is a custom type, will need to be handled by UI
                 "default": [512, 256],
-                "description": "List of integers for hidden layer sizes."
+                "description": "List of integers for hidden layer sizes.",
             },
             "dropout_rate": {
                 "type": "float",
                 "min": 0.0,
                 "max": 0.7,
                 "default": 0.2,
-                "description": "Dropout rate for regularization."
-            }
+                "description": "Dropout rate for regularization.",
+            },
         },
         "optimizer_params": {
             "lr": {
@@ -64,8 +72,8 @@ MLP_MODEL = ModelDefinition(
                 "min": 1e-5,
                 "max": 1e-1,
                 "default": 0.001,
-                "description": "Learning rate for the optimizer."
+                "description": "Learning rate for the optimizer.",
             }
-        }
-    }
+        },
+    },
 )

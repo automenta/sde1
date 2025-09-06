@@ -3,40 +3,48 @@ from dataclasses import dataclass, field
 from typing import List, Type, Any, Tuple, Callable
 from enum import Enum
 
+
 class SdeModel(nn.Module):
     """
     Base class for all models in the Scientific Discovery Engine.
     It standardizes the model interface.
     """
+
     def __init__(self, input_shape: Tuple[int, ...], output_shape: int, **kwargs):
         super().__init__()
         self.input_shape = input_shape
         self.output_shape = output_shape
+
 
 class DatasetType(Enum):
     """
     Enum to categorize the type of a dataset.
     Used for type safety to match compatible models and datasets.
     """
+
     IMAGE_CLASSIFICATION = "IMAGE_CLASSIFICATION"
     TABULAR_REGRESSION = "TABULAR_REGRESSION"
     # Future types can be added here
     # TEXT_GENERATION = "TEXT_GENERATION"
 
+
 class ModelType(Enum):
     """
     Enum to categorize the type of a model.
     """
+
     IMAGE_CLASSIFIER = "IMAGE_CLASSIFIER"
     TABULAR_REGRESSOR = "TABULAR_REGRESSOR"
     # Future types can be added here
     # LANGUAGE_MODEL = "LANGUAGE_MODEL"
+
 
 @dataclass(frozen=True)
 class DatasetDefinition:
     """
     A metadata container for a dataset.
     """
+
     name: str
     type: DatasetType
     description: str
@@ -57,6 +65,7 @@ class ModelDefinition:
     """
     A metadata container for a model/algorithm.
     """
+
     name: str
     description: str
     # The actual model class (e.g., a subclass of nn.Module)

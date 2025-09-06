@@ -1,13 +1,14 @@
 import numpy as np
 from torch.utils.data import DataLoader, Subset
 
+
 def create_train_val_dataloaders(
     dataset_class,
     data_dir: str,
     transform,
     batch_size: int = 64,
     val_split: float = 0.1,
-    seed: int = 42
+    seed: int = 42,
 ):
     """
     Creates training and validation DataLoaders from a torchvision dataset.
@@ -24,7 +25,9 @@ def create_train_val_dataloaders(
         A tuple containing the training and validation DataLoaders.
     """
     # Download and load the full training dataset
-    full_train_dataset = dataset_class(data_dir, train=True, download=True, transform=transform)
+    full_train_dataset = dataset_class(
+        data_dir, train=True, download=True, transform=transform
+    )
 
     # Create a validation split
     num_train = len(full_train_dataset)
@@ -41,7 +44,11 @@ def create_train_val_dataloaders(
     val_subset = Subset(full_train_dataset, val_idx)
 
     # Use num_workers=0 for simplicity and to avoid multiprocessing issues in some environments
-    train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=0)
+    train_loader = DataLoader(
+        train_subset, batch_size=batch_size, shuffle=True, num_workers=0
+    )
+    val_loader = DataLoader(
+        val_subset, batch_size=batch_size, shuffle=False, num_workers=0
+    )
 
     return train_loader, val_loader

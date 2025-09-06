@@ -1,5 +1,5 @@
 import threading
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from sde.core.types import Trial, TrialStatus, WorkUnit
 
@@ -43,13 +43,15 @@ class DataStore:
                 return
 
             # Update state from worker (epoch, checkpoint)
-            state_updates = result.get('state_updates', {})
-            trial.current_epoch = state_updates.get('current_epoch', trial.current_epoch)
-            if state_updates.get('checkpoint_path') is not None:
-                trial.checkpoint_path = state_updates['checkpoint_path']
+            state_updates = result.get("state_updates", {})
+            trial.current_epoch = state_updates.get(
+                "current_epoch", trial.current_epoch
+            )
+            if state_updates.get("checkpoint_path") is not None:
+                trial.checkpoint_path = state_updates["checkpoint_path"]
 
             # Append new metrics
-            for name, value in result.get('metrics', {}).items():
+            for name, value in result.get("metrics", {}).items():
                 trial.results.setdefault(name, []).append((trial.current_epoch, value))
 
     def update_trial_status(self, trial_id: str, status: TrialStatus):

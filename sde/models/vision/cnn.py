@@ -4,11 +4,13 @@ import torch.nn.functional as F
 
 from sde.models.types import ModelDefinition, DatasetType, SdeModel
 
+
 class SimpleCNN(SdeModel):
     """
     A simple, generic CNN for image classification.
     The architecture is adaptable based on input shape and output shape.
     """
+
     def __init__(self, input_shape, output_shape, dropout_rate=0.5, **kwargs):
         super().__init__(input_shape, output_shape)
 
@@ -41,6 +43,7 @@ class SimpleCNN(SdeModel):
         x = self.fc2(x)
         return x
 
+
 # --- Model Definition ---
 
 SIMPLE_CNN_MODEL = ModelDefinition(
@@ -50,20 +53,10 @@ SIMPLE_CNN_MODEL = ModelDefinition(
     supported_dataset_types=[DatasetType.IMAGE_CLASSIFICATION],
     hyperparameter_schema={
         "model_params": {
-            "dropout_rate": {
-                "type": "float",
-                "min": 0.0,
-                "max": 0.9,
-                "default": 0.5
-            }
+            "dropout_rate": {"type": "float", "min": 0.0, "max": 0.9, "default": 0.5}
         },
         "optimizer_params": {
-            "lr": {
-                "type": "float",
-                "min": 1e-5,
-                "max": 1e-2,
-                "default": 1e-3
-            }
-        }
-    }
+            "lr": {"type": "float", "min": 1e-5, "max": 1e-2, "default": 1e-3}
+        },
+    },
 )
