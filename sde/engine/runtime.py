@@ -5,16 +5,17 @@ from typing import List, Callable, Iterator, Dict, Tuple
 
 from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus
 from sde.engine.datastore import DataStore
-from sde.engine.scheduler import Scheduler
+from sde.engine.compute_scheduler import ComputeScheduler
 from sde.engine.insight import InsightEngine
 from sde.exploration.schedulers import AdaptiveScheduler
+from sde import config
 
 logger = logging.getLogger(__name__)
 
 
 class SdeRuntimeEngine:
     """
-    Wraps the core computational components (Scheduler, DataStore, etc.)
+    Wraps the core computational components (ComputeScheduler, DataStore, etc.)
     and exposes a simple API to the Orchestrator. This is the "Engine Room".
     It runs the main experiment loop in a separate thread.
     """
@@ -26,9 +27,9 @@ class SdeRuntimeEngine:
         adaptive_scheduler: AdaptiveScheduler,
         trial_updated_callback: Callable[[Dict], None],
         insights_callback: Callable[[List[Dict]], None],
-        max_workers: int = 2,
+        max_workers: int = config.MAX_WORKERS,
         enable_checkpointing: bool = False,
-        checkpoints_dir: str = "./checkpoints",
+        checkpoints_dir: str = config.CHECKPOINTS_DIR,
     ):
         self.datastore = DataStore(trials)
         self.adaptive_scheduler = adaptive_scheduler
@@ -39,7 +40,7 @@ class SdeRuntimeEngine:
             primary_metric=self.adaptive_scheduler.metric,
             higher_is_better=self.adaptive_scheduler.increasing,
         )
-        self.scheduler = Scheduler(
+        self.compute_scheduler = ComputeScheduler(
             datastore=self.datastore,
             dataset_name=dataset_name,
             max_workers=max_workers,
@@ -68,7 +69,7 @@ class SdeRuntimeEngine:
                 priority = -trial.priority
                 self.work_queue.put((priority, work_unit))
 
-            self.scheduler.start()
+            self.compute_scheduler.start()
             self._thread = threading.Thread(target=self._execution_loop, daemon=True)
             self._thread.start()
 
@@ -77,7 +78,7 @@ class SdeRuntimeEngine:
         if self._is_running:
             self._is_running = False
             self._pause_event.set()  # Ensure loop isn't blocked on pause
-            self.scheduler.stop()
+            self.compute_scheduler.stop()
             if self._thread and self._thread.is_alive():
                 self._thread.join(timeout=5)  # Wait briefly for a clean exit
             self._thread = None
@@ -103,7 +104,7 @@ class SdeRuntimeEngine:
             f"Runtime engine received request to cancel work for trial {trial_id}."
         )
         self._cancelled_trials.add(trial_id)
-        self.scheduler.cancel_work_for_trial(trial_id)
+        self.compute_scheduler.cancel_work_for_trial(trial_id)
 
     def add_trials_live(self, trials: List[Trial]):
         """
@@ -166,7 +167,7 @@ class SdeRuntimeEngine:
 
             # --- Build a batch of work from the queue ---
             current_batch = []
-            while not self.work_queue.empty() and len(current_batch) < self.scheduler.max_workers:
+            while not self.work_queue.empty() and len(current_batch) < self.compute_scheduler.max_workers:
                 try:
                     # Get a work unit, ignoring priority, as the queue handles it
                     _, work_unit = self.work_queue.get_nowait()
@@ -191,7 +192,7 @@ class SdeRuntimeEngine:
                 continue
 
             # --- Execute the batch and process results ---
-            results_iterator = self.scheduler.run(current_batch)
+            results_iterator = self.compute_scheduler.run(current_batch)
             for work_unit, result in results_iterator:
                 self._pause_event.wait()
                 if not self._is_running:
@@ -235,4 +236,4 @@ class SdeRuntimeEngine:
         """Submits a list of work units to the scheduler and yields results."""
         if not self._is_running:
             raise RuntimeError("Runtime Engine is not running.")
-        return self.scheduler.run(work_units)
+        return self.compute_scheduler.run(work_units)

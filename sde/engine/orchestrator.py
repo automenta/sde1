@@ -9,6 +9,7 @@ from sde.challenges import AVAILABLE_DATASETS
 from sde.engine.action_validator import ActionValidator
 from sde.engine.factory import SchedulerFactory
 from sde.utils import Signal
+from sde import config
 
 
 logger = logging.getLogger(__name__)
@@ -66,21 +67,12 @@ class ExperimentOrchestrator:
 
     def emit_state_change(self):
         """Serializes the experiment state and emits it."""
-        # A real implementation would have a more robust serializer
-        state_dict = {
-            "id": self.experiment.id,
-            "status": self.experiment.status.value,
-            "challenge": self.experiment.challenge,
-            "algorithms": {
-                k: v.__dict__ for k, v in self.experiment.algorithms.items()
-            },
-            "trials": {k: v.to_dict() for k, v in self.experiment.trials.items()},
-            "insights": self.experiment.insights,
-            "adaptive_policy": self.experiment.adaptive_policy,
-            "valid_actions": ActionValidator.get_valid_actions(
-                self.experiment
-            ),  # Also emit the valid actions
-        }
+        # Use the new to_dict() method for robust serialization
+        state_dict = self.experiment.to_dict()
+        # Add dynamic information that is not part of the core experiment state
+        state_dict["valid_actions"] = ActionValidator.get_valid_actions(
+            self.experiment
+        )
         self.state_changed.emit(state_dict)
 
     # --- Action Handlers ---
@@ -107,37 +99,9 @@ class ExperimentOrchestrator:
             ExperimentStatus.PAUSED,
         ]:
             self.log_message.emit(
-                f"INFO: Generating new trials for algorithm '{new_algo.name}' mid-run."
+                f"INFO: Adding new trials for algorithm '{new_algo.name}' mid-run."
             )
-            try:
-                scheduler = SchedulerFactory.create_scheduler(
-                    policy_name=self.experiment.adaptive_policy,
-                    challenge_name=self.experiment.challenge["name"],
-                    patience_budget=self.experiment.patience_budget,
-                )
-
-                num_trials_per_algo = (
-                    10  # This could be part of the budget definition later
-                )
-                new_trials = scheduler.generate_initial_trials(
-                    [new_algo], num_trials_per_algo
-                )
-
-                for trial in new_trials:
-                    self.experiment.trials[trial.id] = trial
-
-                if self.runtime_engine:
-                    self.runtime_engine.add_trials_live(new_trials)
-
-                self.log_message.emit(
-                    f"INFO: Added {len(new_trials)} new trials to the running experiment."
-                )
-
-            except Exception as e:
-                self.log_message.emit(f"ERROR: Failed to add new trials mid-run: {e}")
-                logger.error(
-                    f"Mid-run trial generation failed: {traceback.format_exc()}"
-                )
+            self._generate_and_add_trials([new_algo])
 
     def handle_remove_algorithm(self, payload: Dict[str, Any]):
         algo_id = payload["algorithm_id"]
@@ -183,33 +147,7 @@ class ExperimentOrchestrator:
             self.log_message.emit(
                 f"INFO: Generating new trials for '{algo.name}' due to parameter space update."
             )
-            try:
-                # Use the existing scheduler from the runtime engine
-                scheduler = self.runtime_engine.adaptive_scheduler
-                if not scheduler:
-                    raise ValueError(
-                        "Runtime engine has no adaptive scheduler available."
-                    )
-
-                # Ask the scheduler to generate new trials for just this algorithm
-                num_new_trials = 10  # This could be a configurable setting
-                new_trials = scheduler.generate_initial_trials([algo], num_new_trials)
-
-                for trial in new_trials:
-                    self.experiment.trials[trial.id] = trial
-
-                self.runtime_engine.add_trials_live(new_trials)
-                self.log_message.emit(
-                    f"INFO: Added {len(new_trials)} new trials to the running experiment for '{algo.name}'."
-                )
-
-            except Exception as e:
-                self.log_message.emit(
-                    f"ERROR: Failed to generate new trials after param space update: {e}"
-                )
-                logger.error(
-                    f"Failed to generate new trials after param space update: {traceback.format_exc()}"
-                )
+            self._generate_and_add_trials([algo])
 
     def handle_set_adaptive_policy(self, payload: Dict[str, Any]):
         policy_name = payload["policy_name"]
@@ -314,41 +252,57 @@ class ExperimentOrchestrator:
         # --- V2 Trial Generation (Delegated) ---
         if not self.experiment.trials:
             self.log_message.emit(
-                "INFO: No pre-existing trials found. Delegating to adaptive policy for generation."
+                "INFO: No pre-existing trials found. Generating initial set."
             )
-            try:
-                # 1. Get info needed to instantiate the scheduler
+            algorithms = list(self.experiment.algorithms.values())
+            success = self._generate_and_add_trials(algorithms)
+            if not success:
+                self.experiment.status = ExperimentStatus.DEFINING  # Revert status
+                return
+
+        # --- Engine Initialization ---
+        self._initialize_and_start_runtime(payload)
+
+    def _generate_and_add_trials(self, algorithms: List[Any], num_trials_per_algo: int = config.NUM_TRIALS_PER_ALGO):
+        """
+        Generates new trials for a list of algorithms and adds them to the
+        experiment state and live runtime if it exists.
+        """
+        self.log_message.emit(
+            f"INFO: Generating {num_trials_per_algo} trials for {len(algorithms)} algorithm(s)."
+        )
+        try:
+            # Use the existing adaptive scheduler if the engine is running, otherwise create one
+            if self.runtime_engine and self.runtime_engine.adaptive_scheduler:
+                 scheduler = self.runtime_engine.adaptive_scheduler
+            else:
                 scheduler = SchedulerFactory.create_scheduler(
                     policy_name=self.experiment.adaptive_policy,
                     challenge_name=self.experiment.challenge["name"],
                     patience_budget=self.experiment.patience_budget,
                 )
 
-                # 2. Ask the scheduler to generate trials
-                num_trials_per_algo = (
-                    10  # This could be part of the budget definition later
-                )
-                algorithms = list(self.experiment.algorithms.values())
-                new_trials = scheduler.generate_initial_trials(
-                    algorithms, num_trials_per_algo
-                )
+            new_trials = scheduler.generate_initial_trials(
+                algorithms, num_trials_per_algo
+            )
 
-                # 3. Update the experiment state with the new trials
-                for trial in new_trials:
-                    self.experiment.trials[trial.id] = trial
+            for trial in new_trials:
+                self.experiment.trials[trial.id] = trial
 
-                self.log_message.emit(
-                    f"INFO: Generated {len(self.experiment.trials)} initial trials via '{self.experiment.adaptive_policy}' policy."
-                )
+            if self.runtime_engine:
+                self.runtime_engine.add_trials_live(new_trials)
 
-            except Exception as e:
-                self.log_message.emit(f"ERROR: Failed to generate initial trials: {e}")
-                logger.error(f"Trial generation failed: {traceback.format_exc()}")
-                self.experiment.status = ExperimentStatus.DEFINING  # Revert status
-                return
+            self.log_message.emit(
+                f"INFO: Added {len(new_trials)} new trials to the experiment."
+            )
+            return True
 
-        # --- Engine Initialization ---
-        self._initialize_and_start_runtime(payload)
+        except Exception as e:
+            self.log_message.emit(f"ERROR: Failed to generate or add new trials: {e}")
+            logger.error(
+                f"Trial generation/addition failed: {traceback.format_exc()}"
+            )
+            return False
 
     def _initialize_and_start_runtime(self, start_payload: Dict[str, Any] = None):
         """Creates and starts a new SdeRuntimeEngine instance."""

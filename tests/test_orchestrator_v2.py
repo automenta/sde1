@@ -137,6 +137,12 @@ class TestExperimentOrchestrator(unittest.TestCase):
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
 
+        # Fix: Configure the mock scheduler on the mock engine to simulate trial generation
+        mock_scheduler = MagicMock()
+        new_mock_trial = Trial(id='trial_new_1', algorithm_name='TestAlgo2', hyperparameters={'lr': 0.5})
+        mock_scheduler.generate_initial_trials.return_value = [new_mock_trial]
+        mock_engine_instance.adaptive_scheduler = mock_scheduler
+
         # Get the number of trials before adding the new algorithm
         trials_before = len(orchestrator.experiment.trials)
         self.assertGreater(trials_before, 0)

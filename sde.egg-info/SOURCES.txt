@@ -1,6 +1,7 @@
 README.md
 pyproject.toml
 sde/__main__.py
+sde/config.py
 sde/utils.py
 sde.egg-info/PKG-INFO
 sde.egg-info/SOURCES.txt
@@ -13,12 +14,12 @@ sde/challenges/mnist.py
 sde/challenges/utils.py
 sde/core/types.py
 sde/engine/action_validator.py
+sde/engine/compute_scheduler.py
 sde/engine/datastore.py
 sde/engine/factory.py
 sde/engine/insight.py
 sde/engine/orchestrator.py
 sde/engine/runtime.py
-sde/engine/scheduler.py
 sde/engine/worker.py
 sde/exploration/__init__.py
 sde/exploration/schedulers.py

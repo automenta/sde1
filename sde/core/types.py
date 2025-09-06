@@ -71,6 +71,9 @@ class AlgorithmConfig:
     parameter_space: Dict[str, Any]  # e.g., {'lr': (0.001, 0.1), ...}
     is_active: bool = True
 
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
 
 @dataclass
 class Experiment:
@@ -88,3 +91,18 @@ class Experiment:
     # Strategy & Constraints
     adaptive_policy: str = "SuccessiveHalving"  # Default policy
     patience_budget: Optional[Dict[str, int]] = None
+
+    def to_dict(self) -> dict:
+        """Serializes the entire experiment state to a dictionary."""
+        return {
+            "id": self.id,
+            "status": self.status.value,
+            "challenge": self.challenge,
+            "algorithms": {
+                k: v.to_dict() for k, v in self.algorithms.items()
+            },
+            "trials": {k: v.to_dict() for k, v in self.trials.items()},
+            "insights": self.insights,
+            "adaptive_policy": self.adaptive_policy,
+            "patience_budget": self.patience_budget,
+        }

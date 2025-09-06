@@ -42,11 +42,12 @@ def execute_work_unit_in_process(
         return work_unit, {"error": traceback.format_exc()}
 
 
-class Scheduler:
+class ComputeScheduler:
     """
     Manages a pool of worker processes using concurrent.futures. It submits
     work units and yields results as they are completed, using the
-    `as_completed` pattern for efficiency.
+    `as_completed` pattern for efficiency. This is the 'Compute Scheduler'
+    described in the architecture.
     """
 
     def __init__(
