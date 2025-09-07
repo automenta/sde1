@@ -8,6 +8,7 @@ sde/__main__.py
 sde/config.py
 sde/events.py
 sde/persistence.py
+sde/run_ui.py
 sde.egg-info/PKG-INFO
 sde.egg-info/SOURCES.txt
 sde.egg-info/dependency_links.txt
@@ -49,4 +50,5 @@ tests/test_adaptive_scheduler.py
 tests/test_hyperband.py
 tests/test_insight_engine.py
 tests/test_orchestrator_v2.py
+tests/test_runtime.py
 tests/test_worker.py

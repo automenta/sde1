@@ -277,19 +277,15 @@ class MainWindow(QMainWindow):
             )
 
     def remove_algorithm(self, algorithm_id: str):
-        """Dispatches an action to remove an algorithm from the experiment."""
         self.orchestrator.dispatch(ActionType.REMOVE_ALGORITHM, {"algorithm_id": algorithm_id})
 
     def update_throttle(self, value: int):
-        """Dispatches an action to update the worker throttle percentage."""
         self.orchestrator.dispatch(ActionType.SET_BUDGET, {"worker_throttle_percent": value})
 
     def pause_experiment(self):
-        """Dispatches an action to pause the current experiment run."""
         self.orchestrator.dispatch(ActionType.PAUSE_RUN, {})
 
     def resume_experiment(self):
-        """Dispatches an action to resume a paused experiment run."""
         self.orchestrator.dispatch(ActionType.RESUME_RUN, {})
 
     def save_experiment(self):

@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+import os
 from unittest.mock import MagicMock, patch, ANY
 
 from sde.engine.orchestrator import ExperimentOrchestrator
@@ -72,6 +74,19 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.status = ExperimentStatus.RUNNING
         orchestrator.dispatch(ActionType.MANUAL_PRUNE_TRIAL, {"trial_id": "t1"})
         self.assertEqual(orchestrator.experiment.trials['t1'].status, TrialStatus.PRUNED)
+
+    def test_dispatch_manual_prioritize_trial(self, mock_emit):
+        """Test manually prioritizing a single trial."""
+        orchestrator = ExperimentOrchestrator()
+        mock_emit.reset_mock()
+        t1 = Trial(id='t1', algorithm_name='TestAlgo', hyperparameters={}, status=TrialStatus.ACTIVE, priority=0)
+        orchestrator.experiment.trials = {'t1': t1}
+        orchestrator.experiment.status = ExperimentStatus.RUNNING
+
+        orchestrator.dispatch(ActionType.MANUAL_PRIORITIZE_TRIAL, {"trial_id": "t1"})
+
+        self.assertEqual(orchestrator.experiment.trials['t1'].priority, 10)
+        mock_emit.assert_any_call({'level': 'INFO', 'message': 'Increased priority for trial t1.'})
 
     def test_dispatch_spawn_similar_trial(self, mock_emit):
         """Test spawning a new trial from an existing one."""
@@ -267,3 +282,47 @@ class TestExperimentOrchestrator(unittest.TestCase):
 
         with self.assertRaises(AttributeError):
             orchestrator.dispatch(ActionType.DO_A_BARREL_ROLL, {})
+
+    @patch('sde.engine.orchestrator.SdeRuntimeEngine')
+    def test_save_and_load_preserves_state(self, MockSdeRuntimeEngine, mock_emit):
+        """Test that saving and loading an experiment preserves its full state."""
+        # 1. Set up the initial orchestrator and experiment state
+        orchestrator1 = ExperimentOrchestrator()
+        orchestrator1.experiment.challenge = {"name": "MNIST", "type": "vision"}
+        algo = AlgorithmConfig(id='algo1', name='TestAlgo', parameter_space={'lr': 0.1})
+        orchestrator1.experiment.algorithms['algo1'] = algo
+        trial = Trial(id='trial1', algorithm_name='TestAlgo', hyperparameters={'lr': 0.1}, status=TrialStatus.PAUSED)
+        orchestrator1.experiment.trials['trial1'] = trial
+        exec_settings = {"num_workers": 4, "enable_checkpointing": True}
+        orchestrator1.experiment.execution_settings = exec_settings
+        orchestrator1.experiment.status = ExperimentStatus.PAUSED
+
+        # 2. Save the experiment to a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".sde.json") as tmp:
+            filepath = tmp.name
+
+        orchestrator1.dispatch(ActionType.SAVE_EXPERIMENT, {"filepath": filepath})
+
+        # 3. Create a new orchestrator and load the state
+        orchestrator2 = ExperimentOrchestrator()
+        orchestrator2.dispatch(ActionType.LOAD_EXPERIMENT, {"filepath": filepath})
+
+        # 4. Assert that the loaded state is correct
+        exp1 = orchestrator1.experiment
+        exp2 = orchestrator2.experiment
+
+        self.assertEqual(exp1.status, exp2.status)
+        self.assertEqual(exp1.challenge, exp2.challenge)
+        self.assertEqual(exp1.execution_settings, exp2.execution_settings)
+        self.assertEqual(len(exp1.algorithms), len(exp2.algorithms))
+        self.assertEqual(exp1.algorithms['algo1'].name, exp2.algorithms['algo1'].name)
+        self.assertEqual(len(exp1.trials), len(exp2.trials))
+        self.assertEqual(exp1.trials['trial1'].hyperparameters, exp2.trials['trial1'].hyperparameters)
+
+        # 5. Assert that the runtime was re-initialized because the state was PAUSED
+        MockSdeRuntimeEngine.assert_called_once()
+        mock_engine_instance = MockSdeRuntimeEngine.return_value
+        mock_engine_instance.start.assert_called_with(start_paused=True)
+
+        # Clean up the temporary file
+        os.remove(filepath)
