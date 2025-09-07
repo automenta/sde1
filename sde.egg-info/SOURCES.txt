@@ -42,6 +42,7 @@ sde/ui/__init__.py
 sde/ui/hyperparameters.py
 sde/ui/main_window.py
 sde/ui/models.py
+sde/ui/results_pane.py
 sde/ui/setup_pane.py
 sde/ui/view_model.py
 tests/test_adaptive_scheduler.py

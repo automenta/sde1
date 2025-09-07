@@ -8,7 +8,6 @@ from sde.engine.datastore import DataStore
 from sde.engine.compute_scheduler import ComputeScheduler
 from sde.engine.insight import InsightEngine
 from sde.exploration.schedulers import AdaptiveScheduler
-from sde import config
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +26,9 @@ class SdeRuntimeEngine:
         adaptive_scheduler: AdaptiveScheduler,
         trial_updated_callback: Callable[[Dict], None],
         insights_callback: Callable[[List[Dict]], None],
-        max_workers: int = config.MAX_WORKERS,
+        max_workers: int,
         enable_checkpointing: bool = False,
-        checkpoints_dir: str = config.CHECKPOINTS_DIR,
+        checkpoints_dir: str = "./checkpoints",
     ):
         """
         Initializes the SdeRuntimeEngine.

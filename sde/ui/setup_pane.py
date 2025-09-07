@@ -1,4 +1,5 @@
 import sys
+import os
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -15,6 +16,7 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QProgressBar,
     QListWidgetItem,
+    QSpinBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -69,6 +71,28 @@ class SetupPane(QWidget):
         # --- Execution Settings Group ---
         self.settings_group = QGroupBox("2. Execution Settings")
         settings_form_layout = QFormLayout(self.settings_group)
+
+        # Worker Count
+        self.worker_count_spinbox = QSpinBox()
+        self.worker_count_spinbox.setMinimum(1)
+        # Set max to physical CPU count, or a reasonable default if that fails
+        try:
+            max_workers = os.cpu_count() or 4
+        except NotImplementedError:
+            max_workers = 4
+        self.worker_count_spinbox.setMaximum(max_workers)
+        self.worker_count_spinbox.setValue(max_workers)
+        self.worker_count_spinbox.setToolTip("Number of parallel processes for computation.")
+        settings_form_layout.addRow("Parallel Workers:", self.worker_count_spinbox)
+
+        # Trials per Algorithm
+        self.trials_per_algo_spinbox = QSpinBox()
+        self.trials_per_algo_spinbox.setMinimum(1)
+        self.trials_per_algo_spinbox.setMaximum(1000)
+        self.trials_per_algo_spinbox.setValue(10)
+        self.trials_per_algo_spinbox.setToolTip("Number of random hyperparameter sets to generate per algorithm.")
+        settings_form_layout.addRow("Trials per Algorithm:", self.trials_per_algo_spinbox)
+
         self.throttle_slider = QSlider(Qt.Orientation.Horizontal)
         self.throttle_slider.setRange(1, 100)
         self.throttle_slider.setValue(100)

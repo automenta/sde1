@@ -108,7 +108,6 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.trials = {'t1': source_trial}
         orchestrator.dispatch(ActionType.SPAWN_SIMILAR_TRIAL, {"source_trial_id": "t1"})
         new_trial = next(t for t in orchestrator.experiment.trials.values() if t.id != 't1')
-        # We now call the more general add_trials_live method
         orchestrator.runtime_engine.add_trials_live.assert_called_once_with([new_trial])
 
     @patch('sde.engine.orchestrator.SdeRuntimeEngine')
@@ -119,7 +118,8 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         algo = AlgorithmConfig(id='algo1', name='TestAlgo', parameter_space={'lr': (0.01, 0.1)})
         orchestrator.experiment.algorithms['algo1'] = algo
-        orchestrator.dispatch(ActionType.START_RUN, {})
+        start_payload = {"num_workers": 2, "num_trials_per_algo": 5}
+        orchestrator.dispatch(ActionType.START_RUN, start_payload)
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         MockSdeRuntimeEngine.assert_called_once()
         mock_engine_instance = MockSdeRuntimeEngine.return_value
@@ -128,52 +128,39 @@ class TestExperimentOrchestrator(unittest.TestCase):
     @patch('sde.engine.orchestrator.SdeRuntimeEngine')
     def test_add_algorithm_mid_run(self, MockSdeRuntimeEngine, mock_emit):
         """Test adding a new algorithm to a running experiment."""
-        # 1. Setup a running experiment
         orchestrator = ExperimentOrchestrator()
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         algo1 = AlgorithmConfig(id='algo1', name='TestAlgo1', parameter_space={'lr': (0.01, 0.1)})
         orchestrator.experiment.algorithms['algo1'] = algo1
-        orchestrator.dispatch(ActionType.START_RUN, {})
+        start_payload = {"num_workers": 2, "num_trials_per_algo": 5}
+        orchestrator.dispatch(ActionType.START_RUN, start_payload)
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
 
-        # Fix: Configure the mock scheduler on the mock engine to simulate trial generation
         mock_scheduler = MagicMock()
         new_mock_trial = Trial(id='trial_new_1', algorithm_name='TestAlgo2', hyperparameters={'lr': 0.5})
         mock_scheduler.generate_initial_trials.return_value = [new_mock_trial]
         mock_engine_instance.adaptive_scheduler = mock_scheduler
 
-        # Get the number of trials before adding the new algorithm
         trials_before = len(orchestrator.experiment.trials)
         self.assertGreater(trials_before, 0)
 
-        # 2. Dispatch the ADD_ALGORITHM action
         mock_emit.reset_mock()
         add_payload = {"name": "TestAlgo2", "parameter_space": {"lr": (0.2, 0.9)}}
         orchestrator.dispatch(ActionType.ADD_ALGORITHM, add_payload)
 
-        # 3. Assertions
         self.assertIn('algo_1', orchestrator.experiment.algorithms)
         self.assertEqual(orchestrator.experiment.algorithms['algo_1'].name, "TestAlgo2")
 
-        # Check that new trials were created
         trials_after = len(orchestrator.experiment.trials)
         self.assertGreater(trials_after, trials_before)
 
-        # Check that the new trials were for the correct algorithm
-        newly_added_trials = [
-            t for t in orchestrator.experiment.trials.values() if t.algorithm_name == "TestAlgo2"
-        ]
+        newly_added_trials = [t for t in orchestrator.experiment.trials.values() if t.algorithm_name == "TestAlgo2"]
         self.assertGreater(len(newly_added_trials), 0)
 
-        # Check that the new trials were passed to the runtime engine
         mock_engine_instance.add_trials_live.assert_called_once()
-        # The argument to the call should be the list of newly created trials
-        self.assertEqual(
-            mock_engine_instance.add_trials_live.call_args[0][0],
-            newly_added_trials
-        )
+        self.assertEqual(mock_engine_instance.add_trials_live.call_args[0][0], newly_added_trials)
 
     @patch('sde.engine.orchestrator.SdeRuntimeEngine')
     def test_pause_and_resume_run(self, MockSdeRuntimeEngine, mock_emit):
@@ -182,24 +169,21 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.challenge = {"name": "MNIST"}
         orchestrator.experiment.algorithms['algo1'] = AlgorithmConfig(id='a1', name='A1', parameter_space={})
 
-        # Start the run
-        orchestrator.dispatch(ActionType.START_RUN, {})
+        start_payload = {"num_workers": 2, "num_trials_per_algo": 5}
+        orchestrator.dispatch(ActionType.START_RUN, start_payload)
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
         mock_engine_instance.start.assert_called_once()
 
-        # Pause the run
         orchestrator.dispatch(ActionType.PAUSE_RUN, {})
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.PAUSED)
         mock_engine_instance.pause.assert_called_once()
 
-        # Resume the run
         orchestrator.dispatch(ActionType.RESUME_RUN, {})
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         mock_engine_instance.resume.assert_called_once()
 
-        # Assert that start() was only ever called once
         mock_engine_instance.start.assert_called_once()
 
     @patch('sde.engine.orchestrator.SdeRuntimeEngine')
@@ -208,20 +192,18 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator = ExperimentOrchestrator()
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         orchestrator.experiment.algorithms['algo1'] = AlgorithmConfig(id='a1', name='A1', parameter_space={})
-        orchestrator.dispatch(ActionType.START_RUN, {})
+        start_payload = {"num_workers": 2, "num_trials_per_algo": 5}
+        orchestrator.dispatch(ActionType.START_RUN, start_payload)
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
         self.assertEqual(orchestrator.experiment.adaptive_policy, "SuccessiveHalving")
 
-        # Change the policy
         mock_emit.reset_mock()
         orchestrator.dispatch(ActionType.SET_ADAPTIVE_POLICY, {"policy_name": "Hyperband"})
 
-        # Assert state is updated
         self.assertEqual(orchestrator.experiment.adaptive_policy, "Hyperband")
         mock_emit.assert_any_call("INFO: Adaptive policy set to 'Hyperband'.")
 
-        # Assert the runtime engine was updated
         mock_engine_instance.update_adaptive_policy.assert_called_once()
         new_scheduler = mock_engine_instance.update_adaptive_policy.call_args[0][0]
         from sde.exploration.schedulers import HyperbandScheduler
@@ -234,31 +216,23 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         algo1 = AlgorithmConfig(id='algo1', name='TestAlgo1', parameter_space={'lr': (0.01, 0.1)})
         orchestrator.experiment.algorithms['algo1'] = algo1
-        orchestrator.dispatch(ActionType.START_RUN, {})
+        start_payload = {"num_workers": 2, "num_trials_per_algo": 5}
+        orchestrator.dispatch(ActionType.START_RUN, start_payload)
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
-        # Mock the scheduler on the mock engine
         mock_scheduler = MagicMock()
         mock_engine_instance.adaptive_scheduler = mock_scheduler
 
         trials_before = len(orchestrator.experiment.trials)
         mock_emit.reset_mock()
 
-        # Update the parameter space
         new_space = {'lr': (0.1, 0.5), 'epochs': [10, 20]}
         orchestrator.dispatch(ActionType.UPDATE_PARAM_SPACE, {"algorithm_id": "algo1", "new_space": new_space})
 
-        # Assert the space was updated in the state
         self.assertEqual(orchestrator.experiment.algorithms['algo1'].parameter_space, new_space)
-
-        # Assert that the scheduler was asked to generate new trials
         mock_scheduler.generate_initial_trials.assert_called_once()
-        # The first argument should be a list containing the updated algorithm config
         self.assertEqual(mock_scheduler.generate_initial_trials.call_args[0][0][0].parameter_space, new_space)
-
-        # Assert that the runtime engine was called to add the new trials
         mock_engine_instance.add_trials_live.assert_called_once()
-
 
     def test_dispatch_invalid_action(self, mock_emit):
         """Test that invalid actions are logged and ignored."""
@@ -281,14 +255,9 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.trials['trial1'] = trial
         mock_emit.reset_mock()
 
-        # 'MANUAL_PRUNE_TRIAL' is a valid action type, but it requires a 'trial_id'.
-        # Providing it with an 'algorithm_id' makes it invalid in this context.
-        # The old permissive validator might have let this pass the check.
         orchestrator.dispatch(ActionType.MANUAL_PRUNE_TRIAL, {"algorithm_id": "algo1"})
 
-        # The trial should NOT be pruned.
         self.assertEqual(orchestrator.experiment.trials['trial1'].status, TrialStatus.ACTIVE)
-        # A warning should have been logged.
         mock_emit.assert_any_call("WARN: Action 'MANUAL_PRUNE_TRIAL' is not valid for the current state or payload.")
 
     def test_dispatch_fictitious_action(self, mock_emit):
@@ -296,6 +265,5 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator = ExperimentOrchestrator()
         mock_emit.reset_mock()
 
-        # This action doesn't exist and should be rejected by the handler check.
         with self.assertRaises(AttributeError):
             orchestrator.dispatch(ActionType.DO_A_BARREL_ROLL, {})

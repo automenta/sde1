@@ -19,6 +19,49 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from sde.models.types import ModelDefinition
+from PyQt6.QtWidgets import (
+    QTreeWidget,
+    QTreeWidgetItem,
+)
+
+
+class HyperparameterViewerDialog(QDialog):
+    """A dialog to display nested hyperparameter dictionaries in a readable tree."""
+
+    def __init__(self, hparams: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Hyperparameter Details")
+        self.setLayout(QVBoxLayout())
+        self.resize(450, 350)
+
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["Parameter", "Value"])
+        self.layout().addWidget(self.tree)
+
+        self.populate_tree(hparams)
+        self.tree.expandAll()
+        for i in range(self.tree.columnCount()):
+            self.tree.resizeColumnToContents(i)
+
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        self.layout().addWidget(ok_button)
+
+    def populate_tree(self, data: dict, parent_item: QTreeWidgetItem = None):
+        if parent_item is None:
+            parent_item = self.tree.invisibleRootItem()
+
+        for key, value in data.items():
+            item = QTreeWidgetItem(parent_item, [str(key)])
+            if isinstance(value, dict):
+                self.populate_tree(value, item)
+            else:
+                if isinstance(value, float):
+                    value_str = f"{value:.6g}"  # Use general format for nice printing
+                else:
+                    value_str = str(value)
+                item.setText(1, value_str)
 
 
 class HyperparameterDialog(QDialog):
