@@ -1,11 +1,18 @@
-import threading
 import logging
 import queue
-from typing import List, Callable, Iterator, Dict, Tuple, Optional
+import threading
+from typing import Callable
+from typing import Dict
+from typing import Iterator
+from typing import List
+from typing import Optional
+from typing import Tuple
 
-from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus
-from sde.engine.datastore import DataStore
+from sde.core.types import Trial
+from sde.core.types import TrialStatus
+from sde.core.types import WorkUnit
 from sde.engine.compute_scheduler import ComputeScheduler
+from sde.engine.datastore import DataStore
 from sde.engine.insight import InsightEngine
 from sde.exploration.schedulers import AdaptiveScheduler
 
@@ -13,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class SdeRuntimeEngine:
-    """
-    Wraps the core computational components (ComputeScheduler, DataStore, etc.)
+    """Wraps the core computational components (ComputeScheduler, DataStore, etc.)
     and exposes a simple API to the Orchestrator. This is the "Engine Room".
     It runs the main experiment loop in a separate thread.
     """
@@ -30,8 +36,7 @@ class SdeRuntimeEngine:
         enable_checkpointing: bool = False,
         checkpoints_dir: str = "./checkpoints",
     ):
-        """
-        Initializes the SdeRuntimeEngine.
+        """Initializes the SdeRuntimeEngine.
 
         Args:
             trials: The initial list of Trial objects to manage.
@@ -42,6 +47,7 @@ class SdeRuntimeEngine:
             max_workers: The number of parallel processes for computation.
             enable_checkpointing: Whether to save model checkpoints after training steps.
             checkpoints_dir: The directory to store model checkpoints.
+
         """
         self.datastore = DataStore(trials)
         self.adaptive_scheduler = adaptive_scheduler
@@ -115,8 +121,7 @@ class SdeRuntimeEngine:
             logger.info("Runtime engine execution resumed.")
 
     def cancel_work_for_trial(self, trial_id: str) -> None:
-        """
-        Passes a cancellation request down to the scheduler and marks the trial
+        """Passes a cancellation request down to the scheduler and marks the trial
         so any pending work units for it are ignored. This is thread-safe.
         """
         logger.info(
@@ -126,8 +131,7 @@ class SdeRuntimeEngine:
         self.compute_scheduler.cancel_work_for_trial(trial_id)
 
     def add_trials_live(self, trials: List[Trial]) -> None:
-        """
-        Injects new trials into the live datastore and generates work units for them,
+        """Injects new trials into the live datastore and generates work units for them,
         adding them to the active work queue. This is thread-safe.
         """
         if not self._is_running:
@@ -152,8 +156,7 @@ class SdeRuntimeEngine:
         )
 
     def update_adaptive_policy(self, new_scheduler: AdaptiveScheduler) -> None:
-        """
-        Safely swaps the adaptive scheduler mid-run.
+        """Safely swaps the adaptive scheduler mid-run.
         This is a thread-safe operation.
         """
         if not self._is_running:
@@ -170,8 +173,7 @@ class SdeRuntimeEngine:
         )
 
     def _execution_loop(self):
-        """
-        The main loop that drives the experiment. It gets work from the adaptive
+        """The main loop that drives the experiment. It gets work from the adaptive
         scheduler, sends it to the compute scheduler, processes results, and
         determines the next batch of work.
         """
@@ -222,8 +224,7 @@ class SdeRuntimeEngine:
         logger.info("Runtime engine execution loop finished.")
 
     def _process_completed_work_unit(self, work_unit: WorkUnit, result: dict):
-        """
-        Handles the result of a single completed work unit.
+        """Handles the result of a single completed work unit.
 
         This involves updating the datastore, calling callbacks, analyzing for
         insights, and scheduling the next units of work.
@@ -288,8 +289,7 @@ class SdeRuntimeEngine:
     def submit_work(
         self, work_units: List[WorkUnit]
     ) -> Iterator[Tuple[WorkUnit, dict]]:
-        """
-        Submits a list of work units to the scheduler and yields results.
+        """Submits a list of work units to the scheduler and yields results.
 
         Note: This is a lower-level API that bypasses the adaptive scheduler.
         It's intended for specific use cases, not general experiment execution.

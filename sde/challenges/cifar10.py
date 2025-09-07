@@ -1,6 +1,6 @@
-from torchvision import datasets, transforms
-
 from sde.challenges.factory import create_image_classification_challenge
+from torchvision import datasets
+from torchvision import transforms
 
 # Define the specific transform for CIFAR-10
 # Normalize to [-1, 1]

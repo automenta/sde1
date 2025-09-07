@@ -26,6 +26,7 @@ Requires-Dist: torchvision
 Requires-Dist: numpy
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
 Dynamic: license-file
 
 # **Scientific Discovery Engine (SDE): Software Spec**

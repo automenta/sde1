@@ -1,11 +1,12 @@
-import sys
 import multiprocessing
+import sys
+
 from PyQt6.QtWidgets import QApplication
 from sde.ui.main_window import MainWindow
 
+
 def main():
-    """
-    The main entry point for the SDE application.
+    """The main entry point for the SDE application.
     """
     app = QApplication(sys.argv)
     # It's good practice to set application-wide metadata

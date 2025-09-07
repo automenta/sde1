@@ -1,18 +1,19 @@
-from typing import Dict, Any
+from typing import Any
+from typing import Dict
 
-from sde.core.types import Experiment, ExperimentStatus, TrialStatus
+from sde.core.types import Experiment
+from sde.core.types import ExperimentStatus
+from sde.core.types import TrialStatus
 
 
 class ActionValidator:
-    """
-    A dedicated class for validating actions against the current experiment state.
+    """A dedicated class for validating actions against the current experiment state.
     This encapsulates the logic of which actions are permitted in which states.
     """
 
     @staticmethod
     def get_valid_actions(experiment: Experiment) -> Dict[str, Any]:
-        """
-        Inspects the current state and returns a structured dictionary of valid actions.
+        """Inspects the current state and returns a structured dictionary of valid actions.
         e.g., {
             "global": ["ADD_ALGORITHM"],
             "algorithms": { "algo_1": ["UPDATE_PARAM_SPACE", "REMOVE_ALGORITHM"] },
@@ -85,8 +86,7 @@ class ActionValidator:
     def is_action_valid(
         action_type: str, payload: Dict[str, Any], valid_actions: Dict
     ) -> bool:
-        """
-        Checks if a given action is present in the structured valid_actions dict.
+        """Checks if a given action is present in the structured valid_actions dict.
         This is a strict validator. An action is only considered valid if it
         is explicitly listed in the `valid_actions` dictionary for the correct
         context (global, per-algorithm, or per-trial). It follows a

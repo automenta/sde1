@@ -1,21 +1,23 @@
-import torch
-import torch.optim as optim
+import logging
 import os
 import time
-import logging
 import traceback
 from typing import Tuple
 
-from sde.core.types import WorkUnit, Trial, WorkUnitType
-from sde.models.types import ModelDefinition, DatasetDefinition
+import torch
+import torch.optim as optim
+from sde.core.types import Trial
+from sde.core.types import WorkUnit
+from sde.core.types import WorkUnitType
+from sde.models.types import DatasetDefinition
+from sde.models.types import ModelDefinition
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
 
 
 class Worker:
-    """
-    Executes a single WorkUnit, like training a model for one epoch.
+    """Executes a single WorkUnit, like training a model for one epoch.
     It is initialized with a specific ModelDefinition and DatasetDefinition.
     """
 
@@ -25,13 +27,13 @@ class Worker:
         dataset_def: DatasetDefinition,
         checkpoints_dir: str = "./checkpoints",
     ):
-        """
-        Initializes the Worker.
+        """Initializes the Worker.
 
         Args:
             model_def: The definition for the model to be trained/evaluated.
             dataset_def: The definition for the dataset to be used.
             checkpoints_dir: The directory for saving/loading model checkpoints.
+
         """
         logger.info(f"Worker process initialized. Using device: {DEVICE}")
         self.model_def = model_def
@@ -43,8 +45,7 @@ class Worker:
     def _get_dataloaders(
         self, trial: Trial
     ) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
-        """
-        Creates and caches dataloaders based on trial-specific hyperparameters.
+        """Creates and caches dataloaders based on trial-specific hyperparameters.
         This avoids re-creating the dataloader for every epoch of the same trial,
         but allows different trials to have different batch sizes.
         """
@@ -62,8 +63,7 @@ class Worker:
     def execute_work_unit(
         self, work_unit: WorkUnit, trial: Trial, enable_checkpointing: bool = True
     ) -> dict:
-        """
-        Executes the given work unit for the given trial.
+        """Executes the given work unit for the given trial.
         This method is wrapped in a try-except block to gracefully handle
         errors during model training or evaluation (e.g., CUDA OOM).
         """
@@ -115,8 +115,7 @@ class Worker:
         return model, optimizer
 
     def _profile_speed(self, work_unit: WorkUnit, trial: Trial) -> dict:
-        """
-        Runs a few training batches to estimate the time per epoch.
+        """Runs a few training batches to estimate the time per epoch.
         """
         # 1. Setup model, optimizer, and loss function
         model, optimizer = self._setup_model_and_optimizer(trial)

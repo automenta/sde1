@@ -1,10 +1,15 @@
 import unittest
-from unittest.mock import patch, MagicMock
-import torch
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
+import torch
+from sde.core.types import Trial
+from sde.core.types import WorkUnit
+from sde.core.types import WorkUnitType
 from sde.engine.worker import Worker
-from sde.core.types import Trial, WorkUnit, WorkUnitType
-from sde.models.types import ModelDefinition, DatasetDefinition, DatasetType
+from sde.models.types import DatasetType
+from sde.models.types import ModelDefinition
+
 
 # Mock SdeModel to avoid needing a real torch model
 class MockModel(torch.nn.Module):
@@ -19,8 +24,7 @@ class TestWorker(unittest.TestCase):
     @patch('sde.engine.worker.torch.save')
     @patch('sde.challenges.utils.create_train_val_dataloaders')
     def test_batch_size_hyperparameter_is_used(self, mock_create_dataloaders, mock_torch_save):
-        """
-        Tests that the batch_size from trial hyperparameters is passed to the loader factory.
+        """Tests that the batch_size from trial hyperparameters is passed to the loader factory.
         """
         # 1. Setup mocks and test data
         # Mock the dataloaders to return some dummy data

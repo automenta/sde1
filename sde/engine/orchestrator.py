@@ -1,24 +1,29 @@
-import logging
-import traceback
-import threading
 import copy
-from typing import List, Dict, Any
+import logging
+import threading
+import traceback
+from typing import Any
+from typing import Dict
+from typing import List
 
-from sde.core.types import Experiment, ExperimentStatus, Trial, TrialStatus, AlgorithmConfig
 from sde.core.actions import ActionType
-from sde.engine.runtime import SdeRuntimeEngine
-from sde.challenges import AVAILABLE_DATASETS
+from sde.core.types import AlgorithmConfig
+from sde.core.types import Experiment
+from sde.core.types import ExperimentStatus
+from sde.core.types import Trial
+from sde.core.types import TrialStatus
 from sde.engine.action_validator import ActionValidator
 from sde.engine.factory import SchedulerFactory
+from sde.engine.runtime import SdeRuntimeEngine
 from sde.events import Signal
-from sde.persistence import save_experiment, load_experiment
+from sde.persistence import load_experiment
+from sde.persistence import save_experiment
 
 logger = logging.getLogger(__name__)
 
 
 class ExperimentOrchestrator:
-    """
-    The central nervous system of the SDE.
+    """The central nervous system of the SDE.
 
     This class manages the canonical `Experiment` state object, validates all
     incoming `Actions` from the UI, mutates the state, and issues high-level
@@ -37,8 +42,7 @@ class ExperimentOrchestrator:
         self.log_message.emit({'level': 'INFO', 'message': "Orchestrator initialized in DEFINING state."})
 
     def dispatch(self, action_type: ActionType, payload: Dict[str, Any]) -> None:
-        """
-        Receives an action, validates it, mutates the state, and triggers side effects.
+        """Receives an action, validates it, mutates the state, and triggers side effects.
         """
         with self._lock:
             handler_name = f"handle_{action_type.value.lower()}"
@@ -66,8 +70,7 @@ class ExperimentOrchestrator:
                 logger.error(traceback.format_exc())
 
     def emit_state_change(self) -> None:
-        """
-        Serializes the current experiment state and emits it via the state_changed signal.
+        """Serializes the current experiment state and emits it via the state_changed signal.
         """
         state_dict = self.experiment.to_dict()
         state_dict["valid_actions"] = ActionValidator.get_valid_actions(self.experiment)
@@ -304,7 +307,7 @@ class ExperimentOrchestrator:
         with self._lock:
             trial_id = trial_data.get("id")
             if not trial_id:
-                logger.warning(f"Orchestrator received update without a trial_id.")
+                logger.warning("Orchestrator received update without a trial_id.")
                 return
             updated_trial = Trial.from_dict(trial_data)
             self.experiment.trials[updated_trial.id] = updated_trial

@@ -1,16 +1,15 @@
 import json
-from typing import Dict, Any
 
-from sde.core.types import Experiment, ExperimentStatus, AlgorithmConfig, Trial, TrialStatus
+from sde.core.types import Experiment
 
 
 def save_experiment(experiment: Experiment, filepath: str) -> None:
-    """
-    Serializes an Experiment object to a JSON file.
+    """Serializes an Experiment object to a JSON file.
 
     Args:
         experiment: The Experiment object to save.
         filepath: The path to the file where the experiment will be saved.
+
     """
     try:
         state_dict = experiment.to_dict()
@@ -23,14 +22,14 @@ def save_experiment(experiment: Experiment, filepath: str) -> None:
 
 
 def load_experiment(filepath: str) -> Experiment:
-    """
-    Loads an Experiment object from a JSON file.
+    """Loads an Experiment object from a JSON file.
 
     Args:
         filepath: The path to the file from which to load the experiment.
 
     Returns:
         An Experiment object.
+
     """
     try:
         with open(filepath, "r") as f:

@@ -1,19 +1,20 @@
-from typing import Dict, Any, List
 from datetime import datetime
-
-from PyQt6.QtCore import QObject
-from PyQt6.QtWidgets import QStyle
-from PyQt6.QtGui import QIcon
-
-from sde.ui.models import UITrial, UIAlgorithm, UIInsight
-from sde.challenges import AVAILABLE_DATASETS
+from typing import Any
+from typing import Dict
+from typing import List
 
 import pyqtgraph as pg
+from PyQt6.QtCore import QObject
+from PyQt6.QtGui import QIcon
+from PyQt6.QtWidgets import QStyle
+from sde.challenges import AVAILABLE_DATASETS
+from sde.ui.models import UIAlgorithm
+from sde.ui.models import UIInsight
+from sde.ui.models import UITrial
 
 
 class ExperimentViewModel(QObject):
-    """
-    Manages the UI state for the experiment.
+    """Manages the UI state for the experiment.
 
     This class acts as a bridge between the backend `Orchestrator` and the
     `MainWindow`. It receives the raw state dictionary from the backend,

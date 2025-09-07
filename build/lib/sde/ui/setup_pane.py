@@ -1,32 +1,29 @@
-import sys
 import os
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QFormLayout,
-    QGroupBox,
-    QComboBox,
-    QListWidget,
-    QPushButton,
-    QSlider,
-    QLabel,
-    QCheckBox,
-    QTableWidget,
-    QHeaderView,
-    QProgressBar,
-    QListWidgetItem,
-    QSpinBox,
-)
-from PyQt6.QtCore import Qt, pyqtSignal
 
-from sde.models import AVAILABLE_MODELS
+from PyQt6.QtCore import Qt
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import QCheckBox
+from PyQt6.QtWidgets import QComboBox
+from PyQt6.QtWidgets import QFormLayout
+from PyQt6.QtWidgets import QGroupBox
+from PyQt6.QtWidgets import QHBoxLayout
+from PyQt6.QtWidgets import QHeaderView
+from PyQt6.QtWidgets import QLabel
+from PyQt6.QtWidgets import QListWidget
+from PyQt6.QtWidgets import QListWidgetItem
+from PyQt6.QtWidgets import QProgressBar
+from PyQt6.QtWidgets import QPushButton
+from PyQt6.QtWidgets import QSlider
+from PyQt6.QtWidgets import QSpinBox
+from PyQt6.QtWidgets import QTableWidget
+from PyQt6.QtWidgets import QVBoxLayout
+from PyQt6.QtWidgets import QWidget
 from sde.challenges import AVAILABLE_DATASETS
+from sde.models import AVAILABLE_MODELS
 
 
 class SetupPane(QWidget):
-    """
-    The left-hand pane for experiment setup and controls.
+    """The left-hand pane for experiment setup and controls.
     It encapsulates all the widgets and logic for configuring and
     controlling an experiment run.
     """

@@ -1,7 +1,8 @@
 import torch.nn as nn
 import torch.nn.functional as F
-
-from sde.models.types import ModelDefinition, DatasetType, SdeModel
+from sde.models.types import DatasetType
+from sde.models.types import ModelDefinition
+from sde.models.types import SdeModel
 
 
 class ResidualBlock(nn.Module):

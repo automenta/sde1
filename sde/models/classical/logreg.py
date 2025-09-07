@@ -1,13 +1,13 @@
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-
-from sde.models.types import ModelDefinition, DatasetType, SdeModel
+from sde.models.types import DatasetType
+from sde.models.types import ModelDefinition
+from sde.models.types import SdeModel
 
 
 class LogisticRegression(SdeModel):
-    """
-    A simple Logistic Regression model implemented as a PyTorch module.
+    """A simple Logistic Regression model implemented as a PyTorch module.
     It flattens the input and applies a single linear layer.
     """
 

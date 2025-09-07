@@ -1,12 +1,17 @@
-import torch.nn as nn
-from dataclasses import dataclass, field
-from typing import List, Type, Any, Tuple, Callable
+from dataclasses import dataclass
+from dataclasses import field
 from enum import Enum
+from typing import Any
+from typing import Callable
+from typing import List
+from typing import Tuple
+from typing import Type
+
+import torch.nn as nn
 
 
 class SdeModel(nn.Module):
-    """
-    Base class for all models in the Scientific Discovery Engine.
+    """Base class for all models in the Scientific Discovery Engine.
     It standardizes the model interface.
     """
 
@@ -17,8 +22,7 @@ class SdeModel(nn.Module):
 
 
 class DatasetType(Enum):
-    """
-    Enum to categorize the type of a dataset.
+    """Enum to categorize the type of a dataset.
     Used for type safety to match compatible models and datasets.
     """
 
@@ -29,8 +33,7 @@ class DatasetType(Enum):
 
 
 class ModelType(Enum):
-    """
-    Enum to categorize the type of a model.
+    """Enum to categorize the type of a model.
     """
 
     IMAGE_CLASSIFIER = "IMAGE_CLASSIFIER"
@@ -41,8 +44,7 @@ class ModelType(Enum):
 
 @dataclass(frozen=True)
 class DatasetDefinition:
-    """
-    A metadata container for a dataset.
+    """A metadata container for a dataset.
     """
 
     name: str
@@ -62,8 +64,7 @@ class DatasetDefinition:
 
 @dataclass(frozen=True)
 class ModelDefinition:
-    """
-    A metadata container for a model/algorithm.
+    """A metadata container for a model/algorithm.
     """
 
     name: str

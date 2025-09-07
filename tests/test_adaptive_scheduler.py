@@ -1,6 +1,11 @@
 import unittest
+
+from sde.core.types import Trial
+from sde.core.types import TrialStatus
+from sde.core.types import WorkUnit
+from sde.core.types import WorkUnitType
 from sde.exploration.schedulers import SuccessiveHalvingScheduler
-from sde.core.types import Trial, TrialStatus, WorkUnit, WorkUnitType
+
 
 class TestSuccessiveHalvingScheduler(unittest.TestCase):
 
@@ -75,6 +80,33 @@ class TestSuccessiveHalvingScheduler(unittest.TestCase):
         self.assertIn(self.trials['trial_2'], pruned_trials)
         self.assertIn(self.trials['trial_3'], active_trials)
         self.assertIn(self.trials['trial_4'], active_trials)
+
+    def test_pruning_with_missing_metric(self):
+        """Test that a trial missing a metric at a rung is correctly pruned."""
+        scheduler = SuccessiveHalvingScheduler(metric='accuracy', increasing=True, min_epochs_per_rung=1, reduction_factor=2)
+
+        # Simulate completion of the first rung for most trials
+        self.trials['trial_1'].status = TrialStatus.ACTIVE
+        self.trials['trial_1'].current_epoch = 1
+        # trial_2 is missing its result
+        self.trials['trial_2'].status = TrialStatus.ACTIVE
+        self.trials['trial_2'].current_epoch = 1
+        self.trials['trial_3'].status = TrialStatus.ACTIVE
+        self.trials['trial_3'].current_epoch = 1
+        self.trials['trial_3'].results['accuracy'] = [(1, 0.8)]
+        self.trials['trial_4'].status = TrialStatus.ACTIVE
+        self.trials['trial_4'].current_epoch = 1
+        self.trials['trial_4'].results['accuracy'] = [(1, 0.9)]
+
+        # The trial that just finished is trial_1
+        finished_trial = self.trials['trial_1']
+        scheduler.get_next_work_units(finished_trial, self.trials)
+
+        # trial_1 and trial_2 should be pruned (trial_2 for missing metric, trial_1 for no metric)
+        self.assertEqual(self.trials['trial_1'].status, TrialStatus.PRUNED)
+        self.assertEqual(self.trials['trial_2'].status, TrialStatus.PRUNED)
+        self.assertEqual(self.trials['trial_3'].status, TrialStatus.ACTIVE)
+        self.assertEqual(self.trials['trial_4'].status, TrialStatus.ACTIVE)
 
 
 if __name__ == '__main__':

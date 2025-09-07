@@ -1,13 +1,17 @@
 import copy
 import threading
-from typing import Dict, List, Optional
+from typing import Dict
+from typing import List
+from typing import Optional
 
-from sde.core.types import Trial, TrialStatus, WorkUnit, WorkUnitType
+from sde.core.types import Trial
+from sde.core.types import TrialStatus
+from sde.core.types import WorkUnit
+from sde.core.types import WorkUnitType
 
 
 class DataStore:
-    """
-    A thread-safe container for all experiment-related data, primarily the state
+    """A thread-safe container for all experiment-related data, primarily the state
     of all trials. It is the sole component responsible for mutating trial state.
     """
 
@@ -16,8 +20,7 @@ class DataStore:
         self._lock = threading.Lock()
 
     def get_trial(self, trial_id: str) -> Optional[Trial]:
-        """
-        Retrieves a deep copy of a single trial by its ID to ensure the
+        """Retrieves a deep copy of a single trial by its ID to ensure the
         caller cannot mutate the datastore's state.
         """
         with self._lock:
@@ -33,8 +36,7 @@ class DataStore:
             self._trials[trial.id] = trial
 
     def get_all_trials(self) -> Dict[str, Trial]:
-        """
-        Returns a deep copy of the dictionary of all trials to ensure the
+        """Returns a deep copy of the dictionary of all trials to ensure the
         caller cannot mutate the datastore's state.
         """
         with self._lock:
@@ -46,8 +48,7 @@ class DataStore:
     def record_work_unit_result(
         self, work_unit: WorkUnit, result: dict
     ) -> Optional[Trial]:
-        """
-        Updates a trial's state based on the results from a work unit.
+        """Updates a trial's state based on the results from a work unit.
         This includes metrics, epoch count, checkpoint paths, and profile info.
         This is the single entry point for mutating trial state from work results.
         """

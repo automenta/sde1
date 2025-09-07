@@ -1,7 +1,11 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
-from sde.core.types import Trial, TrialStatus, WorkUnit, WorkUnitType
+from sde.core.types import Trial
+from sde.core.types import TrialStatus
+from sde.core.types import WorkUnit
+from sde.core.types import WorkUnitType
 from sde.engine.runtime import SdeRuntimeEngine
 
 
@@ -26,8 +30,7 @@ class TestSdeRuntimeEngine(unittest.TestCase):
             )
 
     def test_work_unit_error_sets_trial_to_failed(self):
-        """
-        Test that if a work unit result contains an error, the trial's status
+        """Test that if a work unit result contains an error, the trial's status
         is set to FAILED and the UI callback is notified.
         """
         work_unit = WorkUnit(trial_id='trial1', type=WorkUnitType.TRAIN_EPOCH)

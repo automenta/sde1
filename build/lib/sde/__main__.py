@@ -1,6 +1,6 @@
+import logging
 import time
 import uuid
-import logging
 
 from sde.core.types import Trial
 from sde.engine.orchestrator import Orchestrator
@@ -8,8 +8,7 @@ from sde.exploration.schedulers import SuccessiveHalvingScheduler
 
 
 def main():
-    """
-    Main entry point for running a command-line-based SDE experiment.
+    """Main entry point for running a command-line-based SDE experiment.
     """
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

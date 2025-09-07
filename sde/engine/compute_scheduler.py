@@ -1,14 +1,19 @@
 import concurrent.futures
+import logging
 import multiprocessing
 import threading
 import traceback
-from typing import List, Dict, Tuple, Iterator
-import logging
+from typing import Dict
+from typing import Iterator
+from typing import List
+from typing import Tuple
 
-from sde.core.types import Trial, WorkUnit, TrialStatus
 from sde.challenges import AVAILABLE_DATASETS
-from sde.models import AVAILABLE_MODELS
+from sde.core.types import Trial
+from sde.core.types import TrialStatus
+from sde.core.types import WorkUnit
 from sde.engine.datastore import DataStore
+from sde.models import AVAILABLE_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +26,7 @@ def execute_work_unit_in_process(
     enable_checkpointing: bool,
     checkpoints_dir: str,
 ) -> Tuple[WorkUnit, dict]:
-    """
-    A wrapper function that initializes a Worker in a new process, executes
+    """A wrapper function that initializes a Worker in a new process, executes
     the given WorkUnit, and returns the result along with the original WorkUnit.
     It's a top-level function to be pickleable.
     """
@@ -43,8 +47,7 @@ def execute_work_unit_in_process(
 
 
 class ComputeScheduler:
-    """
-    Manages a pool of worker processes using concurrent.futures. It submits
+    """Manages a pool of worker processes using concurrent.futures. It submits
     work units and yields results as they are completed, using the
     `as_completed` pattern for efficiency. This is the 'Compute Scheduler'
     described in the architecture.
@@ -111,8 +114,7 @@ class ComputeScheduler:
                 )
 
     def run(self, work_units: List[WorkUnit]) -> Iterator[Tuple[WorkUnit, dict]]:
-        """
-        Submits work units to the executor and yields results as they complete.
+        """Submits work units to the executor and yields results as they complete.
         This is a generator function.
         """
         if not self._is_running or not self.executor:

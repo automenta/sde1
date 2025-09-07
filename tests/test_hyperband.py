@@ -1,8 +1,10 @@
 import unittest
-import math
 
-from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus
-from sde.exploration.schedulers import HyperbandScheduler, _Bracket
+from sde.core.types import Trial
+from sde.core.types import TrialStatus
+from sde.exploration.schedulers import HyperbandScheduler
+from sde.exploration.schedulers import _Bracket
+
 
 class TestHyperbandScheduler(unittest.TestCase):
 
@@ -89,6 +91,39 @@ class TestHyperbandScheduler(unittest.TestCase):
         self.assertEqual(len(new_work), 2)
         survivor_ids = {w.trial_id for w in new_work}
         self.assertEqual(survivor_ids, {"t3", "t4"})
+
+    def test_pruning_with_missing_metric_in_bracket(self):
+        """Test that a trial missing a metric is pruned correctly within a bracket."""
+        trials = {f"t{i}": Trial(id=f"t{i}", algorithm_name="algo", hyperparameters={}) for i in range(3)}
+        scheduler = HyperbandScheduler(metric="acc", increasing=True, max_resource_per_trial=3, reduction_factor=3)
+
+        # Manually set up a bracket with 3 trials
+        bracket = _Bracket(s=1, num_trials=3, rung_resources=[1, 3], trial_ids=[f"t{i}" for i in range(3)])
+        scheduler.brackets.append(bracket)
+        for tid in bracket.trial_ids:
+            scheduler.trial_to_bracket[tid] = bracket
+            trials[tid].status = TrialStatus.ACTIVE
+
+        # Simulate completion of the first rung (1 epoch)
+        trials["t0"].current_epoch = 1
+        trials["t0"].results = {"acc": [(1, 0.9)]}
+        trials["t1"].current_epoch = 1
+        # t1 is missing its result
+        trials["t2"].current_epoch = 1
+        trials["t2"].results = {"acc": [(1, 0.8)]}
+
+        # The last trial (t2) finishes, triggering the pruning decision
+        finished_trial = trials["t2"]
+        new_work = scheduler.get_next_work_units(finished_trial, trials)
+
+        # Check pruning: eta=3, 3 trials -> keep ceil(3/3) = 1 trial.
+        # Survivor should be t0. Pruned should be t1 and t2.
+        self.assertEqual(trials["t0"].status, TrialStatus.ACTIVE)
+        self.assertEqual(trials["t1"].status, TrialStatus.PRUNED)
+        self.assertEqual(trials["t2"].status, TrialStatus.PRUNED)
+        self.assertEqual(len(new_work), 1)
+        self.assertEqual(new_work[0].trial_id, "t0")
+
 
 if __name__ == '__main__':
     unittest.main()

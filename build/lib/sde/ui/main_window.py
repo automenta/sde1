@@ -1,33 +1,29 @@
 import sys
-from PyQt6.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QHBoxLayout,
-    QMessageBox,
-    QDialog,
-    QApplication,
-    QFileDialog,
-    QInputDialog,
-)
+
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QDialog
+from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import QHBoxLayout
+from PyQt6.QtWidgets import QInputDialog
+from PyQt6.QtWidgets import QMainWindow
+from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QWidget
+from sde.challenges import AVAILABLE_DATASETS
 
 # Import backend and UI components
 from sde.core.actions import ActionType
 from sde.engine.orchestrator import ExperimentOrchestrator
 from sde.models import AVAILABLE_MODELS
-from sde.challenges import AVAILABLE_DATASETS
-from sde.ui.hyperparameters import (
-    HyperparameterDialog,
-    HyperparameterViewerDialog,
-    SpawnDialog,
-)
-from sde.ui.view_model import ExperimentViewModel
-from sde.ui.setup_pane import SetupPane
+from sde.ui.hyperparameters import HyperparameterDialog
+from sde.ui.hyperparameters import HyperparameterViewerDialog
+from sde.ui.hyperparameters import SpawnDialog
 from sde.ui.results_pane import ResultsPane
+from sde.ui.setup_pane import SetupPane
+from sde.ui.view_model import ExperimentViewModel
 
 
 class MainWindow(QMainWindow):
-    """
-    The main window for the Scientific Discovery Engine UI. It orchestrates the
+    """The main window for the Scientific Discovery Engine UI. It orchestrates the
     SetupPane (left) and ResultsPane (right), and manages the ViewModel and
     the backend ExperimentOrchestrator.
     """
@@ -91,16 +87,14 @@ class MainWindow(QMainWindow):
     # --- Major Action Handlers ---
 
     def on_state_changed(self, state: dict):
-        """
-        The central handler for all state updates from the Orchestrator.
+        """The central handler for all state updates from the Orchestrator.
         It delegates state processing to the ViewModel and then triggers a UI refresh.
         """
         self.view_model.update_state(state)
         self._update_all_widgets()
 
     def start_simple_experiment(self, settings: dict):
-        """
-        Dispatches actions to the orchestrator to build and start an experiment.
+        """Dispatches actions to the orchestrator to build and start an experiment.
         """
         dataset_name, selected_models = self.setup_pane.get_experiment_settings()
         if not dataset_name or not selected_models:
@@ -195,8 +189,7 @@ class MainWindow(QMainWindow):
         self.setup_pane.clear_algorithms_table()
 
     def _create_default_param_space(self, model_def: dict) -> dict:
-        """
-        Creates a detailed, default parameter space for a given model,
+        """Creates a detailed, default parameter space for a given model,
         preserving properties like 'scale' for random sampling.
         """
         param_space = {}
@@ -277,15 +270,19 @@ class MainWindow(QMainWindow):
             )
 
     def remove_algorithm(self, algorithm_id: str):
+        """Dispatches an action to remove an algorithm from the experiment."""
         self.orchestrator.dispatch(ActionType.REMOVE_ALGORITHM, {"algorithm_id": algorithm_id})
 
     def update_throttle(self, value: int):
+        """Dispatches an action to update the worker throttle percentage."""
         self.orchestrator.dispatch(ActionType.SET_BUDGET, {"worker_throttle_percent": value})
 
     def pause_experiment(self):
+        """Dispatches an action to pause the current experiment run."""
         self.orchestrator.dispatch(ActionType.PAUSE_RUN, {})
 
     def resume_experiment(self):
+        """Dispatches an action to resume a paused experiment run."""
         self.orchestrator.dispatch(ActionType.RESUME_RUN, {})
 
     def save_experiment(self):

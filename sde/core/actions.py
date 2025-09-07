@@ -2,10 +2,10 @@ from enum import Enum
 
 
 class ActionType(str, Enum):
-    """
-    Defines the types of actions that can be dispatched to the ExperimentOrchestrator.
+    """Defines the types of actions that can be dispatched to the ExperimentOrchestrator.
     Using a StrEnum makes it serializable and backward-compatible with the old string-based system.
     """
+
     # Experiment Setup
     SET_CHALLENGE = "SET_CHALLENGE"
     ADD_ALGORITHM = "ADD_ALGORITHM"

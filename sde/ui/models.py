@@ -1,8 +1,14 @@
-from dataclasses import dataclass, field
-from typing import Dict, Any, List, Tuple, Optional
+from dataclasses import dataclass
+from dataclasses import field
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
 
-from PyQt6.QtGui import QColor, QIcon
 import pyqtgraph as pg
+from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QIcon
 
 # A unique, consistent color can be assigned by the ViewModel.
 # This default is just a fallback.

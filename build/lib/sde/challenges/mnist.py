@@ -1,6 +1,6 @@
-from torchvision import datasets, transforms
-
 from sde.challenges.factory import create_image_classification_challenge
+from torchvision import datasets
+from torchvision import transforms
 
 # Define the specific transform for MNIST
 # Mean and std of MNIST are 0.1307 and 0.3081 respectively

@@ -1,8 +1,13 @@
 import dataclasses
 import uuid
-from dataclasses import dataclass, field
-from typing import Dict, Any, List, Tuple, Optional
+from dataclasses import dataclass
+from dataclasses import field
 from enum import Enum
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
 
 
 class WorkUnitType(Enum):
@@ -23,6 +28,7 @@ class WorkUnit:
 class TrialStatus(Enum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
     PRUNED = "PRUNED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
@@ -56,8 +62,7 @@ class Trial:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Trial":
-        """
-        Creates a Trial instance from a dictionary.
+        """Creates a Trial instance from a dictionary.
 
         This method is robust to extra keys in the input dictionary,
         which allows for forward compatibility if the Trial class is

@@ -1,28 +1,19 @@
-import itertools
-import random
-import numpy as np
-from PyQt6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QFormLayout,
-    QLabel,
-    QPushButton,
-    QComboBox,
-    QSpinBox,
-    QDoubleSpinBox,
-    QGroupBox,
-    QScrollArea,
-    QWidget,
-    QDialogButtonBox,
-)
-from PyQt6.QtCore import Qt
-
+from PyQt6.QtWidgets import QComboBox
+from PyQt6.QtWidgets import QDialog
+from PyQt6.QtWidgets import QDialogButtonBox
+from PyQt6.QtWidgets import QDoubleSpinBox
+from PyQt6.QtWidgets import QFormLayout
+from PyQt6.QtWidgets import QGroupBox
+from PyQt6.QtWidgets import QHBoxLayout
+from PyQt6.QtWidgets import QLabel
+from PyQt6.QtWidgets import QPushButton
+from PyQt6.QtWidgets import QScrollArea
+from PyQt6.QtWidgets import QSpinBox
+from PyQt6.QtWidgets import QTreeWidget
+from PyQt6.QtWidgets import QTreeWidgetItem
+from PyQt6.QtWidgets import QVBoxLayout
+from PyQt6.QtWidgets import QWidget
 from sde.models.types import ModelDefinition
-from PyQt6.QtWidgets import (
-    QTreeWidget,
-    QTreeWidgetItem,
-)
 
 
 class HyperparameterViewerDialog(QDialog):
@@ -65,8 +56,7 @@ class HyperparameterViewerDialog(QDialog):
 
 
 class HyperparameterDialog(QDialog):
-    """
-    A dialog for configuring a hyperparameter tuning experiment.
+    """A dialog for configuring a hyperparameter tuning experiment.
     """
 
     def __init__(self, models: list[ModelDefinition], parent=None):

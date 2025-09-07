@@ -1,6 +1,6 @@
-from torchvision import datasets, transforms
-
 from sde.challenges.factory import create_image_classification_challenge
+from torchvision import datasets
+from torchvision import transforms
 
 # Define the specific transform for Fashion-MNIST
 # Mean: 0.2860, Std: 0.3530 (calculated from the training set)

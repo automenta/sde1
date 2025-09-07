@@ -1,5 +1,6 @@
 import numpy as np
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
+from torch.utils.data import Subset
 
 
 def create_train_val_dataloaders(
@@ -10,8 +11,7 @@ def create_train_val_dataloaders(
     val_split: float = 0.1,
     seed: int = 42,
 ):
-    """
-    Creates training and validation DataLoaders from a torchvision dataset.
+    """Creates training and validation DataLoaders from a torchvision dataset.
 
     Args:
         dataset_class: The torchvision dataset class (e.g., datasets.MNIST).
@@ -23,6 +23,7 @@ def create_train_val_dataloaders(
 
     Returns:
         A tuple containing the training and validation DataLoaders.
+
     """
     # Download and load the full training dataset
     full_train_dataset = dataset_class(

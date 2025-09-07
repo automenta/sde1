@@ -1,7 +1,7 @@
 import logging
 import traceback
-from typing import List, Callable
-
+from typing import Callable
+from typing import List
 
 logger = logging.getLogger(__name__)
 

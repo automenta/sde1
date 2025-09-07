@@ -1,11 +1,19 @@
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import List, Dict, Any
 import math
 import random
-import numpy as np
+from abc import ABC
+from abc import abstractmethod
+from dataclasses import dataclass
+from dataclasses import field
+from typing import Any
+from typing import Dict
+from typing import List
 
-from sde.core.types import Trial, WorkUnit, WorkUnitType, TrialStatus, AlgorithmConfig
+import numpy as np
+from sde.core.types import AlgorithmConfig
+from sde.core.types import Trial
+from sde.core.types import TrialStatus
+from sde.core.types import WorkUnit
+from sde.core.types import WorkUnitType
 
 
 def _generate_random_hyperparameters(parameter_space: Dict[str, Any]) -> Dict[str, Any]:
@@ -34,8 +42,7 @@ def _generate_random_hyperparameters(parameter_space: Dict[str, Any]) -> Dict[st
 
 
 class AdaptiveScheduler(ABC):
-    """
-    Abstract base class for an adaptive scheduler policy.
+    """Abstract base class for an adaptive scheduler policy.
     It determines what work to do next based on intermediate results.
     """
 
@@ -55,16 +62,14 @@ class AdaptiveScheduler(ABC):
     def get_next_work_units(
         self, finished_trial: Trial, all_trials: Dict[str, Trial]
     ) -> List[WorkUnit]:
-        """
-        Determines the next WorkUnits to schedule based on the result of a
+        """Determines the next WorkUnits to schedule based on the result of a
         just-finished trial and the state of all other trials.
         """
         ...
 
 
 class SuccessiveHalvingScheduler(AdaptiveScheduler):
-    """
-    Implements the Successive Halving algorithm (SHA) in a stateless manner.
+    """Implements the Successive Halving algorithm (SHA) in a stateless manner.
 
     This scheduler runs a set of trials for a certain number of epochs (a "rung"),
     then prunes the worst-performing half and continues with the survivors.
@@ -117,8 +122,7 @@ class SuccessiveHalvingScheduler(AdaptiveScheduler):
     def get_next_work_units(
         self, finished_trial: Trial, all_trials: Dict[str, Trial]
     ) -> List[WorkUnit]:
-        """
-        Checks if a rung is complete, prunes underperforming trials, and schedules
+        """Checks if a rung is complete, prunes underperforming trials, and schedules
         work for the survivors. The logic is stateless and derives progress from trial data.
         """
         # 1. Identify the set of currently active trials. These are the contenders for the current rung.
@@ -193,8 +197,7 @@ class _Bracket:
 
 
 class HyperbandScheduler(AdaptiveScheduler):
-    """
-    Implements the Hyperband algorithm.
+    """Implements the Hyperband algorithm.
 
     Hyperband is a more advanced version of Successive Halving that automates
     the trade-off between the number of trials to run and the number of epochs
@@ -222,8 +225,7 @@ class HyperbandScheduler(AdaptiveScheduler):
     def generate_initial_trials(
         self, algorithms: List[AlgorithmConfig], num_trials_per_algo: int
     ) -> List[Trial]:
-        """
-        Generates a flat list of trials using random search. Hyperband will later
+        """Generates a flat list of trials using random search. Hyperband will later
         assign these trials to brackets. The num_trials_per_algo may not be
         fully respected, as Hyperband has specific requirements for the total
         number of trials.
@@ -246,8 +248,7 @@ class HyperbandScheduler(AdaptiveScheduler):
         return trials
 
     def get_initial_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
-        """
-        Calculates brackets, assigns trials to them, and returns the first set of work units.
+        """Calculates brackets, assigns trials to them, and returns the first set of work units.
         """
         trial_pool = [t for t in trials.values() if t.status == TrialStatus.PENDING]
 
@@ -294,8 +295,7 @@ class HyperbandScheduler(AdaptiveScheduler):
     def get_next_work_units(
         self, finished_trial: Trial, all_trials: Dict[str, Trial]
     ) -> List[WorkUnit]:
-        """
-        Routes the trial to the correct bracket and applies SHA logic within it.
+        """Routes the trial to the correct bracket and applies SHA logic within it.
         """
         bracket = self.trial_to_bracket.get(finished_trial.id)
         if not bracket or finished_trial.status != TrialStatus.ACTIVE:

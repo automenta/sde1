@@ -1,12 +1,11 @@
 import logging
-from typing import Dict, Any
+from typing import Any
+from typing import Dict
 
-from sde.exploration.schedulers import (
-    AdaptiveScheduler,
-    SuccessiveHalvingScheduler,
-    HyperbandScheduler,
-)
 from sde.challenges import AVAILABLE_DATASETS
+from sde.exploration.schedulers import AdaptiveScheduler
+from sde.exploration.schedulers import HyperbandScheduler
+from sde.exploration.schedulers import SuccessiveHalvingScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +24,7 @@ class SchedulerFactory:
         challenge_name: str,
         patience_budget: Dict[str, Any] = None,
     ) -> AdaptiveScheduler:
-        """
-        Creates an instance of an adaptive scheduler based on its name and config.
+        """Creates an instance of an adaptive scheduler based on its name and config.
 
         Args:
             policy_name: The name of the scheduling policy (e.g., "Hyperband").
@@ -39,6 +37,7 @@ class SchedulerFactory:
 
         Raises:
             ValueError: If the policy_name is unknown or required config is missing.
+
         """
         if patience_budget is None:
             patience_budget = {}

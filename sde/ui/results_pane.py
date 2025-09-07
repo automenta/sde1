@@ -1,25 +1,24 @@
 from datetime import datetime
-import pyqtgraph as pg
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QTableWidget,
-    QTableWidgetItem,
-    QHeaderView,
-    QTextEdit,
-    QSplitter,
-    QPushButton,
-    QListWidget,
-    QListWidgetItem,
-    QGroupBox,
-    QAbstractItemView,
-    QMenu,
-)
 
-from sde.ui.view_model import ExperimentViewModel
+import pyqtgraph as pg
+from PyQt6.QtCore import Qt
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import QAbstractItemView
+from PyQt6.QtWidgets import QGroupBox
+from PyQt6.QtWidgets import QHBoxLayout
+from PyQt6.QtWidgets import QHeaderView
+from PyQt6.QtWidgets import QListWidget
+from PyQt6.QtWidgets import QListWidgetItem
+from PyQt6.QtWidgets import QMenu
+from PyQt6.QtWidgets import QPushButton
+from PyQt6.QtWidgets import QSplitter
+from PyQt6.QtWidgets import QTableWidget
+from PyQt6.QtWidgets import QTableWidgetItem
+from PyQt6.QtWidgets import QTextEdit
+from PyQt6.QtWidgets import QVBoxLayout
+from PyQt6.QtWidgets import QWidget
 from sde.ui.models import UIInsight
+from sde.ui.view_model import ExperimentViewModel
 
 
 class InsightListItem(QListWidgetItem):
@@ -34,8 +33,7 @@ class InsightListItem(QListWidgetItem):
 
 
 class ResultsPane(QWidget):
-    """
-    The right-hand pane for displaying experiment results, including the plot,
+    """The right-hand pane for displaying experiment results, including the plot,
     trials table, insights, and log.
     """
 

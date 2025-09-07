@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from sde.models.types import ModelDefinition, DatasetType, SdeModel
+from sde.models.types import DatasetType
+from sde.models.types import ModelDefinition
+from sde.models.types import SdeModel
 
 
 class SimpleCNN(SdeModel):
-    """
-    A simple, generic CNN for image classification.
+    """A simple, generic CNN for image classification.
     The architecture is adaptable based on input shape and output shape.
     """
 

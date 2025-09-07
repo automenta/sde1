@@ -1,9 +1,10 @@
 from functools import partial
-import torch.nn as nn
-from torchvision.transforms import Compose
 
-from sde.models.types import DatasetDefinition, DatasetType
+import torch.nn as nn
 from sde.challenges.utils import create_train_val_dataloaders
+from sde.models.types import DatasetDefinition
+from sde.models.types import DatasetType
+from torchvision.transforms import Compose
 
 
 def create_image_classification_challenge(
@@ -15,8 +16,7 @@ def create_image_classification_challenge(
     output_shape: int,
     data_dir: str,
 ) -> DatasetDefinition:
-    """
-    Factory function to create a standardized image classification DatasetDefinition.
+    """Factory function to create a standardized image classification DatasetDefinition.
 
     This handles the boilerplate of creating a loader_factory function and
     packaging it into a DatasetDefinition object.
@@ -32,6 +32,7 @@ def create_image_classification_challenge(
 
     Returns:
         A fully configured DatasetDefinition object.
+
     """
     # Use functools.partial to create a specific loader factory function
     # that has the dataset-specific arguments "baked in".
