@@ -1,13 +1,8 @@
-from dataclasses import dataclass
-from dataclasses import field
-from typing import Any
-from typing import Dict
-from typing import List
-from typing import Optional
-
 import numpy as np
-from sde.core.types import Trial
-from sde.core.types import TrialStatus
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional, Any
+
+from sde.core.types import Trial, TrialStatus
 
 
 @dataclass
@@ -21,7 +16,8 @@ class Insight:
 
 
 class InsightEngine:
-    """Analyzes the state of an experiment to find and report insights.
+    """
+    Analyzes the state of an experiment to find and report insights.
 
     This engine contains a suite of "detector" methods that are run at
     different points in a trial's lifecycle (e.g., after each epoch,
@@ -31,13 +27,13 @@ class InsightEngine:
     def __init__(
         self, trials: Dict[str, Trial], primary_metric: str, higher_is_better: bool
     ):
-        """Initializes the InsightEngine.
+        """
+        Initializes the InsightEngine.
 
         Args:
             trials: A reference to the dictionary of all trials in the experiment.
             primary_metric: The name of the metric to use for comparisons (e.g., "accuracy").
             higher_is_better: True if a higher value of the primary metric is better.
-
         """
         self.trials = trials
         self.primary_metric = primary_metric
@@ -50,14 +46,14 @@ class InsightEngine:
         self._fired_correlation_insights = set()
 
     def analyze_on_epoch(self, active_trial: Trial) -> List[Insight]:
-        """Runs lightweight detectors that should be checked after every single epoch.
+        """
+        Runs lightweight detectors that should be checked after every single epoch.
 
         Args:
             active_trial: The trial that has just completed a training epoch.
 
         Returns:
             A list of any new insights that were discovered.
-
         """
         detectors = [
             self._detect_best_performer,
@@ -68,7 +64,8 @@ class InsightEngine:
         return self._run_detectors(detectors, active_trial)
 
     def analyze_on_finish(self, finished_trial: Trial) -> List[Insight]:
-        """Runs more computationally expensive, summary-level analyses that should
+        """
+        Runs more computationally expensive, summary-level analyses that should
         only be checked when a trial terminates (is completed or pruned).
 
         Args:
@@ -76,7 +73,6 @@ class InsightEngine:
 
         Returns:
             A list of any new insights that were discovered.
-
         """
         detectors = [
             self._detect_hyperparameter_correlation,
@@ -98,7 +94,8 @@ class InsightEngine:
         return all_insights
 
     def _detect_best_performer(self, trial: Trial) -> Optional[Insight]:
-        """Checks if the given trial is now the best-performing trial overall.
+        """
+        Checks if the given trial is now the best-performing trial overall.
 
         An insight is generated only if this trial surpasses the current best,
         and only for the trial that becomes the new leader.
@@ -108,7 +105,6 @@ class InsightEngine:
 
         Returns:
             A "BEST_PERFORMER" insight if this trial is the new best, else None.
-
         """
         try:
             finished_trial_perf = trial.results[self.primary_metric][-1][1]
@@ -154,7 +150,8 @@ class InsightEngine:
             return None
 
     def _detect_performance_crossover(self, active_trial: Trial) -> List[Insight]:
-        """Checks if the active trial has just overtaken another trial.
+        """
+        Checks if the active trial has just overtaken another trial.
 
         This is checked any time a trial completes an epoch. A crossover is
         detected if the sign of the performance delta between two trials flips.
@@ -166,7 +163,6 @@ class InsightEngine:
 
         Returns:
             A list of "PERFORMANCE_CROSSOVER" insights, which may be empty.
-
         """
         insights = []
         try:
@@ -233,7 +229,8 @@ class InsightEngine:
     def _detect_performance_plateau(
         self, trial: Trial, lookback: int = 4, relative_tolerance: float = 0.005
     ) -> Optional[Insight]:
-        """Checks if a trial's performance has stalled.
+        """
+        Checks if a trial's performance has stalled.
 
         A plateau is detected if the relative improvement over a 'lookback'
         window is less than a given tolerance. To avoid spam, the insight is
@@ -247,7 +244,6 @@ class InsightEngine:
 
         Returns:
             A "PLATEAU" insight if detected, else None.
-
         """
         try:
             history = [val for _, val in trial.results[self.primary_metric]]
@@ -376,7 +372,8 @@ class InsightEngine:
         min_group_size: int = 3,
         significance_threshold: float = 0.1,
     ) -> List[Insight]:
-        """Analyzes completed trials to find correlations between hyperparameters and performance.
+        """
+        Analyzes completed trials to find correlations between hyperparameters and performance.
 
         This method is called when a trial finishes. It groups trials by their
         hyperparameter values and compares the average performance of these
@@ -395,7 +392,6 @@ class InsightEngine:
 
         Returns:
             A list of "HYPERPARAM_CORRELATION" insights, which may be empty.
-
         """
         completed_trials = self._get_completed_trials_with_results(
             min_trials_for_correlation
@@ -454,7 +450,8 @@ class InsightEngine:
     def _detect_poor_initial_performance(
         self, trial: Trial, z_score_threshold: float = 2.0
     ) -> Optional[Insight]:
-        """Checks if a trial's performance after its first epoch is a significant
+        """
+        Checks if a trial's performance after its first epoch is a significant
         outlier compared to its peers.
 
         This helps identify trials that are unlikely to succeed early on. An
@@ -467,7 +464,6 @@ class InsightEngine:
 
         Returns:
             A "POOR_INITIAL_PERFORMANCE" insight if detected, else None.
-
         """
         try:
             # Only run this check for the first epoch result

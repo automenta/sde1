@@ -11,3 +11,6 @@ checkpoints/
 # IDE files
 .idea/
 .vscode/
+
+# Log files
+*.log

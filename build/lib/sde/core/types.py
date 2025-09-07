@@ -28,6 +28,7 @@ class WorkUnit:
 class TrialStatus(Enum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
     PRUNED = "PRUNED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"

@@ -186,39 +186,38 @@ class SdeRuntimeEngine:
             if not self._is_running:  # Re-check after pause
                 break
 
-            # --- Build a batch of work from the queue ---
-            current_batch = []
-            while not self.work_queue.empty() and len(current_batch) < self.compute_scheduler.max_workers:
-                try:
-                    # Get a work unit, ignoring priority, as the queue handles it
-                    _, work_unit = self.work_queue.get_nowait()
-
-                    # Discard work for cancelled trials
-                    if work_unit.trial_id in self._cancelled_trials:
-                        logger.info(f"Discarding cancelled work unit for trial {work_unit.trial_id}")
-                        continue
-
-                    current_batch.append(work_unit)
-                except queue.Empty:
-                    break  # Should not happen due to the while condition, but for safety
-
-            if not current_batch:
+            # --- Get the next single work unit from the queue ---
+            try:
+                # Get a work unit, ignoring priority, as the queue handles it
+                _, work_unit = self.work_queue.get(timeout=0.5)
+            except queue.Empty:
+                # If the queue is empty, check if the experiment is done
                 if all(
-                    t.status in (TrialStatus.COMPLETED, TrialStatus.PRUNED)
+                    t.status in (TrialStatus.COMPLETED, TrialStatus.PRUNED, TrialStatus.FAILED)
                     for t in self.datastore.get_all_trials().values()
                 ):
                     logger.info("All trials are completed or pruned. Shutting down.")
                     break
-                threading.Event().wait(0.5)
+                # Otherwise, just wait and loop again
                 continue
 
-            # --- Execute the batch and process results ---
-            results_iterator = self.compute_scheduler.run(current_batch)
-            for work_unit, result in results_iterator:
-                self._pause_event.wait()
-                if not self._is_running:
-                    break
-                self._process_completed_work_unit(work_unit, result)
+            # --- Discard work for cancelled trials ---
+            if work_unit.trial_id in self._cancelled_trials:
+                logger.info(f"Discarding cancelled work unit for trial {work_unit.trial_id}")
+                continue
+
+            # --- Execute the single work unit and process its result ---
+            # This is now a blocking call that waits for the next available worker,
+            # runs the job, and returns the single result.
+            results_iterator = self.compute_scheduler.run([work_unit])
+            try:
+                # The iterator will have exactly one item or raise an exception
+                completed_work_unit, result = next(results_iterator)
+                self._process_completed_work_unit(completed_work_unit, result)
+            except StopIteration:
+                # This can happen if the work unit was deemed invalid by the compute scheduler
+                logger.warning(f"Work unit {work_unit.trial_id} did not execute.")
+                continue
 
         self._is_running = False
         logger.info("Runtime engine execution loop finished.")

@@ -109,10 +109,19 @@ class SuccessiveHalvingScheduler(AdaptiveScheduler):
         return trials
 
     def get_initial_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
-        """Schedules the first epoch for all pending trials."""
+        """Schedules work for all trials that are not in a terminal state.
+        This allows a run to be resumed from a loaded state.
+        """
         work_units = []
         for trial in trials.values():
-            if trial.status == TrialStatus.PENDING:
+            # If a trial is PENDING, it's a new run. If it's PAUSED or ACTIVE,
+            # it could be a loaded run. In any of these cases, if it's not
+            # already finished, it should become ACTIVE and get work.
+            if trial.status not in [
+                TrialStatus.COMPLETED,
+                TrialStatus.PRUNED,
+                TrialStatus.FAILED,
+            ]:
                 trial.status = TrialStatus.ACTIVE
                 work_units.append(
                     WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)

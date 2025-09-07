@@ -30,6 +30,7 @@ class ActionValidator:
 
         # Global actions
         if status == ExperimentStatus.DEFINING:
+            actions["global"].append("LOAD_EXPERIMENT")
             if not has_challenge:
                 actions["global"].append("SET_CHALLENGE")
             else:
