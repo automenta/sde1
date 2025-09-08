@@ -131,22 +131,21 @@ class SetupPane(QWidget):
         self.save_button = QPushButton("Save Run")
         self.load_button = QPushButton("Load Run")
 
-        simple_run_layout = QHBoxLayout()
-        simple_run_layout.addWidget(self.start_button)
-        advanced_run_layout = QHBoxLayout()
-        advanced_run_layout.addWidget(self.tune_button)
-        mid_run_layout = QHBoxLayout()
-        mid_run_layout.addWidget(self.add_models_button)
+        # Group related buttons for a cleaner layout
+        start_layout = QHBoxLayout()
+        start_layout.addWidget(self.start_button)
+        start_layout.addWidget(self.tune_button)
+
         pause_resume_layout = QHBoxLayout()
         pause_resume_layout.addWidget(self.pause_button)
         pause_resume_layout.addWidget(self.resume_button)
+
         persistence_layout = QHBoxLayout()
         persistence_layout.addWidget(self.save_button)
         persistence_layout.addWidget(self.load_button)
 
-        controls_layout.addLayout(simple_run_layout)
-        controls_layout.addLayout(advanced_run_layout)
-        controls_layout.addLayout(mid_run_layout)
+        controls_layout.addLayout(start_layout)
+        controls_layout.addWidget(self.add_models_button)
         controls_layout.addLayout(pause_resume_layout)
         controls_layout.addLayout(persistence_layout)
 
