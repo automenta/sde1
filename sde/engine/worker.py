@@ -6,6 +6,8 @@ from typing import Tuple
 
 import torch
 import torch.optim as optim
+
+from sde.app_paths import get_checkpoints_dir
 from sde.core.types import Trial
 from sde.core.types import WorkUnit
 from sde.core.types import WorkUnitType
@@ -25,22 +27,19 @@ class Worker:
         self,
         model_def: ModelDefinition,
         dataset_def: DatasetDefinition,
-        checkpoints_dir: str = "./checkpoints",
     ):
         """Initializes the Worker.
 
         Args:
             model_def: The definition for the model to be trained/evaluated.
             dataset_def: The definition for the dataset to be used.
-            checkpoints_dir: The directory for saving/loading model checkpoints.
 
         """
         logger.info(f"Worker process initialized. Using device: {DEVICE}")
         self.model_def = model_def
         self.dataset_def = dataset_def
-        self.checkpoints_dir = checkpoints_dir
+        self.checkpoints_dir = get_checkpoints_dir()
         self._dataloader_cache = {}
-        os.makedirs(self.checkpoints_dir, exist_ok=True)
 
     def _get_dataloaders(
         self, trial: Trial

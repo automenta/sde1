@@ -1,10 +1,11 @@
 from functools import partial
 
 import torch.nn as nn
+from torchvision.transforms import Compose
+
 from sde.challenges.utils import create_train_val_dataloaders
 from sde.models.types import DatasetDefinition
 from sde.models.types import DatasetType
-from torchvision.transforms import Compose
 
 
 def create_image_classification_challenge(

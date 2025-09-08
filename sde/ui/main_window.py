@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QInputDialog
 from PyQt6.QtWidgets import QMainWindow
 from PyQt6.QtWidgets import QMessageBox
 from PyQt6.QtWidgets import QWidget
+
 from sde.challenges import AVAILABLE_DATASETS
 
 # Import backend and UI components

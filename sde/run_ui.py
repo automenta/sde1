@@ -2,6 +2,7 @@ import multiprocessing
 import sys
 
 from PyQt6.QtWidgets import QApplication
+
 from sde.ui.main_window import MainWindow
 
 

@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QTreeWidget
 from PyQt6.QtWidgets import QTreeWidgetItem
 from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWidgets import QWidget
+
 from sde.models.types import ModelDefinition
 
 

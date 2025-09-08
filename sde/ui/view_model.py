@@ -7,6 +7,7 @@ import pyqtgraph as pg
 from PyQt6.QtCore import QObject
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QStyle
+
 from sde.challenges import AVAILABLE_DATASETS
 from sde.ui.models import UIAlgorithm
 from sde.ui.models import UIInsight

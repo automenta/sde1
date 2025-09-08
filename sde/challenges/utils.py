@@ -73,7 +73,8 @@ def create_train_val_dataloaders(
     train_subset = Subset(full_train_dataset, train_idx)
     val_subset = Subset(full_train_dataset, val_idx)
 
-    # Use num_workers=0 for simplicity and to avoid multiprocessing issues in some environments
+    # Use num_workers=0 for simplicity and to avoid multiprocessing issues
+    # in some environments
     train_loader = DataLoader(
         train_subset, batch_size=batch_size, shuffle=True, num_workers=0
     )

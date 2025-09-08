@@ -18,8 +18,4 @@ find . -name "*.pyo" -exec rm -f {} +
 # Remove log files
 find . -name "*.log" -exec rm -f {} +
 
-# Remove downloaded data and model checkpoints
-rm -rf data_mnist/
-rm -rf checkpoints/
-
 echo "Done."

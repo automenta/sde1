@@ -3,6 +3,8 @@ import random
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -17,18 +19,24 @@ from sde.models import AVAILABLE_MODELS
 class TestCheckpointingAndResume(unittest.TestCase):
     def setUp(self):
         """Set up a temporary directory for checkpoints."""
-        self.checkpoints_dir = tempfile.mkdtemp()
+        self.temp_dir = tempfile.mkdtemp()
 
     def tearDown(self):
         """Clean up the temporary directory."""
-        shutil.rmtree(self.checkpoints_dir)
+        shutil.rmtree(self.temp_dir)
 
-    def test_training_progresses_across_epochs_with_checkpointing(self):
+    @patch("sde.engine.worker.get_checkpoints_dir")
+    def test_training_progresses_across_epochs_with_checkpointing(
+        self, mock_get_checkpoints_dir
+    ):
         """
         Tests the core functionality of checkpointing and resuming.
         It runs two consecutive epochs and asserts that the model's performance
         improves, which proves that the state was correctly saved and reloaded.
         """
+        # Make the mock return the path to our temporary directory
+        mock_get_checkpoints_dir.return_value = Path(self.temp_dir)
+
         # Set seeds for reproducibility
         torch.manual_seed(42)
         np.random.seed(42)
@@ -51,11 +59,7 @@ class TestCheckpointingAndResume(unittest.TestCase):
 
         # --- EPOCH 1 ---
         # 2. Execute the first epoch.
-        worker1 = Worker(
-            model_def=model_def,
-            dataset_def=dataset_def,
-            checkpoints_dir=self.checkpoints_dir,
-        )
+        worker1 = Worker(model_def=model_def, dataset_def=dataset_def)
         work_unit1 = WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)
         result1 = worker1.execute_work_unit(
             work_unit1, trial, enable_checkpointing=True
@@ -66,11 +70,15 @@ class TestCheckpointingAndResume(unittest.TestCase):
         metric_name = dataset_def.performance_metric_name
         self.assertIn(metric_name, result1["metrics"])
         accuracy1 = result1["metrics"][metric_name]
-        self.assertGreater(accuracy1, 0.7, "Model should achieve decent accuracy on MNIST even in one epoch.")
+        self.assertGreater(
+            accuracy1, 0.7, "Model should achieve decent accuracy on MNIST"
+        )
 
         checkpoint_path1 = result1["state_updates"]["checkpoint_path"]
         self.assertIsNotNone(checkpoint_path1, "Checkpoint path should not be None.")
-        self.assertTrue(os.path.exists(checkpoint_path1), "Checkpoint file was not created.")
+        self.assertTrue(
+            os.path.exists(checkpoint_path1), "Checkpoint file was not created."
+        )
 
         # --- EPOCH 2 ---
         # 4. Update trial state to simulate what the Orchestrator would do.
@@ -78,11 +86,7 @@ class TestCheckpointingAndResume(unittest.TestCase):
         trial.checkpoint_path = checkpoint_path1
 
         # 5. Execute the second epoch with a NEW worker to simulate a new process.
-        worker2 = Worker(
-            model_def=model_def,
-            dataset_def=dataset_def,
-            checkpoints_dir=self.checkpoints_dir,
-        )
+        worker2 = Worker(model_def=model_def, dataset_def=dataset_def)
         work_unit2 = WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)
         result2 = worker2.execute_work_unit(
             work_unit2, trial, enable_checkpointing=True
@@ -97,7 +101,7 @@ class TestCheckpointingAndResume(unittest.TestCase):
         self.assertGreater(
             accuracy2,
             accuracy1,
-            f"Accuracy should improve on the second epoch. Epoch 1: {accuracy1}, Epoch 2: {accuracy2}",
+            f"Accuracy should improve on the second epoch. Got: {accuracy2}, expected > {accuracy1}",
         )
 
         checkpoint_path2 = result2["state_updates"]["checkpoint_path"]

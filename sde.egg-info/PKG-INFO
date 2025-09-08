@@ -45,6 +45,7 @@ Requires-Dist: pyqtgraph
 Requires-Dist: torch
 Requires-Dist: torchvision
 Requires-Dist: numpy
+Requires-Dist: platformdirs
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Requires-Dist: ruff; extra == "dev"

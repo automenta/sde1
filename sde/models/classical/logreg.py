@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+
 from sde.models.types import DatasetType
 from sde.models.types import ModelDefinition
 from sde.models.types import SdeModel

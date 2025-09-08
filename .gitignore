@@ -1,21 +1,18 @@
-# Python cache
+# Python cache & compiled files
 __pycache__/
 *.pyc
-
-# Data files downloaded by challenges
-data_mnist/
-
-# Model checkpoints
-checkpoints/
-
-# IDE files
-.idea/
-.vscode/
+*.pyo
 
 # Build artifacts
 build/
 dist/
+.eggs/
 *.egg-info/
+*.egg
+
+# IDE files
+.idea/
+.vscode/
 
 # Log files
 *.log

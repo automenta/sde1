@@ -1,5 +1,4 @@
 import math
-import random
 from abc import ABC
 from abc import abstractmethod
 from dataclasses import dataclass
@@ -9,7 +8,6 @@ from typing import Dict
 from typing import List
 from typing import Tuple
 
-import numpy as np
 from sde.challenges.utils import _generate_random_hyperparameters
 from sde.core.types import AlgorithmConfig
 from sde.core.types import Trial

@@ -37,7 +37,6 @@ class SdeRuntimeEngine:
         insights_callback: Callable[[List[Dict]], None],
         execution_settings: ExecutionSettings,
         scheduler_state: Dict[str, Any],
-        checkpoints_dir: str = "./checkpoints",
     ):
         """Initializes the SdeRuntimeEngine.
 
@@ -50,7 +49,6 @@ class SdeRuntimeEngine:
             insights_callback: A function to call when new insights are generated.
             execution_settings: The execution settings for the run.
             scheduler_state: The persisted state from the scheduler (e.g., for Hyperband).
-            checkpoints_dir: The directory to store model checkpoints.
 
         """
         self.datastore = DataStore(copy.deepcopy(trials))
@@ -69,7 +67,6 @@ class SdeRuntimeEngine:
             max_workers=execution_settings.num_workers,
             enable_checkpointing=execution_settings.enable_checkpointing,
             work_unit_timeout=execution_settings.work_unit_timeout_seconds,
-            checkpoints_dir=checkpoints_dir,
         )
         # --- Threading and State Control ---
         self._is_running = False  # Flag to signal the main loop to terminate.
@@ -97,6 +94,7 @@ class SdeRuntimeEngine:
         Returns:
             The updated scheduler state if it was a fresh run, which may need to
             be persisted by the caller.
+
         """
         if self._thread is not None:
             return None

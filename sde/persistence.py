@@ -1,7 +1,11 @@
 import json
+import logging
 import os
+import traceback
 
 from sde.core.types import Experiment
+
+logger = logging.getLogger(__name__)
 
 
 def save_experiment(experiment: Experiment, filepath: str) -> None:
@@ -18,9 +22,10 @@ def save_experiment(experiment: Experiment, filepath: str) -> None:
             json.dump(state_dict, f, indent=4)
             f.flush()
             os.sync()
-    except (IOError, TypeError) as e:
-        # It would be good to log this error
-        print(f"Error saving experiment to {filepath}: {e}")
+    except (IOError, TypeError):
+        logger.error(
+            f"Error saving experiment to {filepath}:\n{traceback.format_exc()}"
+        )
         raise
 
 
@@ -38,7 +43,8 @@ def load_experiment(filepath: str) -> Experiment:
         with open(filepath, "r") as f:
             state_dict = json.load(f)
         return Experiment.from_dict(state_dict)
-    except (IOError, json.JSONDecodeError, KeyError) as e:
-        # It would be good to log this error
-        print(f"Error loading experiment from {filepath}: {e}")
+    except (IOError, json.JSONDecodeError, KeyError):
+        logger.error(
+            f"Error loading experiment from {filepath}:\n{traceback.format_exc()}"
+        )
         raise

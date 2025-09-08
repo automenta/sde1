@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import QTableWidgetItem
 from PyQt6.QtWidgets import QTextEdit
 from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWidgets import QWidget
+
 from sde.ui.models import UIInsight
 from sde.ui.view_model import ExperimentViewModel
 

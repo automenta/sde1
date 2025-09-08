@@ -30,6 +30,7 @@ dependencies = [
     "torch",
     "torchvision",
     "numpy",
+    "platformdirs",
 ]
 
 [project.optional-dependencies]
@@ -50,8 +51,13 @@ where = ["."]
 include = ["sde*"]
 exclude = ["tests*"]
 
-[tool.ruff.lint]
+[tool.setuptools.package-data]
+sde = ["**"]
+
+[tool.ruff]
 line-length = 88
+
+[tool.ruff.lint]
 select = ["E", "F", "W", "I", "D"]
 
 [tool.ruff.lint.isort]

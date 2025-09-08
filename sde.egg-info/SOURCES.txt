@@ -1,11 +1,10 @@
 CONTRIBUTING.md
 LICENSE
-MANIFEST.in
 README.md
 UPGRADE.md
 pyproject.toml
 sde/__main__.py
-sde/config.py
+sde/app_paths.py
 sde/events.py
 sde/persistence.py
 sde/run_ui.py

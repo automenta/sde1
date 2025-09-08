@@ -8,6 +8,7 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
+from typing import Union
 
 
 class WorkUnitType(Enum):
@@ -116,6 +117,14 @@ class ExecutionSettings:
     enable_checkpointing: bool
     work_unit_timeout_seconds: int
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "ExecutionSettings":
+        """Creates an ExecutionSettings instance from a dictionary."""
+        # This is robust to extra keys in the dictionary
+        known_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered_dict = {k: v for k, v in d.items() if k in known_fields}
+        return cls(**filtered_dict)
+
 
 @dataclass
 class Experiment:
@@ -157,29 +166,50 @@ class Experiment:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Experiment":
-        """Creates an Experiment instance from a dictionary."""
-        execution_settings_data = d.get("execution_settings")
-        execution_settings = (
-            ExecutionSettings(**execution_settings_data)
-            if execution_settings_data
-            else None
-        )
+        """Creates an Experiment instance from a dictionary.
 
-        # First, create the simple fields
-        exp = cls(
-            id=d["id"],
-            status=ExperimentStatus(d["status"]),
-            challenge=d.get("challenge"),
-            insights=d.get("insights", []),
-            adaptive_policy=d.get("adaptive_policy", "SuccessiveHalving"),
-            patience_budget=d.get("patience_budget"),
-            execution_settings=execution_settings,
-            scheduler_state=d.get("scheduler_state") or {},
-        )
+        This method is robust to extra keys in the input dictionary,
+        which allows for forward compatibility if the Experiment class is
+        extended with new fields.
+        """
+        # Get the names of the fields defined in the Experiment dataclass
+        known_fields = {f.name for f in dataclasses.fields(cls)}
+        kwargs = {}
 
-        # Then, deserialize the nested objects
-        exp.algorithms = {
-            k: AlgorithmConfig.from_dict(v) for k, v in d.get("algorithms", {}).items()
-        }
-        exp.trials = {k: Trial.from_dict(v) for k, v in d.get("trials", {}).items()}
-        return exp
+        for name, field_type in cls.__annotations__.items():
+            if name not in d or name not in known_fields:
+                continue
+
+            data = d[name]
+            if data is None:
+                kwargs[name] = None
+                continue
+
+            # Handle complex nested types
+            origin = getattr(field_type, "__origin__", None)
+            args = getattr(field_type, "__args__", ())
+
+            if origin is dict and args and hasattr(args[1], "from_dict"):
+                # e.g., Dict[str, Trial]
+                item_class = args[1]
+                kwargs[name] = {k: item_class.from_dict(v) for k, v in data.items()}
+            elif hasattr(field_type, "from_dict"):
+                # e.g., ExecutionSettings
+                kwargs[name] = field_type.from_dict(data)
+            elif isinstance(field_type, type) and issubclass(field_type, Enum):
+                # e.g., ExperimentStatus
+                kwargs[name] = field_type(data)
+            elif origin is Optional or (
+                origin is Union and len(args) == 2 and args[1] is type(None)
+            ):
+                # Handle Optional[T] which is Union[T, None]
+                inner_type = args[0]
+                if hasattr(inner_type, "from_dict"):
+                    kwargs[name] = inner_type.from_dict(data)
+                else:
+                    kwargs[name] = data
+            else:
+                # For simple types like str, list, dict
+                kwargs[name] = data
+
+        return cls(**kwargs)

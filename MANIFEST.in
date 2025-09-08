@@ -1,9 +1,0 @@
-# Include the license file and other important documentation
-include README.md
-include CONTRIBUTING.md
-include UPGRADE.md
-include LICENSE
-
-recursive-include sde *
-global-exclude __pycache__
-global-exclude *.pyc

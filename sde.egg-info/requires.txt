@@ -3,6 +3,7 @@ pyqtgraph
 torch
 torchvision
 numpy
+platformdirs
 
 [dev]
 pytest

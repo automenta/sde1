@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import QSpinBox
 from PyQt6.QtWidgets import QTableWidget
 from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWidgets import QWidget
+
 from sde.challenges import AVAILABLE_DATASETS
 from sde.models import AVAILABLE_MODELS
 

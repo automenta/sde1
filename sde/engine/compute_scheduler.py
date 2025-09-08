@@ -24,7 +24,6 @@ def execute_work_unit_in_process(
     model_name: str,
     dataset_name: str,
     enable_checkpointing: bool,
-    checkpoints_dir: str,
 ) -> Tuple[WorkUnit, dict]:
     """A wrapper function that initializes a Worker in a new process, executes
     the given WorkUnit, and returns the result along with the original WorkUnit.
@@ -35,11 +34,7 @@ def execute_work_unit_in_process(
 
         model_def = AVAILABLE_MODELS[model_name]
         dataset_def = AVAILABLE_DATASETS[dataset_name]
-        worker = Worker(
-            model_def=model_def,
-            dataset_def=dataset_def,
-            checkpoints_dir=checkpoints_dir,
-        )
+        worker = Worker(model_def=model_def, dataset_def=dataset_def)
         result = worker.execute_work_unit(work_unit, trial, enable_checkpointing)
         return work_unit, result
     except Exception:
@@ -60,13 +55,11 @@ class ComputeScheduler:
         max_workers: int = 2,
         enable_checkpointing: bool = False,
         work_unit_timeout: int = 300,
-        checkpoints_dir: str = "./checkpoints",
     ):
         self.datastore = datastore
         self.dataset_name = dataset_name
         self.max_workers = max_workers
         self.enable_checkpointing = enable_checkpointing
-        self.checkpoints_dir = checkpoints_dir
         self.work_unit_timeout = work_unit_timeout
 
         self.executor = None
