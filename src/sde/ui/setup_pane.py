@@ -57,7 +57,7 @@ class SetupPane(QWidget):
         setup_form_layout = QFormLayout(self.setup_group)
         self.dataset_combo = QComboBox()
         self.model_list = QListWidget()
-        self.model_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.model_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.model_list.setMinimumHeight(150)
         self.model_list.setToolTip(
             "Select one or more models to include in the experiment.\n"
@@ -178,7 +178,7 @@ class SetupPane(QWidget):
 
     def _connect_signals(self):
         """Connects internal UI signals to the pane's public signals."""
-        self.dataset_combo.currentIndexChanged.connect(self.dataset_changed)
+        self.dataset_combo.currentIndexChanged.connect(self._on_dataset_changed)
         self.start_button.clicked.connect(self._on_start_simple_run)
         self.tune_button.clicked.connect(self.tune_run_requested)
         self.add_models_button.clicked.connect(self.add_models_requested)
@@ -188,6 +188,13 @@ class SetupPane(QWidget):
         self.load_button.clicked.connect(self.load_run_requested)
         self.throttle_slider.valueChanged.connect(self.throttle_changed)
         self.throttle_slider.valueChanged.connect(lambda v: self.throttle_label.setText(f"{v}%"))
+
+    def _on_dataset_changed(self, index: int):
+        """Handles the combo box's index change and emits the dataset name."""
+        dataset_name = self.dataset_combo.itemText(index) if index >= 0 else ""
+        self.dataset_changed.emit(dataset_name)
+        # Also update the model list directly when the dataset changes
+        self.update_model_list(dataset_name)
 
     def _on_start_simple_run(self):
         """Gathers settings and emits the start signal."""
@@ -220,25 +227,15 @@ class SetupPane(QWidget):
         ]
         for model_name in supported_models:
             item = QListWidgetItem(model_name)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked)
             self.model_list.addItem(item)
 
     def get_experiment_settings(self):
         dataset_name = self.dataset_combo.currentText()
-        selected_models = [
-            self.model_list.item(i).text()
-            for i in range(self.model_list.count())
-            if self.model_list.item(i).checkState() == Qt.CheckState.Checked
-        ]
+        selected_models = [item.text() for item in self.model_list.selectedItems()]
         return dataset_name, selected_models
 
     def get_newly_selected_models(self, existing_algo_names: set):
-        all_selected_models = {
-            self.model_list.item(i).text()
-            for i in range(self.model_list.count())
-            if self.model_list.item(i).checkState() == Qt.CheckState.Checked
-        }
+        all_selected_models = {item.text() for item in self.model_list.selectedItems()}
         return all_selected_models - existing_algo_names
 
     def update_button_states(self, valid_actions: dict, status: str, has_challenge: bool):
@@ -252,11 +249,13 @@ class SetupPane(QWidget):
         self.resume_button.setEnabled("RESUME_RUN" in global_actions)
 
         # Persistence buttons
-        self.save_button.setEnabled(has_challenge)  # Can save as soon as there's something to save
+        can_save = status in ["RUNNING", "PAUSED", "COMPLETED"]
+        self.save_button.setEnabled(can_save)
         self.load_button.setEnabled(status == "DEFINING") # Can only load when not running
 
-        can_add_mid_run = "ADD_ALGORITHM" in global_actions and status in ["RUNNING", "PAUSED"]
-        self.add_models_button.setEnabled(can_add_mid_run)
+        # Mid-run actions
+        can_add_models = "ADD_ALGORITHM" in global_actions and status in ["RUNNING", "PAUSED"]
+        self.add_models_button.setEnabled(can_add_models)
 
         self.dataset_combo.setEnabled(not has_challenge)
         self.model_list.setEnabled("ADD_ALGORITHM" in global_actions)

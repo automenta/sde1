@@ -65,7 +65,6 @@ class MainWindow(QMainWindow):
         self.orchestrator.state_changed.connect(self.on_state_changed)
 
         # Setup Pane -> Main Window
-        self.setup_pane.dataset_changed.connect(self.update_model_list)
         self.setup_pane.start_simple_run_requested.connect(self.start_simple_experiment)
         self.setup_pane.tune_run_requested.connect(self.open_tuning_dialog)
         self.setup_pane.add_models_requested.connect(self.add_models_to_run)
@@ -224,10 +223,6 @@ class MainWindow(QMainWindow):
             return
         dialog = HyperparameterViewerDialog(hparams, self)
         dialog.exec()
-
-    def update_model_list(self, dataset_name: str):
-        """Updates the model list in the setup pane."""
-        self.setup_pane.update_model_list(dataset_name)
 
     def append_log_message(self, log_data: dict):
         if log_data.get("level") == "INSIGHT":
