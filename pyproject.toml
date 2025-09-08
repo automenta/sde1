@@ -47,9 +47,7 @@ Homepage = "https://github.com/example/sde"
 Repository = "https://github.com/example/sde"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["sde*"]
-exclude = ["tests*"]
+where = ["src"]
 
 [tool.setuptools.package-data]
 sde = ["**"]
