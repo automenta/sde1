@@ -1,5 +1,5 @@
 import unittest
-from sde.core.types import Experiment, Trial, TrialStatus, AlgorithmConfig, WorkUnitType
+from sde.core.types import Experiment, Trial, TrialStatus, AlgorithmConfig, WorkUnitType, ExecutionSettings
 from sde.exploration.schedulers import SuccessiveHalvingScheduler
 from sde.engine.runtime import SdeRuntimeEngine
 
@@ -10,7 +10,12 @@ class TestResumeLogic(unittest.TestCase):
         experiment.status = "PAUSED"
         experiment.challenge = {"name": "CIFAR10", "type": "vision"}
         experiment.adaptive_policy = "SuccessiveHalving"
-        experiment.execution_settings = {"num_workers": 1}
+        experiment.execution_settings = ExecutionSettings(
+            num_workers=1,
+            num_trials_per_algo=5,
+            enable_checkpointing=False,
+            work_unit_timeout_seconds=300,
+        )
 
         # 2. Create some trials in various states
         trials = {
@@ -32,8 +37,7 @@ class TestResumeLogic(unittest.TestCase):
             adaptive_scheduler=scheduler,
             trial_updated_callback=lambda x: None,
             insights_callback=lambda x: None,
-            max_workers=1,
-            enable_checkpointing=False,
+            execution_settings=experiment.execution_settings,
         )
 
         # 5. Call the start method (which should trigger rehydration)

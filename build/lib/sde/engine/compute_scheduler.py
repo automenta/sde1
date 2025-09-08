@@ -59,6 +59,7 @@ class ComputeScheduler:
         dataset_name: str,
         max_workers: int = 2,
         enable_checkpointing: bool = False,
+        work_unit_timeout: int = 300,
         checkpoints_dir: str = "./checkpoints",
     ):
         self.datastore = datastore
@@ -66,6 +67,7 @@ class ComputeScheduler:
         self.max_workers = max_workers
         self.enable_checkpointing = enable_checkpointing
         self.checkpoints_dir = checkpoints_dir
+        self.work_unit_timeout = work_unit_timeout
 
         self.executor = None
         self._is_running = False
@@ -154,8 +156,16 @@ class ComputeScheduler:
                 continue
 
             try:
-                _, result = future.result()
+                # Add a timeout to the result call
+                _, result = future.result(timeout=self.work_unit_timeout)
                 yield work_unit, result
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    f"Work unit for trial {work_unit.trial_id} timed out after {self.work_unit_timeout} seconds."
+                )
+                yield work_unit, {
+                    "error": f"Work unit timed out after {self.work_unit_timeout} seconds."
+                }
             except concurrent.futures.CancelledError:
                 logger.warning(
                     f"Work unit for trial {work_unit.trial_id} was cancelled."

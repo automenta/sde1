@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 from sde.core.types import Experiment, Trial
+from sde.core.types import ExecutionSettings
 from sde.core.types import TrialStatus
 from sde.core.types import WorkUnit
 from sde.core.types import WorkUnitType
@@ -21,6 +22,12 @@ class TestSdeRuntimeEngine(unittest.TestCase):
         self.experiment.challenge = {"name": "MNIST", "type": "vision"}
         self.trial = Trial(id='trial1', algorithm_name='TestAlgo', hyperparameters={'lr': 0.1})
         self.experiment.trials = {'trial1': self.trial}
+        self.experiment.execution_settings = ExecutionSettings(
+            num_workers=1,
+            num_trials_per_algo=1,
+            enable_checkpointing=False,
+            work_unit_timeout_seconds=300,
+        )
 
 
         # We need to patch the ComputeScheduler as it tries to create a process pool
@@ -30,7 +37,7 @@ class TestSdeRuntimeEngine(unittest.TestCase):
                 adaptive_scheduler=self.mock_adaptive_scheduler,
                 trial_updated_callback=self.mock_trial_updated_callback,
                 insights_callback=self.mock_insights_callback,
-                max_workers=1,
+                execution_settings=self.experiment.execution_settings,
             )
 
     def test_work_unit_error_sets_trial_to_failed(self):

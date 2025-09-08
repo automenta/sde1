@@ -8,6 +8,7 @@ from typing import List
 
 from sde.core.actions import ActionType
 from sde.core.types import AlgorithmConfig
+from sde.core.types import ExecutionSettings
 from sde.core.types import Experiment
 from sde.core.types import ExperimentStatus
 from sde.core.types import Trial
@@ -153,7 +154,7 @@ class ExperimentOrchestrator:
                 'message': f"Generating new trials for '{algo.name}' due to parameter space update."
             })
             # Re-use the original number of trials per algorithm from the execution settings
-            num_trials = self.experiment.execution_settings.get("num_trials_per_algo", 10)
+            num_trials = self.experiment.execution_settings.num_trials_per_algo
             self._generate_and_add_trials([algo], num_trials_per_algo=num_trials)
 
     def handle_set_adaptive_policy(self, payload: Dict[str, Any]) -> None:
@@ -227,10 +228,10 @@ class ExperimentOrchestrator:
             self.log_message.emit({'level': 'ERROR', 'message': "Cannot start run without at least one algorithm."})
             return
         self.experiment.status = ExperimentStatus.RUNNING
-        self.experiment.execution_settings = payload
+        self.experiment.execution_settings = ExecutionSettings(**payload)
         if not self.experiment.trials:
             self.log_message.emit({'level': 'INFO', 'message': "No pre-existing trials found. Generating initial set."})
-            num_trials = payload["num_trials_per_algo"]
+            num_trials = self.experiment.execution_settings.num_trials_per_algo
             algorithms = list(self.experiment.algorithms.values())
             success = self._generate_and_add_trials(algorithms, num_trials)
             if not success:
@@ -270,7 +271,11 @@ class ExperimentOrchestrator:
 
     def _initialize_and_start_runtime(self, start_paused: bool = False) -> None:
         """Creates, configures, and starts the SdeRuntimeEngine in a background thread."""
-        execution_settings = self.experiment.execution_settings or {}
+        execution_settings = self.experiment.execution_settings
+        if not execution_settings:
+            self.log_message.emit({'level': 'ERROR', 'message': "Cannot start runtime without execution settings."})
+            return
+
         try:
             challenge_name = self.experiment.challenge["name"]
             scheduler = SchedulerFactory.create_scheduler(
@@ -278,16 +283,13 @@ class ExperimentOrchestrator:
                 challenge_name=challenge_name,
                 patience_budget=self.experiment.patience_budget,
             )
-            enable_checkpointing = execution_settings.get("enable_checkpointing", False)
-            num_workers = execution_settings.get("num_workers", 1)
 
             self.runtime_engine = SdeRuntimeEngine(
                 experiment=self.experiment,
                 adaptive_scheduler=scheduler,
                 trial_updated_callback=self.on_trial_updated,
                 insights_callback=self.on_insights_generated,
-                enable_checkpointing=enable_checkpointing,
-                max_workers=num_workers,
+                execution_settings=execution_settings,
             )
             self.log_message.emit({
                 'level': 'INFO',

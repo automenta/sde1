@@ -108,6 +108,16 @@ class AlgorithmConfig:
 
 
 @dataclass
+class ExecutionSettings:
+    """Settings that control the execution of the experiment run."""
+
+    num_trials_per_algo: int
+    num_workers: int
+    enable_checkpointing: bool
+    work_unit_timeout_seconds: int
+
+
+@dataclass
 class Experiment:
     id: str = field(default_factory=lambda: f"exp_{uuid.uuid4().hex[:8]}")
     status: ExperimentStatus = ExperimentStatus.DEFINING
@@ -123,7 +133,7 @@ class Experiment:
     # Strategy & Constraints
     adaptive_policy: str = "SuccessiveHalving"  # Default policy
     patience_budget: Optional[Dict[str, int]] = None
-    execution_settings: Optional[Dict[str, Any]] = None  # For num_workers etc.
+    execution_settings: Optional[ExecutionSettings] = None  # For num_workers etc.
     scheduler_state: Optional[Dict[str, Any]] = None  # For schedulers that need to persist state
 
     def to_dict(self) -> dict:
@@ -132,20 +142,27 @@ class Experiment:
             "id": self.id,
             "status": self.status.value,
             "challenge": self.challenge,
-            "algorithms": {
-                k: v.to_dict() for k, v in self.algorithms.items()
-            },
+            "algorithms": {k: v.to_dict() for k, v in self.algorithms.items()},
             "trials": {k: v.to_dict() for k, v in self.trials.items()},
             "insights": self.insights,
             "adaptive_policy": self.adaptive_policy,
             "patience_budget": self.patience_budget,
-            "execution_settings": self.execution_settings,
+            "execution_settings": dataclasses.asdict(self.execution_settings)
+            if self.execution_settings
+            else None,
             "scheduler_state": self.scheduler_state,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Experiment":
         """Creates an Experiment instance from a dictionary."""
+        execution_settings_data = d.get("execution_settings")
+        execution_settings = (
+            ExecutionSettings(**execution_settings_data)
+            if execution_settings_data
+            else None
+        )
+
         # First, create the simple fields
         exp = cls(
             id=d["id"],
@@ -154,7 +171,7 @@ class Experiment:
             insights=d.get("insights", []),
             adaptive_policy=d.get("adaptive_policy", "SuccessiveHalving"),
             patience_budget=d.get("patience_budget"),
-            execution_settings=d.get("execution_settings"),
+            execution_settings=execution_settings,
             scheduler_state=d.get("scheduler_state"),
         )
 
@@ -162,7 +179,5 @@ class Experiment:
         exp.algorithms = {
             k: AlgorithmConfig.from_dict(v) for k, v in d.get("algorithms", {}).items()
         }
-        exp.trials = {
-            k: Trial.from_dict(v) for k, v in d.get("trials", {}).items()
-        }
+        exp.trials = {k: Trial.from_dict(v) for k, v in d.get("trials", {}).items()}
         return exp

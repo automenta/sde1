@@ -8,6 +8,7 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
+from sde.core.types import ExecutionSettings
 from sde.core.types import Experiment
 from sde.core.types import Trial
 from sde.core.types import TrialStatus
@@ -32,8 +33,7 @@ class SdeRuntimeEngine:
         adaptive_scheduler: AdaptiveScheduler,
         trial_updated_callback: Callable[[Dict], None],
         insights_callback: Callable[[List[Dict]], None],
-        max_workers: int,
-        enable_checkpointing: bool = False,
+        execution_settings: ExecutionSettings,
         checkpoints_dir: str = "./checkpoints",
     ):
         """Initializes the SdeRuntimeEngine.
@@ -43,8 +43,7 @@ class SdeRuntimeEngine:
             adaptive_scheduler: The policy for scheduling work and pruning trials.
             trial_updated_callback: A function to call when a trial's state is updated.
             insights_callback: A function to call when new insights are generated.
-            max_workers: The number of parallel processes for computation.
-            enable_checkpointing: Whether to save model checkpoints after training steps.
+            execution_settings: The execution settings for the run.
             checkpoints_dir: The directory to store model checkpoints.
 
         """
@@ -61,8 +60,9 @@ class SdeRuntimeEngine:
         self.compute_scheduler = ComputeScheduler(
             datastore=self.datastore,
             dataset_name=experiment.challenge["name"],
-            max_workers=max_workers,
-            enable_checkpointing=enable_checkpointing,
+            max_workers=execution_settings.num_workers,
+            enable_checkpointing=execution_settings.enable_checkpointing,
+            work_unit_timeout=execution_settings.work_unit_timeout_seconds,
             checkpoints_dir=checkpoints_dir,
         )
         # --- Threading and State Control ---

@@ -90,6 +90,17 @@ class SetupPane(QWidget):
         self.trials_per_algo_spinbox.setToolTip("Number of random hyperparameter sets to generate per algorithm.")
         settings_form_layout.addRow("Trials per Algorithm:", self.trials_per_algo_spinbox)
 
+        # Timeout per Work Unit
+        self.timeout_spinbox = QSpinBox()
+        self.timeout_spinbox.setMinimum(1)
+        self.timeout_spinbox.setMaximum(3600)
+        self.timeout_spinbox.setValue(300)
+        self.timeout_spinbox.setToolTip(
+            "Maximum time (in seconds) to wait for a single work unit (e.g., one epoch)\n"
+            "before considering it failed. Prevents the engine from freezing on a stuck trial."
+        )
+        settings_form_layout.addRow("Work Unit Timeout (s):", self.timeout_spinbox)
+
         self.throttle_slider = QSlider(Qt.Orientation.Horizontal)
         self.throttle_slider.setRange(1, 100)
         self.throttle_slider.setValue(100)
@@ -179,10 +190,17 @@ class SetupPane(QWidget):
 
     def _on_start_simple_run(self):
         """Gathers settings and emits the start signal."""
-        settings = {
-            "enable_checkpointing": self.checkpoint_checkbox.isChecked()
-        }
+        settings = self.get_execution_settings()
         self.start_simple_run_requested.emit(settings)
+
+    def get_execution_settings(self) -> dict:
+        """Gathers all execution-related settings from the UI controls."""
+        return {
+            "num_workers": self.worker_count_spinbox.value(),
+            "num_trials_per_algo": self.trials_per_algo_spinbox.value(),
+            "enable_checkpointing": self.checkpoint_checkbox.isChecked(),
+            "work_unit_timeout_seconds": self.timeout_spinbox.value(),
+        }
 
     # --- Public Methods to Update UI State ---
 

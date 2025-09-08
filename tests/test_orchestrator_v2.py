@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from sde.core.actions import ActionType
 from sde.core.types import AlgorithmConfig
+from sde.core.types import ExecutionSettings
 from sde.core.types import ExperimentStatus
 from sde.core.types import Trial
 from sde.core.types import TrialStatus
@@ -138,7 +139,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         algo = AlgorithmConfig(id='algo1', name='TestAlgo', parameter_space={'lr': (0.01, 0.1)})
         orchestrator.experiment.algorithms['algo1'] = algo
-        start_payload = {"num_workers": 2, "num_trials_per_algo": 5}
+        start_payload = {"num_workers": 2, "num_trials_per_algo": 5, "enable_checkpointing": False, "work_unit_timeout_seconds": 300}
         orchestrator.dispatch(ActionType.START_RUN, start_payload)
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         MockSdeRuntimeEngine.assert_called_once()
@@ -152,7 +153,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         algo1 = AlgorithmConfig(id='algo1', name='TestAlgo1', parameter_space={'lr': (0.01, 0.1)})
         orchestrator.experiment.algorithms['algo1'] = algo1
-        start_payload = {"num_workers": 2, "num_trials_per_algo": 5}
+        start_payload = {"num_workers": 2, "num_trials_per_algo": 5, "enable_checkpointing": False, "work_unit_timeout_seconds": 300}
         orchestrator.dispatch(ActionType.START_RUN, start_payload)
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         mock_engine_instance = MockSdeRuntimeEngine.return_value
@@ -189,7 +190,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.challenge = {"name": "MNIST"}
         orchestrator.experiment.algorithms['algo1'] = AlgorithmConfig(id='a1', name='A1', parameter_space={})
 
-        start_payload = {"num_workers": 2, "num_trials_per_algo": 5}
+        start_payload = {"num_workers": 2, "num_trials_per_algo": 5, "enable_checkpointing": False, "work_unit_timeout_seconds": 300}
         orchestrator.dispatch(ActionType.START_RUN, start_payload)
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
         mock_engine_instance = MockSdeRuntimeEngine.return_value
@@ -212,7 +213,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator = ExperimentOrchestrator()
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         orchestrator.experiment.algorithms['algo1'] = AlgorithmConfig(id='a1', name='A1', parameter_space={})
-        start_payload = {"num_workers": 2, "num_trials_per_algo": 5}
+        start_payload = {"num_workers": 2, "num_trials_per_algo": 5, "enable_checkpointing": False, "work_unit_timeout_seconds": 300}
         orchestrator.dispatch(ActionType.START_RUN, start_payload)
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
@@ -236,7 +237,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.challenge = {"name": "MNIST", "performance_metric_name": "accuracy"}
         algo1 = AlgorithmConfig(id='algo1', name='TestAlgo1', parameter_space={'lr': (0.01, 0.1)})
         orchestrator.experiment.algorithms['algo1'] = algo1
-        start_payload = {"num_workers": 2, "num_trials_per_algo": 5}
+        start_payload = {"num_workers": 2, "num_trials_per_algo": 5, "enable_checkpointing": False, "work_unit_timeout_seconds": 300}
         orchestrator.dispatch(ActionType.START_RUN, start_payload)
         mock_engine_instance = MockSdeRuntimeEngine.return_value
         orchestrator.runtime_engine = mock_engine_instance
@@ -298,7 +299,12 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator1.experiment.algorithms['algo1'] = algo
         trial = Trial(id='trial1', algorithm_name='TestAlgo', hyperparameters={'lr': 0.1}, status=TrialStatus.PAUSED)
         orchestrator1.experiment.trials['trial1'] = trial
-        exec_settings = {"num_workers": 4, "enable_checkpointing": True}
+        exec_settings = ExecutionSettings(
+            num_workers=4,
+            enable_checkpointing=True,
+            num_trials_per_algo=1,
+            work_unit_timeout_seconds=300
+        )
         orchestrator1.experiment.execution_settings = exec_settings
         orchestrator1.experiment.status = ExperimentStatus.PAUSED
 
