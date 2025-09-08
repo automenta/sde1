@@ -293,7 +293,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         """Test that saving and loading an experiment preserves its full state."""
         # 1. Set up the initial orchestrator and experiment state
         orchestrator1 = ExperimentOrchestrator()
-        orchestrator1.experiment.challenge = {"name": "MNIST", "type": "vision"}
+        orchestrator1.experiment.challenge = {"name": "MNIST", "type": "vision", "performance_metric_name": "accuracy"}
         algo = AlgorithmConfig(id='algo1', name='TestAlgo', parameter_space={'lr': 0.1})
         orchestrator1.experiment.algorithms['algo1'] = algo
         trial = Trial(id='trial1', algorithm_name='TestAlgo', hyperparameters={'lr': 0.1}, status=TrialStatus.PAUSED)

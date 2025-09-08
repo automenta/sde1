@@ -1,6 +1,6 @@
 import unittest
 
-from sde.core.types import Trial
+from sde.core.types import Experiment, Trial
 from sde.core.types import TrialStatus
 from sde.core.types import WorkUnit
 from sde.core.types import WorkUnitType
@@ -11,22 +11,25 @@ class TestSuccessiveHalvingScheduler(unittest.TestCase):
 
     def setUp(self):
         """Set up trials for testing the scheduler."""
-        self.trials = {
+        self.experiment = Experiment(id="test_exp")
+        self.experiment.trials = {
             'trial_1': Trial(id='trial_1', algorithm_name='Algo1', hyperparameters={}),
             'trial_2': Trial(id='trial_2', algorithm_name='Algo2', hyperparameters={}),
             'trial_3': Trial(id='trial_3', algorithm_name='Algo3', hyperparameters={}),
             'trial_4': Trial(id='trial_4', algorithm_name='Algo4', hyperparameters={}),
         }
+        # Keep a reference to the trials dict for convenience in other tests
+        self.trials = self.experiment.trials
 
     def test_initial_work_units(self):
         """Test that the initial work units are generated correctly."""
         scheduler = SuccessiveHalvingScheduler(metric='accuracy', increasing=True)
-        work_units = scheduler.get_initial_work_units(self.trials)
+        work_units = scheduler.get_initial_work_units(self.experiment)
 
         self.assertEqual(len(work_units), 4)
         self.assertTrue(all(isinstance(wu, WorkUnit) for wu in work_units))
         self.assertTrue(all(wu.type == WorkUnitType.TRAIN_EPOCH for wu in work_units))
-        self.assertTrue(all(t.status == TrialStatus.ACTIVE for t in self.trials.values()))
+        self.assertTrue(all(t.status == TrialStatus.ACTIVE for t in self.experiment.trials.values()))
 
     def test_pruning_logic_increasing_metric(self):
         """Test the pruning logic with a metric where higher is better."""

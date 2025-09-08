@@ -42,12 +42,14 @@ class ActionValidator:
 
         elif status == ExperimentStatus.RUNNING:
             actions["global"].append("PAUSE_RUN")
+            actions["global"].append("SAVE_EXPERIMENT")
             actions["global"].append("ADD_ALGORITHM")
             actions["global"].append("SET_ADAPTIVE_POLICY")
             actions["global"].append("SET_BUDGET")
 
         elif status == ExperimentStatus.PAUSED:
             actions["global"].append("RESUME_RUN")
+            actions["global"].append("SAVE_EXPERIMENT")
             actions["global"].append("ADD_ALGORITHM")
             actions["global"].append("SET_ADAPTIVE_POLICY")
             actions["global"].append("SET_BUDGET")

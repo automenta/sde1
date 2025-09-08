@@ -1,6 +1,6 @@
 import unittest
 
-from sde.core.types import Trial
+from sde.core.types import Experiment, Trial
 from sde.core.types import TrialStatus
 from sde.exploration.schedulers import HyperbandScheduler
 from sde.exploration.schedulers import _Bracket
@@ -11,7 +11,8 @@ class TestHyperbandScheduler(unittest.TestCase):
     def test_bracket_initialization(self):
         """Tests that Hyperband initializes its brackets correctly."""
         # Setup: 13 trials to test assignment
-        trials = {f"t{i}": Trial(id=f"t{i}", algorithm_name="algo", hyperparameters={}) for i in range(13)}
+        experiment = Experiment(id="test_exp")
+        experiment.trials = {f"t{i}": Trial(id=f"t{i}", algorithm_name="algo", hyperparameters={}) for i in range(13)}
 
         # eta=3, max_resource=9 -> s_max=2. Brackets for s=2, 1, 0
         # Correct calculation for eta=3, max_resource=9 -> s_max=2:
@@ -20,7 +21,7 @@ class TestHyperbandScheduler(unittest.TestCase):
         # s=0: n=ceil(3/1 * 3^0)=3. r=9. Trials: (0 available)
         scheduler = HyperbandScheduler(metric="acc", increasing=True, max_resource_per_trial=9, reduction_factor=3)
 
-        work_units = scheduler.get_initial_work_units(trials)
+        work_units = scheduler.get_initial_work_units(experiment)
 
         self.assertEqual(len(scheduler.brackets), 3)
 
@@ -48,7 +49,7 @@ class TestHyperbandScheduler(unittest.TestCase):
         # Check that all 13 trials were assigned and activated
         self.assertEqual(len(scheduler.trial_to_bracket), 13)
         self.assertEqual(len(work_units), 13)
-        self.assertTrue(all(t.status == TrialStatus.ACTIVE for t in trials.values()))
+        self.assertTrue(all(t.status == TrialStatus.ACTIVE for t in experiment.trials.values()))
 
     def test_pruning_logic_within_a_bracket(self):
         """Tests that the SHA logic correctly prunes trials within a single bracket."""

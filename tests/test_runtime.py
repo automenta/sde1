@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
-from sde.core.types import Trial
+from sde.core.types import Experiment, Trial
 from sde.core.types import TrialStatus
 from sde.core.types import WorkUnit
 from sde.core.types import WorkUnitType
@@ -16,13 +16,17 @@ class TestSdeRuntimeEngine(unittest.TestCase):
         self.mock_adaptive_scheduler = MagicMock()
         self.mock_trial_updated_callback = MagicMock()
         self.mock_insights_callback = MagicMock()
+
+        self.experiment = Experiment(id="test_exp_runtime")
+        self.experiment.challenge = {"name": "MNIST", "type": "vision"}
         self.trial = Trial(id='trial1', algorithm_name='TestAlgo', hyperparameters={'lr': 0.1})
+        self.experiment.trials = {'trial1': self.trial}
+
 
         # We need to patch the ComputeScheduler as it tries to create a process pool
         with patch('sde.engine.runtime.ComputeScheduler') as MockComputeScheduler:
             self.runtime_engine = SdeRuntimeEngine(
-                trials=[self.trial],
-                dataset_name="MNIST",
+                experiment=self.experiment,
                 adaptive_scheduler=self.mock_adaptive_scheduler,
                 trial_updated_callback=self.mock_trial_updated_callback,
                 insights_callback=self.mock_insights_callback,
