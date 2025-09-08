@@ -56,6 +56,7 @@ class SetupPane(QWidget):
         self.setup_group = QGroupBox("1. Experiment Setup")
         setup_form_layout = QFormLayout(self.setup_group)
         self.dataset_combo = QComboBox()
+        self.dataset_combo.setStatusTip("Select the dataset to use for the experiment.")
         self.model_list = QListWidget()
         self.model_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.model_list.setMinimumHeight(150)
@@ -63,6 +64,7 @@ class SetupPane(QWidget):
             "Select one or more models to include in the experiment.\n"
             "Models compatible with the selected dataset will appear here."
         )
+        self.model_list.setStatusTip("Select one or more models for the experiment.")
         setup_form_layout.addRow("Dataset:", self.dataset_combo)
         setup_form_layout.addRow("Models:", self.model_list)
 
@@ -81,6 +83,7 @@ class SetupPane(QWidget):
         self.worker_count_spinbox.setMaximum(max_workers)
         self.worker_count_spinbox.setValue(max_workers)
         self.worker_count_spinbox.setToolTip("Number of parallel processes for computation.")
+        self.worker_count_spinbox.setStatusTip("Set the number of parallel processes for computation.")
         settings_form_layout.addRow("Parallel Workers:", self.worker_count_spinbox)
 
         # Trials per Algorithm
@@ -89,6 +92,7 @@ class SetupPane(QWidget):
         self.trials_per_algo_spinbox.setMaximum(1000)
         self.trials_per_algo_spinbox.setValue(10)
         self.trials_per_algo_spinbox.setToolTip("Number of random hyperparameter sets to generate per algorithm.")
+        self.trials_per_algo_spinbox.setStatusTip("Set the number of random hyperparameter sets per algorithm.")
         settings_form_layout.addRow("Trials per Algorithm:", self.trials_per_algo_spinbox)
 
         # Timeout per Work Unit
@@ -100,11 +104,13 @@ class SetupPane(QWidget):
             "Maximum time (in seconds) to wait for a single work unit (e.g., one epoch)\n"
             "before considering it failed. Prevents the engine from freezing on a stuck trial."
         )
+        self.timeout_spinbox.setStatusTip("Set the maximum time to wait for a single work unit.")
         settings_form_layout.addRow("Work Unit Timeout (s):", self.timeout_spinbox)
 
         self.throttle_slider = QSlider(Qt.Orientation.Horizontal)
         self.throttle_slider.setRange(1, 100)
         self.throttle_slider.setValue(100)
+        self.throttle_slider.setStatusTip("Adjust the CPU/GPU usage throttle for worker processes.")
         self.throttle_label = QLabel("100%")
         throttle_widget = QWidget()
         throttle_layout = QHBoxLayout(throttle_widget)
@@ -113,6 +119,7 @@ class SetupPane(QWidget):
         throttle_layout.setContentsMargins(0, 0, 0, 0)
         self.checkpoint_checkbox = QCheckBox("Enable Checkpointing")
         self.checkpoint_checkbox.setChecked(False)
+        self.checkpoint_checkbox.setStatusTip("If checked, save model state after each epoch to allow resuming later.")
         settings_form_layout.addRow("Worker Throttle:", throttle_widget)
         settings_form_layout.addRow(self.checkpoint_checkbox)
 
@@ -120,16 +127,23 @@ class SetupPane(QWidget):
         controls_group = QGroupBox("3. Execution Controls")
         controls_layout = QVBoxLayout(controls_group)
         self.start_button = QPushButton("Start (Defaults)")
+        self.start_button.setStatusTip("Start the experiment with default hyperparameter settings.")
         self.tune_button = QPushButton("Tune Hyperparameters...")
+        self.tune_button.setStatusTip("Open a dialog to configure hyperparameter tuning.")
         self.add_models_button = QPushButton("Add Selected Models to Run")
         self.add_models_button.setToolTip(
             "While a run is active, select new models from the list above\n"
             "and click here to add them to the experiment."
         )
+        self.add_models_button.setStatusTip("Add the selected models to the currently running experiment.")
         self.pause_button = QPushButton("Pause")
+        self.pause_button.setStatusTip("Pause the current experiment.")
         self.resume_button = QPushButton("Resume")
+        self.resume_button.setStatusTip("Resume a paused experiment.")
         self.save_button = QPushButton("Save Run")
+        self.save_button.setStatusTip("Save the state of the current experiment to a file.")
         self.load_button = QPushButton("Load Run")
+        self.load_button.setStatusTip("Load a previously saved experiment from a file.")
 
         simple_run_layout = QHBoxLayout()
         simple_run_layout.addWidget(self.start_button)

@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6.QtWidgets import QInputDialog
 from PyQt6.QtWidgets import QMainWindow
 from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QStatusBar
 from PyQt6.QtWidgets import QWidget
 
 from ..challenges import AVAILABLE_DATASETS
@@ -45,6 +46,7 @@ class MainWindow(QMainWindow):
             "level": "INFO",
             "message": "UI Initialized. Configure your experiment and click 'Start'."
         })
+        self.statusBar().showMessage("Ready. Select a dataset and model to begin.", 5000)
 
     def _init_ui(self):
         """Initializes the main UI layout and sub-components."""
@@ -57,6 +59,7 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.setup_pane)
         main_layout.addWidget(self.results_pane, 1)
+        self.setStatusBar(QStatusBar(self))
 
     def _connect_signals(self):
         """Connects all UI signals to their corresponding slots."""
@@ -225,8 +228,18 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def append_log_message(self, log_data: dict):
-        if log_data.get("level") == "INSIGHT":
-            QMessageBox.information(self, "New Insight", log_data.get("message", ""))
+        """Appends a log message to the log pane and, if appropriate,
+        the status bar. Handles displaying insights as popups.
+        """
+        message = log_data.get("message", "")
+        level = log_data.get("level", "INFO")
+
+        if level == "INSIGHT":
+            QMessageBox.information(self, "New Insight", message)
+        else:
+            # For non-insight messages, show them in the status bar for a few seconds
+            self.statusBar().showMessage(message, 5000)
+
         self.results_pane.append_log_message(log_data)
 
     def add_models_to_run(self):
@@ -286,33 +299,48 @@ class MainWindow(QMainWindow):
         filepath, _ = QFileDialog.getSaveFileName(
             self, "Save Experiment", "", "SDE JSON Files (*.sde.json)"
         )
-        if filepath:
-            self.append_log_message({"level": "INFO", "message": f"Saving experiment to {filepath}..."})
-            # Disable buttons to prevent concurrent operations
-            self.setup_pane.save_button.setEnabled(False)
-            self.setup_pane.load_button.setEnabled(False)
-            QApplication.processEvents() # Ensure UI updates before long operation
+        if not filepath:
+            return
 
+        self.append_log_message({"level": "INFO", "message": f"Saving experiment to {filepath}..."})
+        self.setup_pane.save_button.setEnabled(False)
+        self.setup_pane.load_button.setEnabled(False)
+        try:
             self.orchestrator.dispatch(
                 ActionType.SAVE_EXPERIMENT, {"filepath": filepath}
             )
+        except Exception as e:
+            error_message = f"An unexpected error occurred: {e}"
+            QMessageBox.critical(self, "Error Saving Experiment", error_message)
+            self.append_log_message({"level": "ERROR", "message": f"Failed to save experiment: {e}"})
+            # Re-enable buttons on failure so the user can try again or load another file
+            self.setup_pane.save_button.setEnabled(True)
+            self.setup_pane.load_button.setEnabled(True)
 
     def load_experiment(self):
         """Opens a file dialog to load an experiment state."""
         filepath, _ = QFileDialog.getOpenFileName(
             self, "Load Experiment", "", "SDE JSON Files (*.sde.json)"
         )
-        if filepath:
-            self.append_log_message({"level": "INFO", "message": f"Loading experiment from {filepath}..."})
-            # Disable buttons to prevent concurrent operations
-            self.setup_pane.save_button.setEnabled(False)
-            self.setup_pane.load_button.setEnabled(False)
-            QApplication.processEvents() # Ensure UI updates before long operation
+        if not filepath:
+            return
 
+        self.append_log_message({"level": "INFO", "message": f"Loading experiment from {filepath}..."})
+        # While loading, most controls should be disabled.
+        self.setup_pane.load_button.setEnabled(False)
+        self.setup_pane.start_button.setEnabled(False)
+        try:
             self._clear_previous_experiment()
             self.orchestrator.dispatch(
                 ActionType.LOAD_EXPERIMENT, {"filepath": filepath}
             )
+        except Exception as e:
+            error_message = f"An unexpected error occurred: {e}"
+            QMessageBox.critical(self, "Error Loading Experiment", error_message)
+            self.append_log_message({"level": "ERROR", "message": f"Failed to load experiment: {e}"})
+            # Re-enable the load button on failure so the user can try again
+            self.setup_pane.load_button.setEnabled(True)
+            self.setup_pane.start_button.setEnabled(True)
 
     def prune_trial(self, trial_id: str):
         """Dispatches an action to manually prune a trial."""
