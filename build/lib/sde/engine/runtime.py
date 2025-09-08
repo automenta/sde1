@@ -8,6 +8,7 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
+from sde.core.types import Experiment
 from sde.core.types import Trial
 from sde.core.types import TrialStatus
 from sde.core.types import WorkUnit
@@ -27,8 +28,7 @@ class SdeRuntimeEngine:
 
     def __init__(
         self,
-        trials: List[Trial],
-        dataset_name: str,
+        experiment: Experiment,
         adaptive_scheduler: AdaptiveScheduler,
         trial_updated_callback: Callable[[Dict], None],
         insights_callback: Callable[[List[Dict]], None],
@@ -39,8 +39,7 @@ class SdeRuntimeEngine:
         """Initializes the SdeRuntimeEngine.
 
         Args:
-            trials: The initial list of Trial objects to manage.
-            dataset_name: The name of the challenge dataset to use (e.g., 'CIFAR10').
+            experiment: The full Experiment object to run.
             adaptive_scheduler: The policy for scheduling work and pruning trials.
             trial_updated_callback: A function to call when a trial's state is updated.
             insights_callback: A function to call when new insights are generated.
@@ -49,7 +48,8 @@ class SdeRuntimeEngine:
             checkpoints_dir: The directory to store model checkpoints.
 
         """
-        self.datastore = DataStore(trials)
+        self.experiment = experiment
+        self.datastore = DataStore(list(experiment.trials.values()))
         self.adaptive_scheduler = adaptive_scheduler
         self.trial_updated_callback = trial_updated_callback
         self.insights_callback = insights_callback
@@ -60,7 +60,7 @@ class SdeRuntimeEngine:
         )
         self.compute_scheduler = ComputeScheduler(
             datastore=self.datastore,
-            dataset_name=dataset_name,
+            dataset_name=experiment.challenge["name"],
             max_workers=max_workers,
             enable_checkpointing=enable_checkpointing,
             checkpoints_dir=checkpoints_dir,
@@ -69,8 +69,16 @@ class SdeRuntimeEngine:
         self._is_running = False  # Flag to signal the main loop to terminate.
         self._thread: Optional[threading.Thread] = None  # The main execution thread.
         self.work_queue = queue.PriorityQueue()  # Thread-safe queue for pending work.
+        self._work_counter = 0  # Tie-breaker for priority queue
         self._pause_event = threading.Event()  # Used to pause and resume the loop.
         self._cancelled_trials = set()  # A set of trial_ids to ignore.
+
+    def _put_work_in_queue(self, work_unit: WorkUnit):
+        """Adds a work unit to the priority queue with a tie-breaker."""
+        trial = self.datastore.get_trial(work_unit.trial_id)
+        priority = -trial.priority  # Negated for min-heap
+        self.work_queue.put((priority, self._work_counter, work_unit))
+        self._work_counter += 1
 
     def start(self, start_paused: bool = False) -> None:
         """Starts the main execution loop in a background thread."""
@@ -79,15 +87,25 @@ class SdeRuntimeEngine:
             if not start_paused:
                 self._pause_event.set()  # Start in a "not paused" state
 
-            # Initial work population
-            initial_work_units = self.adaptive_scheduler.get_initial_work_units(
-                self.datastore.get_all_trials()
+            # --- Work Population ---
+            # Check if this is a fresh run or a resumed run
+            is_resumed_run = any(
+                t.status != TrialStatus.PENDING for t in self.datastore.get_all_trials().values()
             )
-            for work_unit in initial_work_units:
-                trial = self.datastore.get_trial(work_unit.trial_id)
-                # Priority is negative because PriorityQueue is a min-heap
-                priority = -trial.priority
-                self.work_queue.put((priority, work_unit))
+
+            if is_resumed_run:
+                logger.info("Resuming experiment. Rehydrating work queue...")
+                work_units = self.adaptive_scheduler.rehydrate_work_units(
+                    self.experiment
+                )
+            else:
+                logger.info("Starting fresh experiment. Generating initial work units...")
+                work_units = self.adaptive_scheduler.get_initial_work_units(
+                    self.experiment
+                )
+
+            for work_unit in work_units:
+                self._put_work_in_queue(work_unit)
 
             self.compute_scheduler.start()
             self._thread = threading.Thread(target=self._execution_loop, daemon=True)
@@ -142,14 +160,20 @@ class SdeRuntimeEngine:
             self.datastore.add_trial(trial)
             logger.info(f"Added new trial {trial.id} to the live datastore.")
 
-        # Generate work units for the new trials
-        new_work_units = self.adaptive_scheduler.get_initial_work_units(trials)
+        # Generate work units for the new trials.
+        # The schedulers' get_initial_work_units methods find all PENDING trials
+        # and create a TRAIN_EPOCH work unit. We can replicate that simple logic
+        # here for just the new trials.
+        new_work_units = []
+        for trial in trials:
+            if trial.status == TrialStatus.PENDING:
+                trial.status = TrialStatus.ACTIVE
+                new_work_units.append(
+                    WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)
+                )
 
         for work_unit in new_work_units:
-            trial = self.datastore.get_trial(work_unit.trial_id)
-            # Priority is negative because PriorityQueue is a min-heap
-            priority = -trial.priority
-            self.work_queue.put((priority, work_unit))
+            self._put_work_in_queue(work_unit)
 
         logger.info(
             f"Added {len(new_work_units)} new work units to the live queue."
@@ -190,8 +214,8 @@ class SdeRuntimeEngine:
             current_batch = []
             while not self.work_queue.empty() and len(current_batch) < self.compute_scheduler.max_workers:
                 try:
-                    # Get a work unit, ignoring priority, as the queue handles it
-                    _, work_unit = self.work_queue.get_nowait()
+                    # Get a work unit, ignoring priority and counter
+                    _, _, work_unit = self.work_queue.get_nowait()
 
                     # Discard work for cancelled trials
                     if work_unit.trial_id in self._cancelled_trials:
@@ -278,8 +302,7 @@ class SdeRuntimeEngine:
                     updated_trial, self.datastore.get_all_trials()
                 )
                 for next_wu in next_work_units:
-                    priority = -updated_trial.priority
-                    self.work_queue.put((priority, next_wu))
+                    self._put_work_in_queue(next_wu)
 
         # --- UI Callback ---
         # Always call the UI callback to update the trial's status, even on failure.

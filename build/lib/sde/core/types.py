@@ -28,6 +28,7 @@ class WorkUnit:
 class TrialStatus(Enum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
     PRUNED = "PRUNED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
@@ -123,6 +124,7 @@ class Experiment:
     adaptive_policy: str = "SuccessiveHalving"  # Default policy
     patience_budget: Optional[Dict[str, int]] = None
     execution_settings: Optional[Dict[str, Any]] = None  # For num_workers etc.
+    scheduler_state: Optional[Dict[str, Any]] = None  # For schedulers that need to persist state
 
     def to_dict(self) -> dict:
         """Serializes the entire experiment state to a dictionary."""
@@ -138,6 +140,7 @@ class Experiment:
             "adaptive_policy": self.adaptive_policy,
             "patience_budget": self.patience_budget,
             "execution_settings": self.execution_settings,
+            "scheduler_state": self.scheduler_state,
         }
 
     @classmethod
@@ -152,6 +155,7 @@ class Experiment:
             adaptive_policy=d.get("adaptive_policy", "SuccessiveHalving"),
             patience_budget=d.get("patience_budget"),
             execution_settings=d.get("execution_settings"),
+            scheduler_state=d.get("scheduler_state"),
         )
 
         # Then, deserialize the nested objects

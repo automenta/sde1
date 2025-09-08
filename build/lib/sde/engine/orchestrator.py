@@ -278,13 +278,11 @@ class ExperimentOrchestrator:
                 challenge_name=challenge_name,
                 patience_budget=self.experiment.patience_budget,
             )
-            current_trials = list(self.experiment.trials.values())
             enable_checkpointing = execution_settings.get("enable_checkpointing", False)
             num_workers = execution_settings.get("num_workers", 1)
 
             self.runtime_engine = SdeRuntimeEngine(
-                trials=current_trials,
-                dataset_name=challenge_name,
+                experiment=self.experiment,
                 adaptive_scheduler=scheduler,
                 trial_updated_callback=self.on_trial_updated,
                 insights_callback=self.on_insights_generated,
@@ -378,8 +376,9 @@ class ExperimentOrchestrator:
                 self.log_message.emit({'level': 'INFO', 'message': f"Loaded experiment is in '{self.experiment.status.value}' state."})
 
         except Exception as e:
-            self.log_message.emit({'level': 'ERROR', 'message': f"Failed to load experiment: {e}"})
-            logger.error(f"Failed to load experiment: {traceback.format_exc()}")
+            tb = traceback.format_exc()
+            self.log_message.emit({'level': 'ERROR', 'message': f"Failed to load experiment: {e}\n{tb}"})
+            logger.error(f"Failed to load experiment: {tb}")
             self.experiment = Experiment()
 
     def shutdown(self) -> None:

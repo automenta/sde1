@@ -85,11 +85,11 @@ class Worker:
             # Return an error message that can be displayed in the UI log.
             return {"error": f"Execution failed in worker: {e}"}
 
-    def _setup_model_and_optimizer(
+    def _load_or_create_model_and_optimizer(
         self, trial: Trial
     ) -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
-        """Initializes the model and optimizer based on trial hyperparameters."""
-        # 1. Setup model
+        """Initializes the model and optimizer, and loads state from a checkpoint if available."""
+        # 1. Create model and optimizer with specified hyperparameters
         ModelClass = self.model_def.model_class
         model_params = trial.hyperparameters.get("model_params", {})
         model_kwargs = {
@@ -99,7 +99,6 @@ class Worker:
         }
         model = ModelClass(**model_kwargs).to(DEVICE)
 
-        # 2. Setup optimizer
         optimizer_hparams = trial.hyperparameters.get("optimizer_params", {})
         optimizer_name = optimizer_hparams.get("name", "Adam").lower()
         optimizer_params = {k: v for k, v in optimizer_hparams.items() if k != "name"}
@@ -112,13 +111,29 @@ class Worker:
             raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
         optimizer = optimizer_class(model.parameters(), **optimizer_params)
+
+        # 2. Load state from checkpoint if the path exists
+        if trial.checkpoint_path and os.path.exists(trial.checkpoint_path):
+            try:
+                checkpoint = torch.load(trial.checkpoint_path, map_location=DEVICE)
+                model.load_state_dict(checkpoint["model_state_dict"])
+                optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                logger.info(f"Loaded checkpoint for trial {trial.id} from {trial.checkpoint_path}")
+            except FileNotFoundError:
+                logger.warning(
+                    f"Checkpoint file not found at {trial.checkpoint_path}. Starting from scratch."
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to load checkpoint for trial {trial.id} from {trial.checkpoint_path}: {e}"
+                )
         return model, optimizer
 
     def _profile_speed(self, work_unit: WorkUnit, trial: Trial) -> dict:
         """Runs a few training batches to estimate the time per epoch.
         """
         # 1. Setup model, optimizer, and loss function
-        model, optimizer = self._setup_model_and_optimizer(trial)
+        model, optimizer = self._load_or_create_model_and_optimizer(trial)
         criterion = self.dataset_def.loss_function_factory()
 
         # 2. Get trial-specific dataloader
@@ -162,25 +177,14 @@ class Worker:
     def _train_one_epoch(
         self, work_unit: WorkUnit, trial: Trial, enable_checkpointing: bool
     ) -> dict:
-        # 1. Setup model, optimizer, and loss function
-        model, optimizer = self._setup_model_and_optimizer(trial)
+        # 1. Setup model and optimizer, loading from checkpoint if it exists
+        model, optimizer = self._load_or_create_model_and_optimizer(trial)
         criterion = self.dataset_def.loss_function_factory()
 
         # 2. Get trial-specific dataloaders
         train_loader, val_loader = self._get_dataloaders(trial)
 
-        # 3. Load state from checkpoint if it exists
-        if trial.checkpoint_path:
-            try:
-                checkpoint = torch.load(trial.checkpoint_path, map_location=DEVICE)
-                model.load_state_dict(checkpoint["model_state_dict"])
-                optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-            except FileNotFoundError:
-                logger.warning(
-                    f"Checkpoint file not found at {trial.checkpoint_path}. Starting from scratch."
-                )
-
-        # 4. Training loop for one epoch
+        # 3. Training loop for one epoch
         model.train()
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(DEVICE), target.to(DEVICE)
@@ -190,7 +194,7 @@ class Worker:
             loss.backward()
             optimizer.step()
 
-        # 5. Evaluation on validation set
+        # 4. Evaluation on validation set
         model.eval()
         val_loss = 0
         correct = 0
@@ -208,19 +212,23 @@ class Worker:
         accuracy = correct / total
 
         # 5. Save new state to a new checkpoint file (if enabled)
-        new_checkpoint_path = None
+        new_checkpoint_path = trial.checkpoint_path
         if enable_checkpointing:
-            new_checkpoint_filename = f"{trial.id}_epoch_{trial.current_epoch + 1}.pt"
-            new_checkpoint_path = os.path.join(
-                self.checkpoints_dir, new_checkpoint_filename
-            )
+            # Use a canonical checkpoint path for each trial
+            if not new_checkpoint_path:
+                checkpoint_filename = f"{trial.id}.pt"
+                new_checkpoint_path = os.path.join(self.checkpoints_dir, checkpoint_filename)
+
+            # Atomic save: write to a temporary file then rename
+            temp_checkpoint_path = f"{new_checkpoint_path}.tmp"
             torch.save(
                 {
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                 },
-                new_checkpoint_path,
+                temp_checkpoint_path,
             )
+            os.rename(temp_checkpoint_path, new_checkpoint_path)
 
         # 6. Return results and state update instructions
         metric_name = self.dataset_def.performance_metric_name

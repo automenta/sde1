@@ -30,6 +30,7 @@ class ActionValidator:
 
         # Global actions
         if status == ExperimentStatus.DEFINING:
+            actions["global"].append("LOAD_EXPERIMENT")
             if not has_challenge:
                 actions["global"].append("SET_CHALLENGE")
             else:
@@ -41,12 +42,14 @@ class ActionValidator:
 
         elif status == ExperimentStatus.RUNNING:
             actions["global"].append("PAUSE_RUN")
+            actions["global"].append("SAVE_EXPERIMENT")
             actions["global"].append("ADD_ALGORITHM")
             actions["global"].append("SET_ADAPTIVE_POLICY")
             actions["global"].append("SET_BUDGET")
 
         elif status == ExperimentStatus.PAUSED:
             actions["global"].append("RESUME_RUN")
+            actions["global"].append("SAVE_EXPERIMENT")
             actions["global"].append("ADD_ALGORITHM")
             actions["global"].append("SET_ADAPTIVE_POLICY")
             actions["global"].append("SET_BUDGET")

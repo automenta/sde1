@@ -1,4 +1,5 @@
 import json
+import os
 
 from sde.core.types import Experiment
 
@@ -15,6 +16,8 @@ def save_experiment(experiment: Experiment, filepath: str) -> None:
         state_dict = experiment.to_dict()
         with open(filepath, "w") as f:
             json.dump(state_dict, f, indent=4)
+            f.flush()
+            os.sync()
     except (IOError, TypeError) as e:
         # It would be good to log this error
         print(f"Error saving experiment to {filepath}: {e}")
