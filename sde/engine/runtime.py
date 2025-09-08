@@ -149,9 +149,7 @@ class SdeRuntimeEngine:
         self.compute_scheduler.cancel_work_for_trial(trial_id)
 
     def add_trials_live(self, trials: List[Trial]) -> None:
-        """Injects new trials into the live datastore and generates work units for them,
-        adding them to the active work queue. This is thread-safe.
-        """
+        """Injects new trials into the live datastore. This is thread-safe."""
         if not self._is_running:
             logger.warning("Cannot add trials live, engine is not running.")
             return
@@ -160,24 +158,16 @@ class SdeRuntimeEngine:
             self.datastore.add_trial(trial)
             logger.info(f"Added new trial {trial.id} to the live datastore.")
 
-        # Generate work units for the new trials.
-        # The schedulers' get_initial_work_units methods find all PENDING trials
-        # and create a TRAIN_EPOCH work unit. We can replicate that simple logic
-        # here for just the new trials.
-        new_work_units = []
-        for trial in trials:
-            if trial.status == TrialStatus.PENDING:
-                trial.status = TrialStatus.ACTIVE
-                new_work_units.append(
-                    WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)
-                )
+    def add_work_units_live(self, work_units: List[WorkUnit]) -> None:
+        """Injects new work units into the live work queue. This is thread-safe."""
+        if not self._is_running:
+            logger.warning("Cannot add work units live, engine is not running.")
+            return
 
-        for work_unit in new_work_units:
+        for work_unit in work_units:
             self._put_work_in_queue(work_unit)
 
-        logger.info(
-            f"Added {len(new_work_units)} new work units to the live queue."
-        )
+        logger.info(f"Added {len(work_units)} new work units to the live queue.")
 
     def update_adaptive_policy(self, new_scheduler: AdaptiveScheduler) -> None:
         """Safely swaps the adaptive scheduler mid-run.

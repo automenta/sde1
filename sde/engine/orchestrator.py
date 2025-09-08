@@ -217,9 +217,14 @@ class ExperimentOrchestrator:
             status=TrialStatus.PENDING,
         )
         self.experiment.trials[new_trial_id] = new_trial
-        if self.runtime_engine:
-            self.runtime_engine.add_trials_live([new_trial])
         self.log_message.emit({'level': 'INFO', 'message': f"Spawned new trial {new_trial_id} from {source_trial_id}."})
+
+        if self.runtime_engine and self.runtime_engine._is_running:
+            self.runtime_engine.add_trials_live([new_trial])
+            scheduler = self.runtime_engine.adaptive_scheduler
+            work_units = scheduler.generate_work_units_for_new_trials([new_trial], self.experiment)
+            self.runtime_engine.add_work_units_live(work_units)
+            self.log_message.emit({'level': 'INFO', 'message': f"Scheduled {len(work_units)} new work units for spawned trial."})
 
     def handle_start_run(self, payload: Dict[str, Any]) -> None:
         """Starts the experiment run by initializing and starting the runtime engine."""
@@ -240,12 +245,15 @@ class ExperimentOrchestrator:
         self._initialize_and_start_runtime()
 
     def _generate_and_add_trials(self, algorithms: List[Any], num_trials_per_algo: int) -> bool:
-        """Generates a set of trials for the given algorithms using the adaptive scheduler."""
+        """Generates trials, adds them to the experiment, and if the run is live,
+        schedules their initial work units.
+        """
         self.log_message.emit({
             'level': 'INFO',
             'message': f"Generating {num_trials_per_algo} trials for {len(algorithms)} algorithm(s)."
         })
         try:
+            # 1. Get the correct scheduler instance
             if self.runtime_engine and self.runtime_engine.adaptive_scheduler:
                 scheduler = self.runtime_engine.adaptive_scheduler
             else:
@@ -257,12 +265,23 @@ class ExperimentOrchestrator:
             if not scheduler:
                 self.log_message.emit({'level': 'ERROR', 'message': "Could not create or find a scheduler."})
                 return False
+
+            # 2. Generate the trial objects
             new_trials = scheduler.generate_initial_trials(algorithms, num_trials_per_algo)
             for trial in new_trials:
                 self.experiment.trials[trial.id] = trial
-            if self.runtime_engine:
+            self.log_message.emit({'level': 'INFO', 'message': f"Created {len(new_trials)} new trial objects."})
+
+            # 3. If the engine is live, schedule the work units for the new trials
+            if self.runtime_engine and self.runtime_engine._is_running:
+                self.log_message.emit({'level': 'INFO', 'message': "Engine is live. Scheduling work for new trials."})
+                # Add trials to the datastore
                 self.runtime_engine.add_trials_live(new_trials)
-            self.log_message.emit({'level': 'INFO', 'message': f"Added {len(new_trials)} new trials to the experiment."})
+                # Generate and add the work units
+                work_units = scheduler.generate_work_units_for_new_trials(new_trials, self.experiment)
+                self.runtime_engine.add_work_units_live(work_units)
+                self.log_message.emit({'level': 'INFO', 'message': f"Scheduled {len(work_units)} new work units."})
+
             return True
         except Exception as e:
             self.log_message.emit({'level': 'ERROR', 'message': f"Failed to generate or add new trials: {e}"})
