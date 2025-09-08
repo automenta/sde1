@@ -21,7 +21,9 @@ class TestHyperbandScheduler(unittest.TestCase):
         # s=0: n=ceil(3/1 * 3^0)=3. r=9. Trials: (0 available)
         scheduler = HyperbandScheduler(metric="acc", increasing=True, max_resource_per_trial=9, reduction_factor=3)
 
-        work_units = scheduler.get_initial_work_units(experiment)
+        work_units, _ = scheduler.get_initial_work_units(
+            experiment.trials, experiment.scheduler_state
+        )
 
         self.assertEqual(len(scheduler.brackets), 3)
 

@@ -24,7 +24,9 @@ class TestSuccessiveHalvingScheduler(unittest.TestCase):
     def test_initial_work_units(self):
         """Test that the initial work units are generated correctly."""
         scheduler = SuccessiveHalvingScheduler(metric='accuracy', increasing=True)
-        work_units = scheduler.get_initial_work_units(self.experiment)
+        work_units, _ = scheduler.get_initial_work_units(
+            self.experiment.trials, self.experiment.scheduler_state
+        )
 
         self.assertEqual(len(work_units), 4)
         self.assertTrue(all(isinstance(wu, WorkUnit) for wu in work_units))

@@ -134,7 +134,9 @@ class Experiment:
     adaptive_policy: str = "SuccessiveHalving"  # Default policy
     patience_budget: Optional[Dict[str, int]] = None
     execution_settings: Optional[ExecutionSettings] = None  # For num_workers etc.
-    scheduler_state: Optional[Dict[str, Any]] = None  # For schedulers that need to persist state
+    scheduler_state: Dict[str, Any] = field(
+        default_factory=dict
+    )  # For schedulers that need to persist state
 
     def to_dict(self) -> dict:
         """Serializes the entire experiment state to a dictionary."""
@@ -172,7 +174,7 @@ class Experiment:
             adaptive_policy=d.get("adaptive_policy", "SuccessiveHalving"),
             patience_budget=d.get("patience_budget"),
             execution_settings=execution_settings,
-            scheduler_state=d.get("scheduler_state"),
+            scheduler_state=d.get("scheduler_state") or {},
         )
 
         # Then, deserialize the nested objects

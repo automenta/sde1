@@ -33,11 +33,13 @@ class TestResumeLogic(unittest.TestCase):
         # 4. Create the Runtime Engine
         # Callbacks can be dummy lambdas for this test
         runtime_engine = SdeRuntimeEngine(
-            experiment=experiment,
+            trials=list(experiment.trials.values()),
+            challenge=experiment.challenge,
             adaptive_scheduler=scheduler,
             trial_updated_callback=lambda x: None,
             insights_callback=lambda x: None,
             execution_settings=experiment.execution_settings,
+            scheduler_state=experiment.scheduler_state,
         )
 
         # 5. Call the start method (which should trigger rehydration)

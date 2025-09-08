@@ -33,11 +33,13 @@ class TestSdeRuntimeEngine(unittest.TestCase):
         # We need to patch the ComputeScheduler as it tries to create a process pool
         with patch('sde.engine.runtime.ComputeScheduler') as MockComputeScheduler:
             self.runtime_engine = SdeRuntimeEngine(
-                experiment=self.experiment,
+                trials=list(self.experiment.trials.values()),
+                challenge=self.experiment.challenge,
                 adaptive_scheduler=self.mock_adaptive_scheduler,
                 trial_updated_callback=self.mock_trial_updated_callback,
                 insights_callback=self.mock_insights_callback,
                 execution_settings=self.experiment.execution_settings,
+                scheduler_state=self.experiment.scheduler_state,
             )
 
     def test_work_unit_error_sets_trial_to_failed(self):
