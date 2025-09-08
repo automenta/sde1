@@ -11,3 +11,11 @@ checkpoints/
 # IDE files
 .idea/
 .vscode/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Log files
+*.log
