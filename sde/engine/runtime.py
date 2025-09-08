@@ -75,9 +75,14 @@ class SdeRuntimeEngine:
         self._is_running = False  # Flag to signal the main loop to terminate.
         self._thread: Optional[threading.Thread] = None  # The main execution thread.
         self.work_queue = queue.PriorityQueue()  # Thread-safe queue for pending work.
+        self.command_queue = queue.Queue() # Thread-safe queue for commands
         self._work_counter = 0  # Tie-breaker for priority queue
         self._pause_event = threading.Event()  # Used to pause and resume the loop.
         self._cancelled_trials = set()  # A set of trial_ids to ignore.
+
+    def post_command(self, command: str, payload: Dict[str, Any]) -> None:
+        """Adds a command to the command queue for the engine to process."""
+        self.command_queue.put((command, payload))
 
     def _put_work_in_queue(self, work_unit: WorkUnit):
         """Adds a work unit to the priority queue with a tie-breaker."""
@@ -167,26 +172,42 @@ class SdeRuntimeEngine:
         self._cancelled_trials.add(trial_id)
         self.compute_scheduler.cancel_work_for_trial(trial_id)
 
-    def add_trials_live(self, trials: List[Trial]) -> None:
-        """Injects new trials into the live datastore. This is thread-safe."""
-        if not self._is_running:
-            logger.warning("Cannot add trials live, engine is not running.")
+    def _handle_add_trials_command(self, payload: Dict[str, Any]):
+        """Handles the 'ADD_TRIALS' command from the orchestrator."""
+        new_trials = payload.get("trials", [])
+        if not new_trials:
+            logger.warning("ADD_TRIALS command received with no trials in payload.")
             return
 
-        for trial in trials:
+        logger.info(f"Processing ADD_TRIALS command for {len(new_trials)} trial(s).")
+        # 1. Add trials to the datastore
+        for trial in new_trials:
             self.datastore.add_trial(trial)
-            logger.info(f"Added new trial {trial.id} to the live datastore.")
 
-    def add_work_units_live(self, work_units: List[WorkUnit]) -> None:
-        """Injects new work units into the live work queue. This is thread-safe."""
-        if not self._is_running:
-            logger.warning("Cannot add work units live, engine is not running.")
-            return
+        # 2. Generate and schedule work units for them
+        work_units, new_state = self.adaptive_scheduler.generate_work_units_for_new_trials(
+            new_trials, self.datastore.get_all_trials(), self.scheduler_state
+        )
+        self.scheduler_state.update(new_state)
 
         for work_unit in work_units:
             self._put_work_in_queue(work_unit)
 
-        logger.info(f"Added {len(work_units)} new work units to the live queue.")
+        logger.info(f"Scheduled {len(work_units)} new work units for added trials.")
+
+
+    def _process_command_queue(self):
+        """Processes all pending commands in the queue."""
+        try:
+            while not self.command_queue.empty():
+                command, payload = self.command_queue.get_nowait()
+                if command == "ADD_TRIALS":
+                    self._handle_add_trials_command(payload)
+                # Add other command handlers here in the future
+                else:
+                    logger.warning(f"Unknown command received: {command}")
+        except queue.Empty:
+            return # Should not happen, but for safety
 
     def update_adaptive_policy(self, new_scheduler: AdaptiveScheduler) -> None:
         """Safely swaps the adaptive scheduler mid-run.
@@ -218,6 +239,9 @@ class SdeRuntimeEngine:
             self._pause_event.wait()  # This will block if the event is cleared (paused)
             if not self._is_running:  # Re-check after pause
                 break
+
+            # --- Process any pending commands from the orchestrator ---
+            self._process_command_queue()
 
             # --- Build a batch of work from the queue ---
             current_batch = []

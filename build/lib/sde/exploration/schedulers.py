@@ -7,39 +7,15 @@ from dataclasses import field
 from typing import Any
 from typing import Dict
 from typing import List
+from typing import Tuple
 
 import numpy as np
+from sde.challenges.utils import _generate_random_hyperparameters
 from sde.core.types import AlgorithmConfig
-from sde.core.types import Experiment
 from sde.core.types import Trial
 from sde.core.types import TrialStatus
 from sde.core.types import WorkUnit
 from sde.core.types import WorkUnitType
-
-
-def _generate_random_hyperparameters(parameter_space: Dict[str, Any]) -> Dict[str, Any]:
-    """Helper function to generate one set of random hyperparameters."""
-    hparams = {}
-    for p_name, p_def in parameter_space.items():
-        if isinstance(p_def, dict) and "min" in p_def and "max" in p_def:
-            if p_def.get("scale") == "log":
-                log_min = np.log10(p_def["min"])
-                log_max = np.log10(p_def["max"])
-                value = 10 ** random.uniform(log_min, log_max)
-            else:
-                value = random.uniform(p_def["min"], p_def["max"])
-
-            if p_def.get("type") == "int":
-                value = int(value)
-        elif isinstance(p_def, (list, tuple)):
-            if all(isinstance(x, (int, float)) for x in p_def) and len(p_def) == 2:
-                value = random.uniform(p_def[0], p_def[1])
-            else:
-                value = random.choice(p_def)
-        else:
-            value = p_def
-        hparams[p_name] = value
-    return hparams
 
 
 class AdaptiveScheduler(ABC):
@@ -55,12 +31,26 @@ class AdaptiveScheduler(ABC):
         ...
 
     @abstractmethod
-    def get_initial_work_units(self, experiment: Experiment) -> List[WorkUnit]:
+    def generate_work_units_for_new_trials(
+        self,
+        new_trials: List[Trial],
+        all_trials: Dict[str, Trial],
+        scheduler_state: Dict[str, Any],
+    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
+        """Creates the initial WorkUnits for a list of newly created trials."""
+        ...
+
+    @abstractmethod
+    def get_initial_work_units(
+        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
+    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
         """Returns the first batch of WorkUnits to start an experiment."""
         ...
 
     @abstractmethod
-    def rehydrate_work_units(self, experiment: Experiment) -> List[WorkUnit]:
+    def rehydrate_work_units(
+        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
+    ) -> List[WorkUnit]:
         """Creates work units for a loaded experiment to resume from its saved state."""
         ...
 
@@ -114,21 +104,37 @@ class SuccessiveHalvingScheduler(AdaptiveScheduler):
                 trial_counter += 1
         return trials
 
-    def get_initial_work_units(self, experiment: Experiment) -> List[WorkUnit]:
-        """Schedules the first epoch for all pending trials."""
+    def generate_work_units_for_new_trials(
+        self,
+        new_trials: List[Trial],
+        all_trials: Dict[str, Trial],
+        scheduler_state: Dict[str, Any],
+    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
+        """Schedules the first epoch for a given list of new trials."""
         work_units = []
-        for trial in experiment.trials.values():
+        for trial in new_trials:
             if trial.status == TrialStatus.PENDING:
                 trial.status = TrialStatus.ACTIVE
                 work_units.append(
                     WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)
                 )
-        return work_units
+        return work_units, scheduler_state
 
-    def rehydrate_work_units(self, experiment: Experiment) -> List[WorkUnit]:
+    def get_initial_work_units(
+        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
+    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
+        """Schedules the first epoch for all pending trials in the experiment."""
+        pending_trials = [t for t in trials.values() if t.status == TrialStatus.PENDING]
+        return self.generate_work_units_for_new_trials(
+            pending_trials, trials, scheduler_state
+        )
+
+    def rehydrate_work_units(
+        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
+    ) -> List[WorkUnit]:
         """For SHA, rehydration is simple: resume any trial that was active."""
         work_units = []
-        for trial in experiment.trials.values():
+        for trial in trials.values():
             if trial.status == TrialStatus.ACTIVE:
                 work_units.append(
                     WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)
@@ -264,10 +270,16 @@ class HyperbandScheduler(AdaptiveScheduler):
                 trial_counter += 1
         return trials
 
-    def get_initial_work_units(self, experiment: Experiment) -> List[WorkUnit]:
-        """Calculates brackets, assigns trials to them, saves state, and returns work."""
-        trials = experiment.trials
-        trial_pool = [t for t in trials.values() if t.status == TrialStatus.PENDING]
+    def generate_work_units_for_new_trials(
+        self,
+        new_trials: List[Trial],
+        all_trials: Dict[str, Trial],
+        scheduler_state: Dict[str, Any],
+    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
+        """Calculates brackets, assigns trials, and returns work and state to persist.
+        NOTE: This implementation of Hyperband expects all trials to be provided at once.
+        """
+        trial_pool = [t for t in new_trials if t.status == TrialStatus.PENDING]
 
         # 1. Calculate bracket configurations
         for s in range(self.s_max, -1, -1):
@@ -290,28 +302,35 @@ class HyperbandScheduler(AdaptiveScheduler):
             for trial in assigned_trials:
                 self.trial_to_bracket[trial.id] = bracket
 
-        # 3. Save state for resumption
-        # The state is the mapping of trial_id to its bracket's 's' value.
-        # Brackets can be deterministically recalculated from 's'.
+        # 3. Create state to persist
         state_to_persist = {
             "trial_to_bracket_s": {
                 tid: b.s for tid, b in self.trial_to_bracket.items()
             }
         }
-        experiment.scheduler_state = state_to_persist
 
         # 4. Create initial work units
         work_units = []
         for trial_id in self.trial_to_bracket.keys():
-            trials[trial_id].status = TrialStatus.ACTIVE
+            all_trials[trial_id].status = TrialStatus.ACTIVE
             work_units.append(
                 WorkUnit(trial_id=trial_id, type=WorkUnitType.TRAIN_EPOCH)
             )
-        return work_units
+        return work_units, state_to_persist
 
-    def rehydrate_work_units(self, experiment: Experiment) -> List[WorkUnit]:
+    def get_initial_work_units(
+        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
+    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
+        """Schedules the first epoch for all pending trials in the experiment."""
+        pending_trials = [t for t in trials.values() if t.status == TrialStatus.PENDING]
+        return self.generate_work_units_for_new_trials(
+            pending_trials, trials, scheduler_state
+        )
+
+    def rehydrate_work_units(
+        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
+    ) -> List[WorkUnit]:
         """Rebuilds internal state from the experiment and schedules work for active trials."""
-        scheduler_state = experiment.scheduler_state
         if not scheduler_state or "trial_to_bracket_s" not in scheduler_state:
             # Fallback for old save files or corrupted state
             return []
@@ -337,7 +356,7 @@ class HyperbandScheduler(AdaptiveScheduler):
 
         # 3. Schedule work for all trials that were active
         work_units = []
-        for trial in experiment.trials.values():
+        for trial in trials.values():
             if trial.status == TrialStatus.ACTIVE:
                 work_units.append(
                     WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)

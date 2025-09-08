@@ -307,19 +307,11 @@ class ExperimentOrchestrator:
         )
 
         if self.runtime_engine and self.runtime_engine._is_running:
-            self.runtime_engine.add_trials_live([new_trial])
-            scheduler = self.runtime_engine.adaptive_scheduler
-            work_units, new_state = scheduler.generate_work_units_for_new_trials(
-                [new_trial],
-                self.experiment.trials,
-                self.experiment.scheduler_state,
-            )
-            self.experiment.scheduler_state.update(new_state)
-            self.runtime_engine.add_work_units_live(work_units)
+            self.runtime_engine.post_command("ADD_TRIALS", {"trials": [new_trial]})
             self.log_message.emit(
                 {
                     "level": "INFO",
-                    "message": f"Scheduled {len(work_units)} new work units for spawned trial.",
+                    "message": f"Sent command to runtime engine to schedule work for trial {new_trial_id}.",
                 }
             )
 
@@ -391,24 +383,12 @@ class ExperimentOrchestrator:
             # 3. If the engine is live, schedule the work units for the new trials
             if self.runtime_engine and self.runtime_engine._is_running:
                 self.log_message.emit(
-                    {"level": "INFO", "message": "Engine is live. Scheduling work for new trials."}
+                    {
+                        "level": "INFO",
+                        "message": f"Engine is live. Posting command to schedule work for {len(new_trials)} trials.",
+                    }
                 )
-                # Add trials to the datastore
-                self.runtime_engine.add_trials_live(new_trials)
-                # Generate and add the work units
-                (
-                    work_units,
-                    new_state,
-                ) = scheduler.generate_work_units_for_new_trials(
-                    new_trials,
-                    self.experiment.trials,
-                    self.experiment.scheduler_state,
-                )
-                self.experiment.scheduler_state.update(new_state)
-                self.runtime_engine.add_work_units_live(work_units)
-                self.log_message.emit(
-                    {"level": "INFO", "message": f"Scheduled {len(work_units)} new work units."}
-                )
+                self.runtime_engine.post_command("ADD_TRIALS", {"trials": new_trials})
 
             return True
         except Exception as e:

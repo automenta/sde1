@@ -1,6 +1,8 @@
+import copy
 import logging
 import queue
 import threading
+from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Iterator
@@ -9,7 +11,6 @@ from typing import Optional
 from typing import Tuple
 
 from sde.core.types import ExecutionSettings
-from sde.core.types import Experiment
 from sde.core.types import Trial
 from sde.core.types import TrialStatus
 from sde.core.types import WorkUnit
@@ -29,29 +30,34 @@ class SdeRuntimeEngine:
 
     def __init__(
         self,
-        experiment: Experiment,
+        trials: List[Trial],
+        challenge: Dict[str, Any],
         adaptive_scheduler: AdaptiveScheduler,
         trial_updated_callback: Callable[[Dict], None],
         insights_callback: Callable[[List[Dict]], None],
         execution_settings: ExecutionSettings,
+        scheduler_state: Dict[str, Any],
         checkpoints_dir: str = "./checkpoints",
     ):
         """Initializes the SdeRuntimeEngine.
 
         Args:
-            experiment: The full Experiment object to run.
+            trials: A list of the initial trial objects. A deep copy is made to
+                    ensure the engine has isolated state.
+            challenge: The challenge definition dictionary.
             adaptive_scheduler: The policy for scheduling work and pruning trials.
             trial_updated_callback: A function to call when a trial's state is updated.
             insights_callback: A function to call when new insights are generated.
             execution_settings: The execution settings for the run.
+            scheduler_state: The persisted state from the scheduler (e.g., for Hyperband).
             checkpoints_dir: The directory to store model checkpoints.
 
         """
-        self.experiment = experiment
-        self.datastore = DataStore(list(experiment.trials.values()))
+        self.datastore = DataStore(copy.deepcopy(trials))
         self.adaptive_scheduler = adaptive_scheduler
         self.trial_updated_callback = trial_updated_callback
         self.insights_callback = insights_callback
+        self.scheduler_state = scheduler_state
         self.insight_engine = InsightEngine(
             self.datastore.get_all_trials(),
             primary_metric=self.adaptive_scheduler.metric,
@@ -59,7 +65,7 @@ class SdeRuntimeEngine:
         )
         self.compute_scheduler = ComputeScheduler(
             datastore=self.datastore,
-            dataset_name=experiment.challenge["name"],
+            dataset_name=challenge["name"],
             max_workers=execution_settings.num_workers,
             enable_checkpointing=execution_settings.enable_checkpointing,
             work_unit_timeout=execution_settings.work_unit_timeout_seconds,
@@ -69,9 +75,14 @@ class SdeRuntimeEngine:
         self._is_running = False  # Flag to signal the main loop to terminate.
         self._thread: Optional[threading.Thread] = None  # The main execution thread.
         self.work_queue = queue.PriorityQueue()  # Thread-safe queue for pending work.
+        self.command_queue = queue.Queue() # Thread-safe queue for commands
         self._work_counter = 0  # Tie-breaker for priority queue
         self._pause_event = threading.Event()  # Used to pause and resume the loop.
         self._cancelled_trials = set()  # A set of trial_ids to ignore.
+
+    def post_command(self, command: str, payload: Dict[str, Any]) -> None:
+        """Adds a command to the command queue for the engine to process."""
+        self.command_queue.put((command, payload))
 
     def _put_work_in_queue(self, work_unit: WorkUnit):
         """Adds a work unit to the priority queue with a tie-breaker."""
@@ -80,51 +91,64 @@ class SdeRuntimeEngine:
         self.work_queue.put((priority, self._work_counter, work_unit))
         self._work_counter += 1
 
-    def start(self, start_paused: bool = False) -> None:
-        """Starts the main execution loop in a background thread."""
-        if self._thread is None:
-            self._is_running = True
-            if not start_paused:
-                self._pause_event.set()  # Start in a "not paused" state
+    def start(self, start_paused: bool = False) -> Optional[Dict[str, Any]]:
+        """Starts the main execution loop in a background thread.
 
-            # --- Work Population ---
-            # Check if this is a fresh run or a resumed run
-            is_resumed_run = any(
-                t.status != TrialStatus.PENDING for t in self.datastore.get_all_trials().values()
+        Returns:
+            The updated scheduler state if it was a fresh run, which may need to
+            be persisted by the caller.
+        """
+        if self._thread is not None:
+            return None
+
+        self._is_running = True
+        if not start_paused:
+            self._pause_event.set()  # Start in a "not paused" state
+
+        updated_scheduler_state = None
+        all_trials = self.datastore.get_all_trials()
+        is_resumed_run = any(
+            t.status != TrialStatus.PENDING for t in all_trials.values()
+        )
+
+        if is_resumed_run:
+            logger.info("Resuming experiment. Rehydrating work queue...")
+            work_units = self.adaptive_scheduler.rehydrate_work_units(
+                all_trials, self.scheduler_state
             )
-
-            if is_resumed_run:
-                logger.info("Resuming experiment. Rehydrating work queue...")
-                work_units = self.adaptive_scheduler.rehydrate_work_units(
-                    self.experiment
+        else:
+            logger.info("Starting fresh experiment. Generating initial work units...")
+            work_units, updated_scheduler_state = (
+                self.adaptive_scheduler.get_initial_work_units(
+                    all_trials, self.scheduler_state
                 )
-            else:
-                logger.info("Starting fresh experiment. Generating initial work units...")
-                work_units = self.adaptive_scheduler.get_initial_work_units(
-                    self.experiment
-                )
+            )
+            self.scheduler_state = updated_scheduler_state
 
-            for work_unit in work_units:
-                self._put_work_in_queue(work_unit)
+        for work_unit in work_units:
+            self._put_work_in_queue(work_unit)
 
-            self.compute_scheduler.start()
-            self._thread = threading.Thread(target=self._execution_loop, daemon=True)
-            self._thread.start()
+        self.compute_scheduler.start()
+        self._thread = threading.Thread(target=self._execution_loop, daemon=True)
+        self._thread.start()
+        return updated_scheduler_state
 
     def stop(self) -> None:
         """Signals the execution loop to stop and cleans up."""
-        if self._is_running:
-            self._is_running = False
-            self._pause_event.set()  # Ensure loop isn't blocked on pause
+        if not self._is_running:
+            return
 
-            # Stop the compute scheduler first, which will shut down the process pool
-            self.compute_scheduler.stop()
+        self._is_running = False
+        self._pause_event.set()  # Ensure loop isn't blocked on pause
 
-            # Now, wait for the main execution loop thread to finish
-            if self._thread and self._thread.is_alive():
-                self._thread.join()  # Wait indefinitely for a clean exit
-            self._thread = None
-            logger.info("SdeRuntimeEngine has been cleanly shut down.")
+        # Stop the compute scheduler first, which will shut down the process pool
+        self.compute_scheduler.stop()
+
+        # Now, wait for the main execution loop thread to finish
+        if self._thread and self._thread.is_alive():
+            self._thread.join()  # Wait indefinitely for a clean exit
+        self._thread = None
+        logger.info("SdeRuntimeEngine has been cleanly shut down.")
 
     def pause(self) -> None:
         """Pauses the execution loop."""
@@ -148,36 +172,42 @@ class SdeRuntimeEngine:
         self._cancelled_trials.add(trial_id)
         self.compute_scheduler.cancel_work_for_trial(trial_id)
 
-    def add_trials_live(self, trials: List[Trial]) -> None:
-        """Injects new trials into the live datastore and generates work units for them,
-        adding them to the active work queue. This is thread-safe.
-        """
-        if not self._is_running:
-            logger.warning("Cannot add trials live, engine is not running.")
+    def _handle_add_trials_command(self, payload: Dict[str, Any]):
+        """Handles the 'ADD_TRIALS' command from the orchestrator."""
+        new_trials = payload.get("trials", [])
+        if not new_trials:
+            logger.warning("ADD_TRIALS command received with no trials in payload.")
             return
 
-        for trial in trials:
+        logger.info(f"Processing ADD_TRIALS command for {len(new_trials)} trial(s).")
+        # 1. Add trials to the datastore
+        for trial in new_trials:
             self.datastore.add_trial(trial)
-            logger.info(f"Added new trial {trial.id} to the live datastore.")
 
-        # Generate work units for the new trials.
-        # The schedulers' get_initial_work_units methods find all PENDING trials
-        # and create a TRAIN_EPOCH work unit. We can replicate that simple logic
-        # here for just the new trials.
-        new_work_units = []
-        for trial in trials:
-            if trial.status == TrialStatus.PENDING:
-                trial.status = TrialStatus.ACTIVE
-                new_work_units.append(
-                    WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)
-                )
+        # 2. Generate and schedule work units for them
+        work_units, new_state = self.adaptive_scheduler.generate_work_units_for_new_trials(
+            new_trials, self.datastore.get_all_trials(), self.scheduler_state
+        )
+        self.scheduler_state.update(new_state)
 
-        for work_unit in new_work_units:
+        for work_unit in work_units:
             self._put_work_in_queue(work_unit)
 
-        logger.info(
-            f"Added {len(new_work_units)} new work units to the live queue."
-        )
+        logger.info(f"Scheduled {len(work_units)} new work units for added trials.")
+
+
+    def _process_command_queue(self):
+        """Processes all pending commands in the queue."""
+        try:
+            while not self.command_queue.empty():
+                command, payload = self.command_queue.get_nowait()
+                if command == "ADD_TRIALS":
+                    self._handle_add_trials_command(payload)
+                # Add other command handlers here in the future
+                else:
+                    logger.warning(f"Unknown command received: {command}")
+        except queue.Empty:
+            return # Should not happen, but for safety
 
     def update_adaptive_policy(self, new_scheduler: AdaptiveScheduler) -> None:
         """Safely swaps the adaptive scheduler mid-run.
@@ -209,6 +239,9 @@ class SdeRuntimeEngine:
             self._pause_event.wait()  # This will block if the event is cleared (paused)
             if not self._is_running:  # Re-check after pause
                 break
+
+            # --- Process any pending commands from the orchestrator ---
+            self._process_command_queue()
 
             # --- Build a batch of work from the queue ---
             current_batch = []
@@ -308,6 +341,11 @@ class SdeRuntimeEngine:
         # Always call the UI callback to update the trial's status, even on failure.
         if self.trial_updated_callback:
             self.trial_updated_callback(updated_trial.to_dict())
+
+    def get_all_trial_data(self) -> List[Dict[str, Any]]:
+        """Returns a serialized list of all trials in the datastore. This is thread-safe."""
+        trials = self.datastore.get_all_trials().values()
+        return [trial.to_dict() for trial in trials]
 
     def submit_work(
         self, work_units: List[WorkUnit]

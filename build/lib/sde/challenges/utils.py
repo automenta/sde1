@@ -1,6 +1,35 @@
+import random
+from typing import Any
+from typing import Dict
+
 import numpy as np
 from torch.utils.data import DataLoader
 from torch.utils.data import Subset
+
+
+def _generate_random_hyperparameters(parameter_space: Dict[str, Any]) -> Dict[str, Any]:
+    """Helper function to generate one set of random hyperparameters."""
+    hparams = {}
+    for p_name, p_def in parameter_space.items():
+        if isinstance(p_def, dict) and "min" in p_def and "max" in p_def:
+            if p_def.get("scale") == "log":
+                log_min = np.log10(p_def["min"])
+                log_max = np.log10(p_def["max"])
+                value = 10 ** random.uniform(log_min, log_max)
+            else:
+                value = random.uniform(p_def["min"], p_def["max"])
+
+            if p_def.get("type") == "int":
+                value = int(value)
+        elif isinstance(p_def, (list, tuple)):
+            if all(isinstance(x, (int, float)) for x in p_def) and len(p_def) == 2:
+                value = random.uniform(p_def[0], p_def[1])
+            else:
+                value = random.choice(p_def)
+        else:
+            value = p_def
+        hparams[p_name] = value
+    return hparams
 
 
 def create_train_val_dataloaders(

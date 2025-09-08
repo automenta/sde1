@@ -129,7 +129,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         orchestrator.experiment.trials = {'t1': source_trial}
         orchestrator.dispatch(ActionType.SPAWN_SIMILAR_TRIAL, {"source_trial_id": "t1"})
         new_trial = next(t for t in orchestrator.experiment.trials.values() if t.id != 't1')
-        orchestrator.runtime_engine.add_trials_live.assert_called_once_with([new_trial])
+        orchestrator.runtime_engine.post_command.assert_called_once_with("ADD_TRIALS", {"trials": [new_trial]})
 
     @patch('sde.engine.orchestrator.SdeRuntimeEngine')
     def test_dispatch_start_run(self, MockSdeRuntimeEngine, mock_emit):
@@ -180,8 +180,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
         newly_added_trials = [t for t in orchestrator.experiment.trials.values() if t.algorithm_name == "TestAlgo2"]
         self.assertGreater(len(newly_added_trials), 0)
 
-        mock_engine_instance.add_trials_live.assert_called_once()
-        self.assertEqual(mock_engine_instance.add_trials_live.call_args[0][0], newly_added_trials)
+        mock_engine_instance.post_command.assert_called_once_with("ADD_TRIALS", {"trials": newly_added_trials})
 
     @patch('sde.engine.orchestrator.SdeRuntimeEngine')
     def test_pause_and_resume_run(self, MockSdeRuntimeEngine, mock_emit):
@@ -253,7 +252,8 @@ class TestExperimentOrchestrator(unittest.TestCase):
         self.assertEqual(orchestrator.experiment.algorithms['algo1'].parameter_space, new_space)
         mock_scheduler.generate_initial_trials.assert_called_once()
         self.assertEqual(mock_scheduler.generate_initial_trials.call_args[0][0][0].parameter_space, new_space)
-        mock_engine_instance.add_trials_live.assert_called_once()
+        newly_added_trials = mock_scheduler.generate_initial_trials.return_value
+        mock_engine_instance.post_command.assert_called_once_with("ADD_TRIALS", {"trials": newly_added_trials})
 
     def test_dispatch_invalid_action(self, mock_emit):
         """Test that invalid actions are logged and ignored."""
