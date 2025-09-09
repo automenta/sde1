@@ -15,6 +15,7 @@ from ..core.types import ExperimentStatus
 from ..core.types import Trial
 from ..core.types import TrialStatus
 from .action_validator import ActionValidator
+from .datastore import DataStore
 from .factory import SchedulerFactory
 from .runtime import SdeRuntimeEngine
 from ..events import Signal
@@ -42,6 +43,7 @@ class ExperimentOrchestrator:
     def __init__(self):
         self.experiment = Experiment()
         self.runtime_engine = None  # Will be initialized on START_RUN
+        self.datastore = None  # Will be initialized on START_RUN
         self._lock = threading.RLock()
         self.log_message.emit(
             {"level": "INFO", "message": "Orchestrator initialized in DEFINING state."}
@@ -302,6 +304,8 @@ class ExperimentOrchestrator:
             status=TrialStatus.PENDING,
         )
         self.experiment.trials[new_trial_id] = new_trial
+        if self.datastore:
+            self.datastore.add_trial(new_trial)
         self.log_message.emit(
             {
                 "level": "INFO",
@@ -350,6 +354,8 @@ class ExperimentOrchestrator:
             if not success:
                 self.experiment.status = ExperimentStatus.DEFINING
                 return
+
+        self.datastore = DataStore(list(self.experiment.trials.values()))
         self._initialize_and_start_runtime()
 
     def _generate_and_add_trials(
@@ -386,6 +392,8 @@ class ExperimentOrchestrator:
             )
             for trial in new_trials:
                 self.experiment.trials[trial.id] = trial
+                if self.datastore:
+                    self.datastore.add_trial(trial)
             self.log_message.emit(
                 {"level": "INFO", "message": f"Created {len(new_trials)} new trial objects."}
             )
@@ -416,6 +424,11 @@ class ExperimentOrchestrator:
                 {"level": "ERROR", "message": "Cannot start runtime without execution settings."}
             )
             return
+        if not self.datastore:
+            self.log_message.emit(
+                {"level": "ERROR", "message": "Cannot start runtime without a datastore."}
+            )
+            return
 
         try:
             scheduler = SchedulerFactory.create_scheduler(
@@ -425,7 +438,7 @@ class ExperimentOrchestrator:
             )
 
             self.runtime_engine = SdeRuntimeEngine(
-                trials=list(self.experiment.trials.values()),
+                datastore=self.datastore,
                 challenge=self.experiment.challenge,
                 adaptive_scheduler=scheduler,
                 trial_updated_callback=self.on_trial_updated,
@@ -464,7 +477,11 @@ class ExperimentOrchestrator:
             if not trial_id:
                 logger.warning("Orchestrator received update without a trial_id.")
                 return
-            # Only update if the trial still exists in our master list
+
+            # The source of truth for trial state is now the datastore, which is
+            # updated by the runtime engine. The orchestrator's experiment.trials
+            # dict is a reflection of that for serialization and UI purposes.
+            # This callback just ensures that reflection stays in sync.
             if trial_id in self.experiment.trials:
                 updated_trial = Trial.from_dict(trial_data)
                 self.experiment.trials[updated_trial.id] = updated_trial
@@ -480,28 +497,11 @@ class ExperimentOrchestrator:
                 )
         self.emit_state_change()
 
-    def _sync_state_from_runtime(self) -> None:
-        """Requests the latest trial states from the runtime and updates the main experiment object."""
-        if not self.runtime_engine:
-            return
-
-        self.log_message.emit(
-            {"level": "DEBUG", "message": "Syncing state from runtime engine..."}
-        )
-        latest_trial_dicts = self.runtime_engine.get_all_trial_data()
-
-        # This is a full replacement of the trials dict.
-        self.experiment.trials = {
-            trial_dict["id"]: Trial.from_dict(trial_dict)
-            for trial_dict in latest_trial_dicts
-        }
-        self.log_message.emit({"level": "DEBUG", "message": "State sync complete."})
-
     def handle_pause_run(self, payload: Dict[str, Any]) -> None:
         """Pauses the current experiment run."""
         if self.runtime_engine:
             self.runtime_engine.pause()
-            self._sync_state_from_runtime()  # Sync state after pausing
+            # No longer need to sync state, as the datastore is the single source of truth
             self.experiment.status = ExperimentStatus.PAUSED
             self.log_message.emit({"level": "INFO", "message": "Experiment paused."})
 
@@ -546,12 +546,12 @@ class ExperimentOrchestrator:
         was_running = False
         try:
             with self._lock:
-                # If the run is active, pause and sync state first to ensure consistency
+                # If the run is active, pause it to ensure a consistent state for saving.
+                # No sync is needed because the orchestrator's state is the source of truth.
                 was_running = self.experiment.status == ExperimentStatus.RUNNING
                 if was_running:
                     self.log_message.emit({"level": "INFO", "message": "Pausing run for consistent save..."})
                     self.runtime_engine.pause()
-                    self._sync_state_from_runtime()
                     self.experiment.status = ExperimentStatus.PAUSED
                     self.emit_state_change()
 
@@ -600,26 +600,41 @@ class ExperimentOrchestrator:
 
             with self._lock:
                 self.experiment = loaded_experiment
-                self.runtime_engine = None # Ensure old engine is gone
-                self.log_message.emit({"level": "INFO", "message": f"Loaded from {filepath}."})
+                self.runtime_engine = None  # Ensure old engine is gone
+                self.datastore = None  # Reset datastore
+                self.log_message.emit(
+                    {"level": "INFO", "message": f"Loaded from {filepath}."}
+                )
 
                 if self.experiment.status == ExperimentStatus.PAUSED:
-                    self.log_message.emit({"level": "INFO", "message": "Restoring paused experiment..."})
+                    self.log_message.emit(
+                        {"level": "INFO", "message": "Restoring paused experiment..."}
+                    )
                     # This will create the engine, but it will start in a paused state
+                    self.datastore = DataStore(list(self.experiment.trials.values()))
                     self._initialize_and_start_runtime(start_paused=True)
                     self.experiment.status = ExperimentStatus.PAUSED
-                    self.log_message.emit({"level": "INFO", "message": "Engine ready. Press 'Resume'."})
+                    self.log_message.emit(
+                        {"level": "INFO", "message": "Engine ready. Press 'Resume'."}
+                    )
                 else:
-                    self.log_message.emit({"level": "INFO", "message": f"Loaded in '{self.experiment.status.value}' state."})
+                    self.log_message.emit(
+                        {
+                            "level": "INFO",
+                            "message": f"Loaded in '{self.experiment.status.value}' state.",
+                        }
+                    )
 
                 self.emit_state_change()
 
         except Exception as e:
             tb = traceback.format_exc()
-            self.log_message.emit({"level": "ERROR", "message": f"Load failed: {e}\n{tb}"})
+            self.log_message.emit(
+                {"level": "ERROR", "message": f"Load failed: {e}\n{tb}"}
+            )
             logger.error(f"Load failed: {tb}")
             with self._lock:
-                self.experiment = Experiment() # Reset to a clean state
+                self.experiment = Experiment()  # Reset to a clean state
                 self.emit_state_change()
         finally:
             self.operation_finished.emit("Load operation complete.")

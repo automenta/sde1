@@ -7,6 +7,7 @@ from sde.core.types import ExecutionSettings
 from sde.core.types import TrialStatus
 from sde.core.types import WorkUnit
 from sde.core.types import WorkUnitType
+from sde.engine.datastore import DataStore
 from sde.engine.runtime import SdeRuntimeEngine
 
 
@@ -32,8 +33,9 @@ class TestSdeRuntimeEngine(unittest.TestCase):
 
         # We need to patch the ComputeScheduler as it tries to create a process pool
         with patch('sde.engine.runtime.ComputeScheduler') as MockComputeScheduler:
+            datastore = DataStore(list(self.experiment.trials.values()))
             self.runtime_engine = SdeRuntimeEngine(
-                trials=list(self.experiment.trials.values()),
+                datastore=datastore,
                 challenge=self.experiment.challenge,
                 adaptive_scheduler=self.mock_adaptive_scheduler,
                 trial_updated_callback=self.mock_trial_updated_callback,

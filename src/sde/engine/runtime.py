@@ -30,7 +30,7 @@ class SdeRuntimeEngine:
 
     def __init__(
         self,
-        trials: List[Trial],
+        datastore: DataStore,
         challenge: Dict[str, Any],
         adaptive_scheduler: AdaptiveScheduler,
         trial_updated_callback: Callable[[Dict], None],
@@ -41,8 +41,7 @@ class SdeRuntimeEngine:
         """Initializes the SdeRuntimeEngine.
 
         Args:
-            trials: A list of the initial trial objects. A deep copy is made to
-                    ensure the engine has isolated state.
+            datastore: The central datastore for all trial data.
             challenge: The challenge definition dictionary.
             adaptive_scheduler: The policy for scheduling work and pruning trials.
             trial_updated_callback: A function to call when a trial's state is updated.
@@ -51,7 +50,7 @@ class SdeRuntimeEngine:
             scheduler_state: The persisted state from the scheduler (e.g., for Hyperband).
 
         """
-        self.datastore = DataStore(copy.deepcopy(trials))
+        self.datastore = datastore
         self.adaptive_scheduler = adaptive_scheduler
         self.trial_updated_callback = trial_updated_callback
         self.insights_callback = insights_callback
@@ -171,18 +170,20 @@ class SdeRuntimeEngine:
         self.compute_scheduler.cancel_work_for_trial(trial_id)
 
     def _handle_add_trials_command(self, payload: Dict[str, Any]):
-        """Handles the 'ADD_TRIALS' command from the orchestrator."""
+        """Handles the 'ADD_TRIALS' command from the orchestrator.
+
+        This command is now only responsible for scheduling work for trials that
+        have already been added to the central datastore by the orchestrator.
+        """
         new_trials = payload.get("trials", [])
         if not new_trials:
             logger.warning("ADD_TRIALS command received with no trials in payload.")
             return
 
         logger.info(f"Processing ADD_TRIALS command for {len(new_trials)} trial(s).")
-        # 1. Add trials to the datastore
-        for trial in new_trials:
-            self.datastore.add_trial(trial)
 
-        # 2. Generate and schedule work units for them
+        # The orchestrator is now responsible for adding trials to the datastore.
+        # This command just needs to schedule the work units.
         work_units, new_state = self.adaptive_scheduler.generate_work_units_for_new_trials(
             new_trials, self.datastore.get_all_trials(), self.scheduler_state
         )
@@ -339,11 +340,6 @@ class SdeRuntimeEngine:
         # Always call the UI callback to update the trial's status, even on failure.
         if self.trial_updated_callback:
             self.trial_updated_callback(updated_trial.to_dict())
-
-    def get_all_trial_data(self) -> List[Dict[str, Any]]:
-        """Returns a serialized list of all trials in the datastore. This is thread-safe."""
-        trials = self.datastore.get_all_trials().values()
-        return [trial.to_dict() for trial in trials]
 
     def submit_work(
         self, work_units: List[WorkUnit]

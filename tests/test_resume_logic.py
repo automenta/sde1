@@ -2,6 +2,7 @@ import unittest
 from sde.core.types import Experiment, Trial, TrialStatus, AlgorithmConfig, WorkUnitType, ExecutionSettings
 from sde.exploration.schedulers import SuccessiveHalvingScheduler
 from sde.engine.runtime import SdeRuntimeEngine
+from sde.engine.datastore import DataStore
 
 class TestResumeLogic(unittest.TestCase):
     def test_resume_from_saved_state(self):
@@ -32,8 +33,9 @@ class TestResumeLogic(unittest.TestCase):
 
         # 4. Create the Runtime Engine
         # Callbacks can be dummy lambdas for this test
+        datastore = DataStore(list(experiment.trials.values()))
         runtime_engine = SdeRuntimeEngine(
-            trials=list(experiment.trials.values()),
+            datastore=datastore,
             challenge=experiment.challenge,
             adaptive_scheduler=scheduler,
             trial_updated_callback=lambda x: None,
