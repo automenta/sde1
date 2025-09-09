@@ -116,10 +116,36 @@ class ResultsPane(QWidget):
 
         # --- Bottom Pane (Table, Insights, Log) ---
         bottom_pane = QWidget()
-        bottom_layout = QHBoxLayout(bottom_pane)
+        bottom_layout = QVBoxLayout(bottom_pane) # Changed to QVBoxLayout
 
+        # --- Filter Controls ---
+        filter_widget = QWidget()
+        filter_layout = QHBoxLayout(filter_widget)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.filter_status_combo = QComboBox()
+        self.filter_status_combo.addItems(["All Statuses", "ACTIVE", "PRUNED", "COMPLETED", "PENDING"])
+        self.filter_status_combo.setToolTip("Filter trials by their status.")
+
+        self.filter_text_input = QLineEdit()
+        self.filter_text_input.setPlaceholderText("Filter by Trial ID or Algorithm Name...")
+        self.filter_text_input.setClearButtonEnabled(True)
+
+        filter_layout.addWidget(QLabel("Filter by:"))
+        filter_layout.addWidget(self.filter_status_combo)
+        filter_layout.addWidget(self.filter_text_input, 1) # Stretch the text input
+
+        # --- Trials Table ---
         self.trials_table = QTableWidget()
         self.setup_table()
+
+        # Add filter controls and table to a container
+        table_container = QWidget()
+        table_layout = QVBoxLayout(table_container)
+        table_layout.addWidget(filter_widget)
+        table_layout.addWidget(self.trials_table)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+
 
         right_bottom_splitter = QSplitter(Qt.Orientation.Vertical)
 
@@ -159,11 +185,12 @@ class ResultsPane(QWidget):
 
         # Bottom Splitter
         bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
-        bottom_splitter.addWidget(self.trials_table)
+        bottom_splitter.addWidget(table_container)
         bottom_splitter.addWidget(right_bottom_splitter)
         bottom_splitter.setSizes([750, 450])
         bottom_layout.addWidget(bottom_splitter)
-        bottom_pane.setLayout(bottom_layout)
+        # This was incorrect, bottom_layout is already on bottom_pane
+        # bottom_pane.setLayout(bottom_layout)
 
         splitter.addWidget(plot_container)
         splitter.addWidget(bottom_pane)
@@ -178,6 +205,10 @@ class ResultsPane(QWidget):
         self.refresh_button.clicked.connect(self.refresh_requested)
         self.trials_table.customContextMenuRequested.connect(self._show_trial_context_menu)
         self.metric_combo.currentIndexChanged.connect(self._on_metric_changed)
+        self.filter_status_combo.currentIndexChanged.connect(self._update_trial_filter)
+        self.filter_text_input.textChanged.connect(self._update_trial_filter)
+        if self.legend:
+            self.legend.itemClicked.connect(self._on_legend_item_clicked)
 
 
     # --- Public Methods for Updating the View ---
@@ -197,6 +228,7 @@ class ResultsPane(QWidget):
         self.plot_widget.setLabel("bottom", "Epoch", color="k", **{"font-size": "12pt"})
         self.plot_widget.showGrid(x=True, y=True)
         self.legend = self.plot_widget.addLegend()
+        self.plot_curve_visibility = {} # trial_id -> bool
 
     def setup_table(self):
         self.trials_table.setColumnCount(7)
@@ -234,6 +266,32 @@ class ResultsPane(QWidget):
             QAbstractItemView.SelectionMode.SingleSelection
         )
 
+    def _update_trial_filter(self):
+        """Filters the trials table based on the status combo box and text input."""
+        status_filter = self.filter_status_combo.currentText()
+        text_filter = self.filter_text_input.text().lower()
+
+        for row in range(self.trials_table.rowCount()):
+            # Column indices: 0 = Trial ID, 1 = Algorithm, 2 = Status
+            trial_id_item = self.trials_table.item(row, 0)
+            algorithm_item = self.trials_table.item(row, 1)
+            status_item = self.trials_table.item(row, 2)
+
+            if not all([trial_id_item, algorithm_item, status_item]):
+                continue
+
+            # Check status filter
+            status_match = (status_filter == "All Statuses" or status_item.text() == status_filter)
+
+            # Check text filter
+            text_match = (
+                text_filter in trial_id_item.text().lower() or
+                text_filter in algorithm_item.text().lower()
+            )
+
+            # Show or hide the row
+            self.trials_table.setRowHidden(row, not (status_match and text_match))
+
     def update_trials_and_plots(self, view_model: ExperimentViewModel):
         """Updates the trials table and plot widget from the ViewModel."""
         # Use the combo box's current selection as the metric to display
@@ -261,6 +319,8 @@ class ResultsPane(QWidget):
                     except ValueError:
                         self.plot_curve_map[trial_id].clear()
 
+        self._update_trial_filter()
+
     def _update_trial_ui(self, ui_trial, metric_name: str):
         """Updates or creates a row in the trials table for a given UITrial."""
         trial_id = ui_trial.id
@@ -274,6 +334,7 @@ class ResultsPane(QWidget):
             row_position = self.trials_table.rowCount()
             self.trials_table.insertRow(row_position)
             self.trial_row_map[trial_id] = row_position
+            self.plot_curve_visibility[trial_id] = True # Default to visible
 
             name = f"{ui_trial.algorithm_name} ({trial_id[:6]})"
             pen = ui_trial.pen
@@ -282,8 +343,8 @@ class ResultsPane(QWidget):
             )
 
         row = self.trial_row_map[trial_id]
-        self.plot_curve_map[trial_id].setPen(ui_trial.pen)
         background_color = ui_trial.row_background_color
+        self._apply_plot_curve_styles()
 
         # Use a mix of regular and numeric items for appropriate sorting
         trial_id_item = QTableWidgetItem(trial_id)
@@ -344,23 +405,10 @@ class ResultsPane(QWidget):
     insightBorderColor = pyqtProperty(QColor, fset=_set_insight_border_color)
 
     def update_plot_highlight(self, highlight_ids: set, view_model: ExperimentViewModel):
-        """Highlights a specific set of trials on the plot."""
-        for trial_id, curve in self.plot_curve_map.items():
-            ui_trial = view_model.trials.get(trial_id)
-            if not ui_trial:
-                continue
-
-            pen = ui_trial.pen
-            color = pen.color()
-
-            if trial_id in highlight_ids:
-                color.setAlpha(255)
-                curve.setPen(pg.mkPen(color=color, width=4))
-                curve.setZValue(100)
-            else:
-                color.setAlpha(30)
-                curve.setPen(pg.mkPen(color=color, width=1))
-                curve.setZValue(0)
+        """Highlights a specific set of trials on the plot by re-applying all styles."""
+        # The new logic is now centralized in _apply_plot_curve_styles.
+        # We just need to trigger it. The highlight_ids are read from self.selected_insight_item.
+        self._apply_plot_curve_styles()
 
     def append_log_message(self, log_data: dict):
         """Appends a structured log message to the text edit with color-coding."""
@@ -442,13 +490,81 @@ class ResultsPane(QWidget):
         highlight_ids = set(item.insight.trial_ids)
         self.insight_selected.emit(highlight_ids)
 
+        # --- Insight Focus Mode ---
+        if self.selected_insight_item:
+            # When an insight is selected, filter the table to show only relevant trials
+            short_ids = [tid[:8] for tid in highlight_ids]
+            filter_text = "|".join(short_ids)
+            self.filter_text_input.setText(filter_text)
+            self.filter_status_combo.setCurrentText("All Statuses")
+        else:
+            # When selection is cleared, clear the filter
+            self.filter_text_input.clear()
+
         # Also select the rows in the table
         self.trials_table.clearSelection()
         self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
-        for trial_id, row in self.trial_row_map.items():
-            if trial_id in highlight_ids:
-                self.trials_table.selectRow(row)
+        for row in range(self.trials_table.rowCount()):
+            # Check if row is visible before selecting
+            if not self.trials_table.isRowHidden(row):
+                trial_id_item = self.trials_table.item(row, 0)
+                if trial_id_item and any(tid.startswith(trial_id_item.text()) for tid in highlight_ids):
+                     self.trials_table.selectRow(row)
         self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+
+    def _on_legend_item_clicked(self, curve_item, label_item):
+        """Toggles the visibility of a plot curve when its legend item is clicked."""
+        # Find the trial_id associated with the clicked curve
+        clicked_trial_id = None
+        for trial_id, curve in self.plot_curve_map.items():
+            if curve is curve_item:
+                clicked_trial_id = trial_id
+                break
+
+        if clicked_trial_id:
+            # Toggle visibility state
+            self.plot_curve_visibility[clicked_trial_id] = not self.plot_curve_visibility.get(clicked_trial_id, True)
+            self._apply_plot_curve_styles()
+
+    def _apply_plot_curve_styles(self):
+        """Applies visibility and highlight styles to all plot curves."""
+        if not self.view_model:
+            return
+
+        # Get the set of highlighted trials from the currently selected insight, if any
+        highlight_ids = set()
+        if self.selected_insight_item:
+            highlight_ids = set(self.selected_insight_item.insight.trial_ids)
+
+        for trial_id, curve in self.plot_curve_map.items():
+            ui_trial = self.view_model.trials.get(trial_id)
+            if not ui_trial:
+                continue
+
+            pen = ui_trial.pen
+            color = pen.color()
+            is_visible = self.plot_curve_visibility.get(trial_id, True)
+            is_highlighted = trial_id in highlight_ids
+
+            if is_highlighted:
+                color.setAlpha(255)
+                curve.setPen(pg.mkPen(color=color, width=4))
+                curve.setZValue(100)
+            elif is_visible:
+                color.setAlpha(200) # Slightly less opaque than highlighted
+                curve.setPen(pg.mkPen(color=color, width=2))
+                curve.setZValue(0)
+            else:
+                color.setAlpha(15) # Barely visible
+                curve.setPen(pg.mkPen(color=color, width=1, style=Qt.PenStyle.DotLine))
+                curve.setZValue(-100)
+
+            # Update legend label color
+            for _, label in self.legend.items:
+                if label.text == curve.name():
+                    label.setText(label.text, color='k' if is_visible else 'gray')
+                    break
+
 
     def _on_metric_changed(self):
         """Handles the metric selection change by replotting all data."""

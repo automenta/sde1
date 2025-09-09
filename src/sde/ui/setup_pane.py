@@ -74,6 +74,16 @@ class SetupPane(QWidget):
         setup_layout.addWidget(self.model_search_input)
         setup_layout.addWidget(self.model_list)
 
+        self.model_details_group = QGroupBox("Model Details")
+        model_details_layout = QVBoxLayout(self.model_details_group)
+        self.model_details_text = QTextEdit()
+        self.model_details_text.setReadOnly(True)
+        self.model_details_text.setPlaceholderText("Click on a model to see its details.")
+        model_details_layout.addWidget(self.model_details_text)
+        self.model_details_group.setVisible(False) # Initially hidden
+        setup_layout.addWidget(self.model_details_group)
+
+
         # --- Compute Settings Group ---
         self.settings_group = QGroupBox("2. Compute Settings")
         settings_form_layout = QFormLayout(self.settings_group)
@@ -88,7 +98,10 @@ class SetupPane(QWidget):
             max_workers = 4
         self.worker_count_spinbox.setMaximum(max_workers)
         self.worker_count_spinbox.setValue(max_workers)
-        self.worker_count_spinbox.setToolTip("Number of parallel processes for computation.")
+        self.worker_count_spinbox.setToolTip(
+            "Number of parallel CPU workers to run computation tasks (like training or evaluation).\n"
+            "Set this to the number of physical CPU cores for maximum throughput."
+        )
         settings_form_layout.addRow("Parallel Workers:", self.worker_count_spinbox)
 
         # Timeout per Work Unit
@@ -97,8 +110,9 @@ class SetupPane(QWidget):
         self.timeout_spinbox.setMaximum(3600)
         self.timeout_spinbox.setValue(300)
         self.timeout_spinbox.setToolTip(
-            "Maximum time (in seconds) to wait for a single work unit (e.g., one epoch)\n"
-            "before considering it failed. Prevents the engine from freezing on a stuck trial."
+            "Maximum time (in seconds) allowed for a single Work Unit (e.g., one training epoch).\n"
+            "If a unit exceeds this, it's marked as failed.\n"
+            "This prevents a single stalled trial from halting the entire experiment."
         )
         settings_form_layout.addRow("Work Unit Timeout (s):", self.timeout_spinbox)
         self.checkpoint_checkbox = QCheckBox("Enable Checkpointing")
@@ -114,7 +128,10 @@ class SetupPane(QWidget):
         self.trials_per_algo_spinbox.setMinimum(1)
         self.trials_per_algo_spinbox.setMaximum(1000)
         self.trials_per_algo_spinbox.setValue(10)
-        self.trials_per_algo_spinbox.setToolTip("Number of random hyperparameter sets to generate per algorithm.")
+        self.trials_per_algo_spinbox.setToolTip(
+            "For 'Simple' mode, this is the number of random hyperparameter configurations to generate for each selected algorithm.\n"
+            "More trials increase the chance of finding a good configuration, but require more computation."
+        )
         run_config_form_layout.addRow("Run Mode:", self.run_mode_combo)
         run_config_form_layout.addRow("Trials per Algorithm:", self.trials_per_algo_spinbox)
 
@@ -195,6 +212,7 @@ class SetupPane(QWidget):
         """Connects internal UI signals to the pane's public signals."""
         self.dataset_combo.currentIndexChanged.connect(self._on_dataset_changed)
         self.model_search_input.textChanged.connect(self._update_model_filter)
+        self.model_list.itemSelectionChanged.connect(self._on_model_selection_changed)
         self.start_experiment_button.clicked.connect(self._on_start_experiment)
         self.add_models_button.clicked.connect(self.add_models_requested)
         self.pause_button.clicked.connect(self.pause_run_requested)
@@ -212,6 +230,48 @@ class SetupPane(QWidget):
         self.update_model_list(dataset_name)
         # Clear the filter when the dataset changes
         self.model_search_input.clear()
+        self._on_model_selection_changed() # Clear details pane
+
+    def _on_model_selection_changed(self):
+        """Updates the model details view when a model is selected."""
+        selected_items = self.model_list.selectedItems()
+        if not selected_items:
+            self.model_details_group.setVisible(False)
+            self.model_details_text.clear()
+            return
+
+        # For simplicity, show details for the first selected item
+        model_name = selected_items[0].text()
+        model_def = AVAILABLE_MODELS.get(model_name)
+
+        if not model_def:
+            self.model_details_text.setText(f"Could not find details for '{model_name}'.")
+            self.model_details_group.setVisible(True)
+            return
+
+        # Build an HTML string for display
+        details_html = f"<h3>{model_def.get('name', model_name)}</h3>"
+        details_html += f"<p><i>{model_def.get('description', 'No description available.')}</i></p>"
+        details_html += f"<b>Architecture Type:</b> {model_def.get('architecture_type', 'N/A')}<br>"
+
+        schema = model_def.get('hyperparameter_schema', {})
+        if schema:
+            details_html += "<b>Hyperparameters:</b><ul>"
+            for group, params in schema.items():
+                for param_name, properties in params.items():
+                    details_html += f"<li><b>{param_name}</b>: "
+                    if 'values' in properties:
+                        details_html += f"Categorical {properties['values']}"
+                    else:
+                        scale = f" ({properties.get('scale', 'linear')} scale)"
+                        details_html += f"Range [{properties.get('min', 'N/A')}, {properties.get('max', 'N/A')}]"
+                        details_html += f"<small>{scale}</small>"
+                    details_html += "</li>"
+            details_html += "</ul>"
+
+        self.model_details_text.setHtml(details_html)
+        self.model_details_group.setVisible(True)
+
 
     def _update_model_filter(self):
         """Filters the model list based on the search input text."""

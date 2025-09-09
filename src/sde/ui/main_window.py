@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6.QtWidgets import QInputDialog
 from PyQt6.QtWidgets import QMainWindow
 from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QProgressDialog
 from PyQt6.QtWidgets import QWidget
 
 from ..challenges import AVAILABLE_DATASETS
@@ -58,11 +59,21 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.setup_pane)
         main_layout.addWidget(self.results_pane, 1)
 
+        # --- Progress Dialog for Long Operations ---
+        self.progress_dialog = QProgressDialog(self)
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setAutoClose(True)
+        self.progress_dialog.setAutoReset(True)
+        self.progress_dialog.setMinimum(0)
+        self.progress_dialog.setMaximum(0) # Makes it an indeterminate progress bar
+
     def _connect_signals(self):
         """Connects all UI signals to their corresponding slots."""
         # Backend signals -> Main Window
         self.orchestrator.log_message.connect(self.append_log_message)
         self.orchestrator.state_changed.connect(self.on_state_changed)
+        self.orchestrator.operation_started.connect(self.on_operation_started)
+        self.orchestrator.operation_finished.connect(self.on_operation_finished)
 
         # Setup Pane -> Main Window
         self.setup_pane.start_experiment_requested.connect(self.start_experiment)
@@ -288,34 +299,34 @@ class MainWindow(QMainWindow):
         """Dispatches an action to resume a paused experiment run."""
         self.orchestrator.dispatch(ActionType.RESUME_RUN, {})
 
+    def on_operation_started(self, message: str):
+        """Shows the modal progress dialog when a long operation starts."""
+        self.progress_dialog.setLabelText(message)
+        self.progress_dialog.show()
+
+    def on_operation_finished(self, message: str):
+        """Hides the progress dialog when the operation is complete."""
+        self.progress_dialog.hide()
+        self.append_log_message({"level": "INFO", "message": message})
+
+
     def save_experiment(self):
-        """Opens a file dialog to save the current experiment state."""
+        """Opens a file dialog and dispatches the action to save the experiment."""
         filepath, _ = QFileDialog.getSaveFileName(
             self, "Save Experiment", "", "SDE JSON Files (*.sde.json)"
         )
         if filepath:
-            self.append_log_message({"level": "INFO", "message": f"Saving experiment to {filepath}..."})
-            # Disable buttons to prevent concurrent operations
-            self.setup_pane.save_button.setEnabled(False)
-            self.setup_pane.load_button.setEnabled(False)
-            QApplication.processEvents() # Ensure UI updates before long operation
-
             self.orchestrator.dispatch(
                 ActionType.SAVE_EXPERIMENT, {"filepath": filepath}
             )
 
     def load_experiment(self):
-        """Opens a file dialog to load an experiment state."""
+        """Opens a file dialog and dispatches the action to load an experiment."""
         filepath, _ = QFileDialog.getOpenFileName(
             self, "Load Experiment", "", "SDE JSON Files (*.sde.json)"
         )
         if filepath:
-            self.append_log_message({"level": "INFO", "message": f"Loading experiment from {filepath}..."})
-            # Disable buttons to prevent concurrent operations
-            self.setup_pane.save_button.setEnabled(False)
-            self.setup_pane.load_button.setEnabled(False)
-            QApplication.processEvents() # Ensure UI updates before long operation
-
+            # Clear the UI immediately for a better user experience
             self._clear_previous_experiment()
             self.orchestrator.dispatch(
                 ActionType.LOAD_EXPERIMENT, {"filepath": filepath}

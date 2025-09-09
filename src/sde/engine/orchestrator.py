@@ -35,6 +35,8 @@ class ExperimentOrchestrator:
     # Signals to update the UI
     state_changed = Signal(dict)
     log_message = Signal(dict)
+    operation_started = Signal(str)
+    operation_finished = Signal(str)
 
     def __init__(self):
         self.experiment = Experiment()
@@ -517,94 +519,94 @@ class ExperimentOrchestrator:
             )
 
     def handle_save_experiment(self, payload: Dict[str, Any]) -> None:
-        """Handles the request to save the current experiment state to a file."""
+        """Handles the request to save the experiment state asynchronously."""
         filepath = payload.get("filepath")
         if not filepath:
-            self.log_message.emit(
-                {"level": "ERROR", "message": "No filepath provided for saving experiment."}
-            )
+            self.log_message.emit({"level": "ERROR", "message": "No filepath for save."})
             return
 
-        # If the run is active, pause and sync state first to ensure consistency
-        was_running = self.experiment.status == ExperimentStatus.RUNNING
-        if was_running:
-            self.log_message.emit(
-                {"level": "INFO", "message": "Pausing run to ensure consistent save state..."}
-            )
-            self.handle_pause_run({})
+        thread = threading.Thread(target=self._save_experiment_thread, args=(filepath,))
+        thread.start()
 
+    def _save_experiment_thread(self, filepath: str):
+        """The actual saving logic that runs in a background thread."""
+        self.operation_started.emit(f"Saving experiment to {filepath}...")
+        was_running = False
         try:
-            # Now the experiment object has the latest state from the engine
-            experiment_copy = copy.deepcopy(self.experiment)
+            with self._lock:
+                # If the run is active, pause and sync state first to ensure consistency
+                was_running = self.experiment.status == ExperimentStatus.RUNNING
+                if was_running:
+                    self.log_message.emit({"level": "INFO", "message": "Pausing run for consistent save..."})
+                    self.runtime_engine.pause()
+                    self._sync_state_from_runtime()
+                    self.experiment.status = ExperimentStatus.PAUSED
+                    self.emit_state_change()
+
+                experiment_copy = copy.deepcopy(self.experiment)
+
             save_experiment(experiment_copy, filepath)
-            self.log_message.emit(
-                {"level": "INFO", "message": f"Experiment successfully saved to {filepath}"}
-            )
-        except Exception as e:
-            self.log_message.emit(
-                {"level": "ERROR", "message": f"Failed to save experiment: {e}"}
-            )
-            logger.error(f"Failed to save experiment: {traceback.format_exc()}")
-        finally:
-            # If we paused the run just for saving, resume it
-            if was_running:
-                self.log_message.emit(
-                    {"level": "INFO", "message": "Resuming run after saving."}
-                )
-                self.handle_resume_run({})
-
-    def handle_load_experiment(self, payload: Dict[str, Any]) -> None:
-        """Handles the request to load an experiment state from a file."""
-        filepath = payload.get("filepath")
-        if not filepath:
-            self.log_message.emit(
-                {"level": "ERROR", "message": "No filepath provided for loading experiment."}
-            )
-            return
-        if self.runtime_engine:
-            self.shutdown()
-            self.runtime_engine = None
-        try:
-            self.experiment = load_experiment(filepath)
-            self.log_message.emit(
-                {"level": "INFO", "message": f"Experiment successfully loaded from {filepath}."}
-            )
-
-            # If the loaded experiment was paused, re-initialize the engine in a paused state
-            if self.experiment.status == ExperimentStatus.PAUSED:
-                self.log_message.emit(
-                    {
-                        "level": "INFO",
-                        "message": "Restoring paused experiment. Initializing runtime engine...",
-                    }
-                )
-                # This will create and start the engine, but the engine's loop will be
-                # immediately blocked because we pass start_paused=True.
-                self._initialize_and_start_runtime(start_paused=True)
-                # The status is set to RUNNING inside start, so we set it back to PAUSED
-                self.experiment.status = ExperimentStatus.PAUSED
-                self.log_message.emit(
-                    {
-                        "level": "INFO",
-                        "message": "Engine is ready. Press 'Resume' to continue the run.",
-                    }
-                )
-            else:
-                # For COMPLETED or other states, just load and let the user inspect.
-                self.log_message.emit(
-                    {
-                        "level": "INFO",
-                        "message": f"Loaded experiment is in '{self.experiment.status.value}' state.",
-                    }
-                )
+            self.log_message.emit({"level": "INFO", "message": f"Experiment saved to {filepath}"})
 
         except Exception as e:
             tb = traceback.format_exc()
-            self.log_message.emit(
-                {"level": "ERROR", "message": f"Failed to load experiment: {e}\n{tb}"}
-            )
-            logger.error(f"Failed to load experiment: {tb}")
-            self.experiment = Experiment()
+            self.log_message.emit({"level": "ERROR", "message": f"Save failed: {e}"})
+            logger.error(f"Save failed: {tb}")
+        finally:
+            with self._lock:
+                if was_running:
+                    self.log_message.emit({"level": "INFO", "message": "Resuming run after saving."})
+                    self.runtime_engine.resume()
+                    self.experiment.status = ExperimentStatus.RUNNING
+                    self.emit_state_change()
+            self.operation_finished.emit(f"Save operation complete.")
+
+
+    def handle_load_experiment(self, payload: Dict[str, Any]) -> None:
+        """Handles the request to load an experiment state asynchronously."""
+        filepath = payload.get("filepath")
+        if not filepath:
+            self.log_message.emit({"level": "ERROR", "message": "No filepath for load."})
+            return
+
+        thread = threading.Thread(target=self._load_experiment_thread, args=(filepath,))
+        thread.start()
+
+    def _load_experiment_thread(self, filepath: str):
+        """The actual loading logic that runs in a background thread."""
+        self.operation_started.emit(f"Loading experiment from {filepath}...")
+        try:
+            # Shutdown any existing engine before loading
+            if self.runtime_engine:
+                self.shutdown()
+
+            loaded_experiment = load_experiment(filepath)
+
+            with self._lock:
+                self.experiment = loaded_experiment
+                self.runtime_engine = None # Ensure old engine is gone
+                self.log_message.emit({"level": "INFO", "message": f"Loaded from {filepath}."})
+
+                if self.experiment.status == ExperimentStatus.PAUSED:
+                    self.log_message.emit({"level": "INFO", "message": "Restoring paused experiment..."})
+                    # This will create the engine, but it will start in a paused state
+                    self._initialize_and_start_runtime(start_paused=True)
+                    self.experiment.status = ExperimentStatus.PAUSED
+                    self.log_message.emit({"level": "INFO", "message": "Engine ready. Press 'Resume'."})
+                else:
+                    self.log_message.emit({"level": "INFO", "message": f"Loaded in '{self.experiment.status.value}' state."})
+
+                self.emit_state_change()
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            self.log_message.emit({"level": "ERROR", "message": f"Load failed: {e}\n{tb}"})
+            logger.error(f"Load failed: {tb}")
+            with self._lock:
+                self.experiment = Experiment() # Reset to a clean state
+                self.emit_state_change()
+        finally:
+            self.operation_finished.emit("Load operation complete.")
 
     def shutdown(self) -> None:
         """Gracefully shuts down the runtime engine if it exists."""
