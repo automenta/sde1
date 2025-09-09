@@ -89,6 +89,7 @@ class ExperimentStatus(Enum):
     DEFINING = "DEFINING"  # The initial state, no compute is running.
     RUNNING = "RUNNING"
     PAUSED = "PAUSED"
+    STOPPED = "STOPPED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"  # The experiment terminated due to an unrecoverable error.
 

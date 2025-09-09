@@ -1,5 +1,6 @@
 import sys
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtWidgets import QDialog
 from PyQt6.QtWidgets import QFileDialog
@@ -38,6 +39,7 @@ class MainWindow(QMainWindow):
         # --- Backend and ViewModel ---
         self.orchestrator = ExperimentOrchestrator()
         self.view_model = ExperimentViewModel(self.style())
+        self.simple_run_hparams = {}
 
         self._init_ui()
         self._connect_signals()
@@ -61,7 +63,7 @@ class MainWindow(QMainWindow):
 
         # --- Progress Dialog for Long Operations ---
         self.progress_dialog = QProgressDialog(self)
-        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setWindowModality(Qt.WindowModality.NonModal)
         self.progress_dialog.setAutoClose(True)
         self.progress_dialog.setAutoReset(True)
         self.progress_dialog.setMinimum(0)
@@ -80,8 +82,10 @@ class MainWindow(QMainWindow):
         self.setup_pane.add_models_requested.connect(self.add_models_to_run)
         self.setup_pane.pause_run_requested.connect(self.pause_experiment)
         self.setup_pane.resume_run_requested.connect(self.resume_experiment)
+        self.setup_pane.stop_run_requested.connect(self.stop_experiment)
         self.setup_pane.save_run_requested.connect(self.save_experiment)
         self.setup_pane.load_run_requested.connect(self.load_experiment)
+        self.setup_pane.edit_hparams_requested.connect(self.edit_simple_hyperparameters)
         self.setup_pane.throttle_changed.connect(self.update_throttle)
         self.setup_pane.remove_algorithm_requested.connect(self.remove_algorithm)
 
@@ -119,10 +123,11 @@ class MainWindow(QMainWindow):
         """
         dataset_name, selected_models = self.setup_pane.get_experiment_settings()
         if not dataset_name or not selected_models:
-            self.append_log_message({
-                "level": "ERROR",
-                "message": "Please select a dataset and at least one model."
-            })
+            QMessageBox.warning(
+                self,
+                "Missing Information",
+                "Please select a dataset and at least one model before starting an experiment."
+            )
             return
 
         self.append_log_message({
@@ -137,15 +142,51 @@ class MainWindow(QMainWindow):
             ActionType.SET_CHALLENGE, {"name": dataset_name, "type": challenge_def.type}
         )
 
+        # Use custom hparams if they exist, otherwise use defaults
+        custom_hparams = self.simple_run_hparams.get("models", {}) if self.simple_run_hparams else {}
+
         for model_name in selected_models:
-            model_def = AVAILABLE_MODELS[model_name]
-            param_space = self._create_default_param_space(model_def)
+            if model_name in custom_hparams:
+                # This logic is now similar to the tuning dialog's logic
+                model_params = custom_hparams[model_name]
+                param_space = {}
+                for param_type in model_params.values():
+                    for param_name, properties in param_type.items():
+                         param_space[param_name] = {
+                            "type": "float", "min": properties["min"], "max": properties["max"],
+                            "scale": properties.get("scale", "linear"),
+                        }
+                self.append_log_message({"level": "INFO", "message": f"Using custom hyperparameter space for {model_name}."})
+            else:
+                model_def = AVAILABLE_MODELS[model_name]
+                param_space = self._create_default_param_space(model_def)
+                self.append_log_message({"level": "INFO", "message": f"Using default hyperparameter space for {model_name}."})
+
             self.orchestrator.dispatch(
                 ActionType.ADD_ALGORITHM, {"name": model_name, "parameter_space": param_space}
             )
 
         # The settings dict already contains all execution settings from the SetupPane
         self.orchestrator.dispatch(ActionType.START_RUN, settings)
+
+    def edit_simple_hyperparameters(self):
+        """Opens a dialog to let the user edit the hyperparameter space for a simple run."""
+        _, selected_models_names = self.setup_pane.get_experiment_settings()
+        if not selected_models_names:
+            QMessageBox.warning(self, "Warning", "Please select at least one model to edit its parameters.")
+            return
+
+        # If there are cached hparams, use them to pre-populate the dialog
+        initial_config = self.simple_run_hparams or None
+
+        selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
+        dialog = HyperparameterDialog(selected_model_defs, self, initial_config=initial_config)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.simple_run_hparams = dialog.get_configuration()
+            self.append_log_message({
+                "level": "INFO",
+                "message": "Custom hyperparameter space saved. It will be used for the next 'Simple' run."
+            })
 
     def open_tuning_dialog(self, settings: dict):
         """Opens the tuning dialog and configures the experiment via the orchestrator."""
@@ -207,6 +248,7 @@ class MainWindow(QMainWindow):
         self.view_model.clear()
         self.results_pane.clear_all()
         self.setup_pane.clear_algorithms_table()
+        self.simple_run_hparams = {}
 
     def _create_default_param_space(self, model_def: dict) -> dict:
         """Creates a detailed, default parameter space for a given model,
@@ -298,6 +340,10 @@ class MainWindow(QMainWindow):
     def resume_experiment(self):
         """Dispatches an action to resume a paused experiment run."""
         self.orchestrator.dispatch(ActionType.RESUME_RUN, {})
+
+    def stop_experiment(self):
+        """Dispatches an action to stop the current experiment run."""
+        self.orchestrator.dispatch(ActionType.STOP_RUN, {})
 
     def on_operation_started(self, message: str):
         """Shows the modal progress dialog when a long operation starts."""

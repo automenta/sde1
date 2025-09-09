@@ -18,6 +18,7 @@ class ActionType(str, Enum):
     START_RUN = "START_RUN"
     PAUSE_RUN = "PAUSE_RUN"
     RESUME_RUN = "RESUME_RUN"
+    STOP_RUN = "STOP_RUN"
 
     # Persistence
     SAVE_EXPERIMENT = "SAVE_EXPERIMENT"

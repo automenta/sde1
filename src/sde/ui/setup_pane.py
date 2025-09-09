@@ -35,8 +35,10 @@ class SetupPane(QWidget):
     add_models_requested = pyqtSignal()
     pause_run_requested = pyqtSignal()
     resume_run_requested = pyqtSignal()
+    stop_run_requested = pyqtSignal()
     save_run_requested = pyqtSignal()
     load_run_requested = pyqtSignal()
+    edit_hparams_requested = pyqtSignal()
     dataset_changed = pyqtSignal(str)
     throttle_changed = pyqtSignal(int)
     remove_algorithm_requested = pyqtSignal(str)
@@ -80,7 +82,7 @@ class SetupPane(QWidget):
         self.model_details_text.setReadOnly(True)
         self.model_details_text.setPlaceholderText("Click on a model to see its details.")
         model_details_layout.addWidget(self.model_details_text)
-        self.model_details_group.setVisible(False) # Initially hidden
+        self.model_details_group.setVisible(False)  # Initially hidden
         setup_layout.addWidget(self.model_details_group)
 
 
@@ -135,6 +137,13 @@ class SetupPane(QWidget):
         run_config_form_layout.addRow("Run Mode:", self.run_mode_combo)
         run_config_form_layout.addRow("Trials per Algorithm:", self.trials_per_algo_spinbox)
 
+        self.edit_hparams_button = QPushButton("Edit Hyperparameters...")
+        self.edit_hparams_button.setToolTip(
+            "For 'Simple' mode, this allows you to view and override the default\n"
+            "hyperparameter sampling space for the selected models."
+        )
+        run_config_form_layout.addRow(self.edit_hparams_button)
+
 
         # --- Experiment Controls ---
         controls_group = QGroupBox("4. Experiment Controls")
@@ -147,6 +156,7 @@ class SetupPane(QWidget):
         )
         self.pause_button = QPushButton("Pause")
         self.resume_button = QPushButton("Resume")
+        self.stop_button = QPushButton("Stop")
         self.save_button = QPushButton("Save Run")
         self.load_button = QPushButton("Load Run")
 
@@ -157,6 +167,7 @@ class SetupPane(QWidget):
         pause_resume_layout = QHBoxLayout()
         pause_resume_layout.addWidget(self.pause_button)
         pause_resume_layout.addWidget(self.resume_button)
+        pause_resume_layout.addWidget(self.stop_button)
         persistence_layout = QHBoxLayout()
         persistence_layout.addWidget(self.save_button)
         persistence_layout.addWidget(self.load_button)
@@ -217,8 +228,10 @@ class SetupPane(QWidget):
         self.add_models_button.clicked.connect(self.add_models_requested)
         self.pause_button.clicked.connect(self.pause_run_requested)
         self.resume_button.clicked.connect(self.resume_run_requested)
+        self.stop_button.clicked.connect(self.stop_run_requested)
         self.save_button.clicked.connect(self.save_run_requested)
         self.load_button.clicked.connect(self.load_run_requested)
+        self.edit_hparams_button.clicked.connect(self.edit_hparams_requested)
         self.throttle_slider.valueChanged.connect(self.throttle_changed)
         self.throttle_slider.valueChanged.connect(lambda v: self.throttle_label.setText(f"{v}%"))
 
@@ -333,6 +346,7 @@ class SetupPane(QWidget):
 
         self.pause_button.setEnabled("PAUSE_RUN" in global_actions)
         self.resume_button.setEnabled("RESUME_RUN" in global_actions)
+        self.stop_button.setEnabled("STOP_RUN" in global_actions)
 
         # Persistence buttons
         can_save = status in ["RUNNING", "PAUSED", "COMPLETED"]
@@ -346,6 +360,11 @@ class SetupPane(QWidget):
         self.dataset_combo.setEnabled(not has_challenge)
         self.model_list.setEnabled("ADD_ALGORITHM" in global_actions)
         self.settings_group.setEnabled(status == "DEFINING")
+        is_simple_mode = self.run_mode_combo.currentText() == "Simple"
+        can_edit_hparams = (
+            status == "DEFINING" and is_simple_mode and self.model_list.selectedItems()
+        )
+        self.edit_hparams_button.setEnabled(can_edit_hparams)
 
     def update_algorithm_table(self, algorithms: dict, valid_actions: dict):
         self.algorithms_table.setRowCount(0)

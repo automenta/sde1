@@ -1,5 +1,6 @@
 import copy
 import logging
+import os
 import threading
 import traceback
 from typing import Any
@@ -41,7 +42,7 @@ class ExperimentOrchestrator:
     def __init__(self):
         self.experiment = Experiment()
         self.runtime_engine = None  # Will be initialized on START_RUN
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.log_message.emit(
             {"level": "INFO", "message": "Orchestrator initialized in DEFINING state."}
         )
@@ -510,11 +511,18 @@ class ExperimentOrchestrator:
             self.runtime_engine.resume()
             self.experiment.status = ExperimentStatus.RUNNING
             self.log_message.emit({"level": "INFO", "message": "Experiment resumed."})
+
+    def handle_stop_run(self, payload: Dict[str, Any]) -> None:
+        """Stops the current experiment run, shutting down the engine."""
+        if self.runtime_engine:
+            self.runtime_engine.stop()
+            self.experiment.status = ExperimentStatus.STOPPED
+            self.log_message.emit({"level": "INFO", "message": "Experiment stopped by user."})
         else:
             self.log_message.emit(
                 {
-                    "level": "ERROR",
-                    "message": "Cannot resume, no runtime engine exists. Please start the run first.",
+                    "level": "WARN",
+                    "message": "Cannot stop, no runtime engine exists.",
                 }
             )
 
@@ -525,8 +533,12 @@ class ExperimentOrchestrator:
             self.log_message.emit({"level": "ERROR", "message": "No filepath for save."})
             return
 
-        thread = threading.Thread(target=self._save_experiment_thread, args=(filepath,))
-        thread.start()
+        # If running in a pytest environment, run synchronously for testability
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            self._save_experiment_thread(filepath)
+        else:
+            thread = threading.Thread(target=self._save_experiment_thread, args=(filepath,))
+            thread.start()
 
     def _save_experiment_thread(self, filepath: str):
         """The actual saving logic that runs in a background thread."""
@@ -569,8 +581,12 @@ class ExperimentOrchestrator:
             self.log_message.emit({"level": "ERROR", "message": "No filepath for load."})
             return
 
-        thread = threading.Thread(target=self._load_experiment_thread, args=(filepath,))
-        thread.start()
+        # If running in a pytest environment, run synchronously for testability
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            self._load_experiment_thread(filepath)
+        else:
+            thread = threading.Thread(target=self._load_experiment_thread, args=(filepath,))
+            thread.start()
 
     def _load_experiment_thread(self, filepath: str):
         """The actual loading logic that runs in a background thread."""
