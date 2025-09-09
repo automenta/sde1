@@ -27,6 +27,7 @@ class UITrial:
     results: Dict[str, List[Tuple[int, float]]] = field(default_factory=dict)
     est_time_per_epoch: Optional[float] = None
     is_best: bool = False
+    prioritized: bool = False
     # This color will be assigned by the ViewModel to ensure uniqueness for the plot
     plot_color: QColor = field(default_factory=lambda: DEFAULT_COLOR)
 

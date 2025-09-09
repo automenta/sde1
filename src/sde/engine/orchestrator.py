@@ -315,6 +315,13 @@ class ExperimentOrchestrator:
                 }
             )
 
+    def handle_request_state_update(self, payload: Dict[str, Any]) -> None:
+        """Handles a manual request from the UI to re-emit the full state."""
+        self.log_message.emit({"level": "INFO", "message": "Full state update requested by UI."})
+        # The state is emitted automatically at the end of the dispatch cycle.
+        # This handler only needs to exist to be a valid action.
+        pass
+
     def handle_start_run(self, payload: Dict[str, Any]) -> None:
         """Starts the experiment run by initializing and starting the runtime engine."""
         self.log_message.emit(

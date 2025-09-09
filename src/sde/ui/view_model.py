@@ -86,6 +86,7 @@ class ExperimentViewModel(QObject):
                 est_time_per_epoch=trial_data.get("est_time_per_epoch"),
                 is_best=(trial_id == best_trial_id),
                 plot_color=self._trial_plot_colors[trial_id],
+                prioritized=trial_data.get("prioritized", False),
             )
 
     def _find_best_trial(self, trials_data: Dict[str, Any]) -> str | None:

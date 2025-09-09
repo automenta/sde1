@@ -65,8 +65,7 @@ class MainWindow(QMainWindow):
         self.orchestrator.state_changed.connect(self.on_state_changed)
 
         # Setup Pane -> Main Window
-        self.setup_pane.start_simple_run_requested.connect(self.start_simple_experiment)
-        self.setup_pane.tune_run_requested.connect(self.open_tuning_dialog)
+        self.setup_pane.start_experiment_requested.connect(self.start_experiment)
         self.setup_pane.add_models_requested.connect(self.add_models_to_run)
         self.setup_pane.pause_run_requested.connect(self.pause_experiment)
         self.setup_pane.resume_run_requested.connect(self.resume_experiment)
@@ -82,6 +81,7 @@ class MainWindow(QMainWindow):
         self.results_pane.prune_trial_requested.connect(self.prune_trial)
         self.results_pane.prioritize_trial_requested.connect(self.prioritize_trial)
         self.results_pane.spawn_trial_requested.connect(self.spawn_trial)
+        self.results_pane.refresh_requested.connect(self.request_state_update)
 
 
     # --- Major Action Handlers ---
@@ -92,6 +92,16 @@ class MainWindow(QMainWindow):
         """
         self.view_model.update_state(state)
         self._update_all_widgets()
+
+    def start_experiment(self, settings: dict):
+        """Starts an experiment based on the mode selected in the SetupPane."""
+        run_mode = settings.get("run_mode")
+        if run_mode == "Simple":
+            self.start_simple_experiment(settings)
+        elif run_mode == "Tune Hyperparameters":
+            self.open_tuning_dialog(settings)
+        else:
+            self.append_log_message({"level": "ERROR", "message": f"Unknown run mode: {run_mode}"})
 
     def start_simple_experiment(self, settings: dict):
         """Dispatches actions to the orchestrator to build and start an experiment.
@@ -126,7 +136,7 @@ class MainWindow(QMainWindow):
         # The settings dict already contains all execution settings from the SetupPane
         self.orchestrator.dispatch(ActionType.START_RUN, settings)
 
-    def open_tuning_dialog(self):
+    def open_tuning_dialog(self, settings: dict):
         """Opens the tuning dialog and configures the experiment via the orchestrator."""
         dataset_name, selected_models_names = self.setup_pane.get_experiment_settings()
         if not dataset_name or not selected_models_names:
@@ -164,8 +174,7 @@ class MainWindow(QMainWindow):
             "message": f"Starting run. The '{config['adaptive_scheduler']}' policy will now generate trials."
         })
         # Get the latest execution settings from the pane
-        execution_settings = self.setup_pane.get_execution_settings()
-        self.orchestrator.dispatch(ActionType.START_RUN, execution_settings)
+        self.orchestrator.dispatch(ActionType.START_RUN, settings)
 
     # --- UI Update and State Management ---
 
@@ -314,10 +323,18 @@ class MainWindow(QMainWindow):
 
     def prune_trial(self, trial_id: str):
         """Dispatches an action to manually prune a trial."""
+        trial = self.view_model.trials.get(trial_id)
+        if trial:
+            trial.status = "PRUNED"
+            self.results_pane.update_view(self.view_model)
         self.orchestrator.dispatch(ActionType.MANUAL_PRUNE_TRIAL, {"trial_id": trial_id})
 
     def prioritize_trial(self, trial_id: str):
         """Dispatches an action to increase a trial's priority."""
+        trial = self.view_model.trials.get(trial_id)
+        if trial:
+            trial.prioritized = True
+            self.results_pane.update_view(self.view_model)
         self.orchestrator.dispatch(ActionType.MANUAL_PRIORITIZE_TRIAL, {"trial_id": trial_id})
 
     def spawn_trial(self, trial_id: str):
@@ -333,6 +350,10 @@ class MainWindow(QMainWindow):
                 ActionType.SPAWN_SIMILAR_TRIAL,
                 {"source_trial_id": trial_id, "new_hparams": new_hparams},
             )
+
+    def request_state_update(self):
+        """Dispatches an action to request a full state update from the orchestrator."""
+        self.orchestrator.dispatch(ActionType.REQUEST_STATE_UPDATE, {})
 
     def closeEvent(self, event):
         """Handles the window close event to ensure graceful shutdown."""

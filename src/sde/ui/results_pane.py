@@ -3,6 +3,7 @@ from datetime import datetime
 import pyqtgraph as pg
 from PyQt6.QtCore import QPropertyAnimation
 from PyQt6.QtCore import Qt
+from PyQt6.QtCore import pyqtProperty
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QAbstractItemView
@@ -62,6 +63,7 @@ class ResultsPane(QWidget):
     prune_trial_requested = pyqtSignal(str)
     prioritize_trial_requested = pyqtSignal(str)
     spawn_trial_requested = pyqtSignal(str)
+    refresh_requested = pyqtSignal()
 
 
     def __init__(self, parent=None):
@@ -76,6 +78,9 @@ class ResultsPane(QWidget):
         self.view_model = None  # To access trial data in context menu
         self.insight_animation = None
         self.available_metrics = set()
+        self.star_icon = self.style().standardIcon(
+            QStyle.StandardPixmap.SP_DialogApplyButton
+        )
 
         self._init_ui()
         self._connect_signals()
@@ -99,9 +104,10 @@ class ResultsPane(QWidget):
         # Metric selection UI
         metric_selection_layout = QHBoxLayout()
         metric_selection_layout.addStretch()
-        metric_selection_layout.addWidget(QLabel("Plot Metric:"))
+        metric_label = QLabel("<b>Plotting Metric:</b>")
+        metric_selection_layout.addWidget(metric_label)
         self.metric_combo = QComboBox()
-        self.metric_combo.setMinimumWidth(120)
+        self.metric_combo.setMinimumWidth(150)
         metric_selection_layout.addWidget(self.metric_combo)
 
         plot_layout.addLayout(metric_selection_layout)
@@ -133,7 +139,9 @@ class ResultsPane(QWidget):
 
         log_header_layout = QHBoxLayout()
         log_header_layout.addStretch()
+        self.refresh_button = QPushButton("Refresh")
         clear_log_button = QPushButton("Clear Log")
+        log_header_layout.addWidget(self.refresh_button)
         log_header_layout.addWidget(clear_log_button)
 
         self.log_text_edit = QTextEdit()
@@ -167,6 +175,7 @@ class ResultsPane(QWidget):
         self.trials_table.itemDoubleClicked.connect(self._on_trial_double_clicked)
         self.insights_list.itemClicked.connect(self._on_insight_selected)
         self.clear_log_button.clicked.connect(self.clear_log)
+        self.refresh_button.clicked.connect(self.refresh_requested)
         self.trials_table.customContextMenuRequested.connect(self._show_trial_context_menu)
         self.metric_combo.currentIndexChanged.connect(self._on_metric_changed)
 
@@ -277,8 +286,12 @@ class ResultsPane(QWidget):
         background_color = ui_trial.row_background_color
 
         # Use a mix of regular and numeric items for appropriate sorting
+        trial_id_item = QTableWidgetItem(trial_id)
+        if ui_trial.prioritized:
+            trial_id_item.setIcon(self.star_icon)
+
         items = [
-            QTableWidgetItem(trial_id),
+            trial_id_item,
             QTableWidgetItem(ui_trial.algorithm_name),
             QTableWidgetItem(ui_trial.status),
             NumericTableWidgetItem(ui_trial.display_epoch),

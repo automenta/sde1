@@ -31,8 +31,7 @@ class SetupPane(QWidget):
     """
 
     # Signals to communicate user actions to the main window
-    start_simple_run_requested = pyqtSignal(dict)
-    tune_run_requested = pyqtSignal()
+    start_experiment_requested = pyqtSignal(dict)
     add_models_requested = pyqtSignal()
     pause_run_requested = pyqtSignal()
     resume_run_requested = pyqtSignal()
@@ -75,8 +74,8 @@ class SetupPane(QWidget):
         setup_layout.addWidget(self.model_search_input)
         setup_layout.addWidget(self.model_list)
 
-        # --- Execution Settings Group ---
-        self.settings_group = QGroupBox("2. Execution Settings")
+        # --- Compute Settings Group ---
+        self.settings_group = QGroupBox("2. Compute Settings")
         settings_form_layout = QFormLayout(self.settings_group)
 
         # Worker Count
@@ -92,14 +91,6 @@ class SetupPane(QWidget):
         self.worker_count_spinbox.setToolTip("Number of parallel processes for computation.")
         settings_form_layout.addRow("Parallel Workers:", self.worker_count_spinbox)
 
-        # Trials per Algorithm
-        self.trials_per_algo_spinbox = QSpinBox()
-        self.trials_per_algo_spinbox.setMinimum(1)
-        self.trials_per_algo_spinbox.setMaximum(1000)
-        self.trials_per_algo_spinbox.setValue(10)
-        self.trials_per_algo_spinbox.setToolTip("Number of random hyperparameter sets to generate per algorithm.")
-        settings_form_layout.addRow("Trials per Algorithm:", self.trials_per_algo_spinbox)
-
         # Timeout per Work Unit
         self.timeout_spinbox = QSpinBox()
         self.timeout_spinbox.setMinimum(1)
@@ -110,26 +101,28 @@ class SetupPane(QWidget):
             "before considering it failed. Prevents the engine from freezing on a stuck trial."
         )
         settings_form_layout.addRow("Work Unit Timeout (s):", self.timeout_spinbox)
-
-        self.throttle_slider = QSlider(Qt.Orientation.Horizontal)
-        self.throttle_slider.setRange(1, 100)
-        self.throttle_slider.setValue(100)
-        self.throttle_label = QLabel("100%")
-        throttle_widget = QWidget()
-        throttle_layout = QHBoxLayout(throttle_widget)
-        throttle_layout.addWidget(self.throttle_slider)
-        throttle_layout.addWidget(self.throttle_label)
-        throttle_layout.setContentsMargins(0, 0, 0, 0)
         self.checkpoint_checkbox = QCheckBox("Enable Checkpointing")
         self.checkpoint_checkbox.setChecked(False)
-        settings_form_layout.addRow("Worker Throttle:", throttle_widget)
         settings_form_layout.addRow(self.checkpoint_checkbox)
 
-        # --- Execution Controls ---
-        controls_group = QGroupBox("3. Execution Controls")
+        # --- Run Configuration Group ---
+        run_config_group = QGroupBox("3. Run Configuration")
+        run_config_form_layout = QFormLayout(run_config_group)
+        self.run_mode_combo = QComboBox()
+        self.run_mode_combo.addItems(["Simple", "Tune Hyperparameters"])
+        self.trials_per_algo_spinbox = QSpinBox()
+        self.trials_per_algo_spinbox.setMinimum(1)
+        self.trials_per_algo_spinbox.setMaximum(1000)
+        self.trials_per_algo_spinbox.setValue(10)
+        self.trials_per_algo_spinbox.setToolTip("Number of random hyperparameter sets to generate per algorithm.")
+        run_config_form_layout.addRow("Run Mode:", self.run_mode_combo)
+        run_config_form_layout.addRow("Trials per Algorithm:", self.trials_per_algo_spinbox)
+
+
+        # --- Experiment Controls ---
+        controls_group = QGroupBox("4. Experiment Controls")
         controls_layout = QVBoxLayout(controls_group)
-        self.start_button = QPushButton("Start (Defaults)")
-        self.tune_button = QPushButton("Tune Hyperparameters...")
+        self.start_experiment_button = QPushButton("Start Experiment")
         self.add_models_button = QPushButton("Add Selected Models to Run")
         self.add_models_button.setToolTip(
             "While a run is active, select new models from the list above\n"
@@ -140,10 +133,8 @@ class SetupPane(QWidget):
         self.save_button = QPushButton("Save Run")
         self.load_button = QPushButton("Load Run")
 
-        simple_run_layout = QHBoxLayout()
-        simple_run_layout.addWidget(self.start_button)
-        advanced_run_layout = QHBoxLayout()
-        advanced_run_layout.addWidget(self.tune_button)
+        start_layout = QHBoxLayout()
+        start_layout.addWidget(self.start_experiment_button)
         mid_run_layout = QHBoxLayout()
         mid_run_layout.addWidget(self.add_models_button)
         pause_resume_layout = QHBoxLayout()
@@ -153,14 +144,28 @@ class SetupPane(QWidget):
         persistence_layout.addWidget(self.save_button)
         persistence_layout.addWidget(self.load_button)
 
-        controls_layout.addLayout(simple_run_layout)
-        controls_layout.addLayout(advanced_run_layout)
+        controls_layout.addLayout(start_layout)
         controls_layout.addLayout(mid_run_layout)
         controls_layout.addLayout(pause_resume_layout)
         controls_layout.addLayout(persistence_layout)
 
+        # Worker Throttle
+        self.throttle_slider = QSlider(Qt.Orientation.Horizontal)
+        self.throttle_slider.setRange(1, 100)
+        self.throttle_slider.setValue(100)
+        self.throttle_label = QLabel("100%")
+        throttle_widget = QWidget()
+        throttle_layout = QHBoxLayout(throttle_widget)
+        throttle_layout.addWidget(self.throttle_slider)
+        throttle_layout.addWidget(self.throttle_label)
+        throttle_layout.setContentsMargins(0, 0, 0, 0)
+        throttle_form_layout = QFormLayout()
+        throttle_form_layout.addRow("Worker Throttle:", throttle_widget)
+        controls_layout.addLayout(throttle_form_layout)
+
+
         # --- Algorithm Management Group ---
-        self.algorithms_group = QGroupBox("4. Active Algorithms")
+        self.algorithms_group = QGroupBox("5. Active Algorithms")
         algorithms_layout = QVBoxLayout(self.algorithms_group)
         self.algorithms_table = QTableWidget()
         self.algorithms_table.setColumnCount(2)
@@ -180,6 +185,7 @@ class SetupPane(QWidget):
         # --- Assemble Pane ---
         main_layout.addWidget(self.setup_group)
         main_layout.addWidget(self.settings_group)
+        main_layout.addWidget(run_config_group)
         main_layout.addWidget(controls_group)
         main_layout.addWidget(self.algorithms_group)
         main_layout.addStretch(1)
@@ -189,8 +195,7 @@ class SetupPane(QWidget):
         """Connects internal UI signals to the pane's public signals."""
         self.dataset_combo.currentIndexChanged.connect(self._on_dataset_changed)
         self.model_search_input.textChanged.connect(self._update_model_filter)
-        self.start_button.clicked.connect(self._on_start_simple_run)
-        self.tune_button.clicked.connect(self.tune_run_requested)
+        self.start_experiment_button.clicked.connect(self._on_start_experiment)
         self.add_models_button.clicked.connect(self.add_models_requested)
         self.pause_button.clicked.connect(self.pause_run_requested)
         self.resume_button.clicked.connect(self.resume_run_requested)
@@ -217,14 +222,15 @@ class SetupPane(QWidget):
             # The item is hidden if the filter text is not a substring of the item text
             item.setHidden(filter_text not in item_text)
 
-    def _on_start_simple_run(self):
+    def _on_start_experiment(self):
         """Gathers settings and emits the start signal."""
         settings = self.get_execution_settings()
-        self.start_simple_run_requested.emit(settings)
+        self.start_experiment_requested.emit(settings)
 
     def get_execution_settings(self) -> dict:
         """Gathers all execution-related settings from the UI controls."""
         return {
+            "run_mode": self.run_mode_combo.currentText(),
             "num_workers": self.worker_count_spinbox.value(),
             "num_trials_per_algo": self.trials_per_algo_spinbox.value(),
             "enable_checkpointing": self.checkpoint_checkbox.isChecked(),
@@ -263,8 +269,7 @@ class SetupPane(QWidget):
         global_actions = valid_actions.get("global", [])
 
         can_start = "START_RUN" in global_actions
-        self.start_button.setEnabled(can_start)
-        self.tune_button.setEnabled(can_start)
+        self.start_experiment_button.setEnabled(can_start)
 
         self.pause_button.setEnabled("PAUSE_RUN" in global_actions)
         self.resume_button.setEnabled("RESUME_RUN" in global_actions)
