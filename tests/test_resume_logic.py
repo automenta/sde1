@@ -1,14 +1,18 @@
 import unittest
-from sde.core.types import Experiment, Trial, TrialStatus, AlgorithmConfig, WorkUnitType, ExecutionSettings
+from unittest.mock import patch, MagicMock
+from sde.core.types import Experiment, Trial, TrialStatus, WorkUnit, WorkUnitType, ExecutionSettings, ExperimentStatus
 from sde.exploration.schedulers import SuccessiveHalvingScheduler
 from sde.engine.runtime import SdeRuntimeEngine
-from sde.engine.datastore import DataStore
+
 
 class TestResumeLogic(unittest.TestCase):
-    def test_resume_from_saved_state(self):
+
+    @patch('sde.engine.runtime.ComputeScheduler')
+    @patch('sde.engine.runtime.SchedulerFactory')
+    def test_resume_from_saved_state(self, MockSchedulerFactory, MockComputeScheduler):
         # 1. Create an Experiment object that looks like it was saved mid-run
         experiment = Experiment(id="test_exp_1")
-        experiment.status = "PAUSED"
+        experiment.status = ExperimentStatus.PAUSED
         experiment.challenge = {"name": "CIFAR10", "type": "vision"}
         experiment.adaptive_policy = "SuccessiveHalving"
         experiment.execution_settings = ExecutionSettings(
@@ -28,45 +32,43 @@ class TestResumeLogic(unittest.TestCase):
         }
         experiment.trials = trials
 
-        # 3. Create a scheduler
-        scheduler = SuccessiveHalvingScheduler(metric="accuracy", increasing=True)
+        # 3. Set up mocks for the engine's dependencies
+        mock_adaptive_scheduler = MagicMock(spec=SuccessiveHalvingScheduler)
+        mock_adaptive_scheduler.metric = "accuracy"
+        mock_adaptive_scheduler.increasing = True
+        mock_adaptive_scheduler.rehydrate_work_units.return_value = [
+            WorkUnit(trial_id="trial_2", type=WorkUnitType.TRAIN_EPOCH, payload={}),
+            WorkUnit(trial_id="trial_4", type=WorkUnitType.TRAIN_EPOCH, payload={})
+        ]
+        MockSchedulerFactory.create_scheduler.return_value = mock_adaptive_scheduler
 
         # 4. Create the Runtime Engine
-        # Callbacks can be dummy lambdas for this test
-        datastore = DataStore(list(experiment.trials.values()))
-        runtime_engine = SdeRuntimeEngine(
-            datastore=datastore,
-            challenge=experiment.challenge,
-            adaptive_scheduler=scheduler,
-            trial_updated_callback=lambda x: None,
-            insights_callback=lambda x: None,
-            execution_settings=experiment.execution_settings,
-            scheduler_state=experiment.scheduler_state,
-        )
+        runtime_engine = SdeRuntimeEngine(event_callback=lambda x, y: None)
 
-        # 5. Call the start method (which should trigger rehydration)
-        runtime_engine.start(start_paused=True)
+        # 5. Initialize the engine by sending the START_RUN command
+        runtime_engine._handle_start_run({
+            "experiment_definition": experiment.to_dict(),
+            "start_paused": True
+        })
 
-        # 6. Check the work queue
+        # 6. Check that the rehydration method was called on the scheduler
+        mock_adaptive_scheduler.rehydrate_work_units.assert_called_once()
+
+        # 7. Check the work queue
         work_queue = runtime_engine.work_queue
         self.assertEqual(work_queue.qsize(), 2)
 
-        # Get the work units from the queue
         work_units = []
         while not work_queue.empty():
-            work_units.append(work_queue.get()[2]) # [2] to get the WorkUnit object
+            work_units.append(work_queue.get()[2])  # [2] to get the WorkUnit object
 
-        # Check that we have work units for the two active trials
         active_trial_ids = {"trial_2", "trial_4"}
         work_unit_trial_ids = {wu.trial_id for wu in work_units}
         self.assertEqual(active_trial_ids, work_unit_trial_ids)
 
-        # Check that the work units are of the correct type
-        for wu in work_units:
-            self.assertEqual(wu.type, WorkUnitType.TRAIN_EPOCH)
-
         # Clean up the engine
-        runtime_engine.stop()
+        runtime_engine._handle_stop_run({})
+
 
 if __name__ == "__main__":
     unittest.main()

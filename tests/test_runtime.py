@@ -7,18 +7,24 @@ from sde.core.types import ExecutionSettings
 from sde.core.types import TrialStatus
 from sde.core.types import WorkUnit
 from sde.core.types import WorkUnitType
-from sde.engine.datastore import DataStore
 from sde.engine.runtime import SdeRuntimeEngine
 
 
 class TestSdeRuntimeEngine(unittest.TestCase):
 
-    def setUp(self):
-        """Set up common mocks and a trial for tests."""
-        self.mock_adaptive_scheduler = MagicMock()
-        self.mock_trial_updated_callback = MagicMock()
-        self.mock_insights_callback = MagicMock()
+    @patch('sde.engine.runtime.ComputeScheduler')
+    @patch('sde.engine.runtime.SchedulerFactory')
+    def setUp(self, MockSchedulerFactory, MockComputeScheduler):
+        """Set up a runtime engine instance for tests."""
+        self.mock_event_callback = MagicMock()
+        self.runtime_engine = SdeRuntimeEngine(event_callback=self.mock_event_callback)
 
+        # Mock the components that the engine creates internally
+        self.mock_adaptive_scheduler = MockSchedulerFactory.create_scheduler.return_value
+        self.mock_adaptive_scheduler.get_initial_work_units.return_value = ([], {})
+        self.mock_compute_scheduler = MockComputeScheduler.return_value
+
+        # Define a basic experiment and trial
         self.experiment = Experiment(id="test_exp_runtime")
         self.experiment.challenge = {"name": "MNIST", "type": "vision"}
         self.trial = Trial(id='trial1', algorithm_name='TestAlgo', hyperparameters={'lr': 0.1})
@@ -30,40 +36,30 @@ class TestSdeRuntimeEngine(unittest.TestCase):
             work_unit_timeout_seconds=300,
         )
 
-
-        # We need to patch the ComputeScheduler as it tries to create a process pool
-        with patch('sde.engine.runtime.ComputeScheduler') as MockComputeScheduler:
-            datastore = DataStore(list(self.experiment.trials.values()))
-            self.runtime_engine = SdeRuntimeEngine(
-                datastore=datastore,
-                challenge=self.experiment.challenge,
-                adaptive_scheduler=self.mock_adaptive_scheduler,
-                trial_updated_callback=self.mock_trial_updated_callback,
-                insights_callback=self.mock_insights_callback,
-                execution_settings=self.experiment.execution_settings,
-                scheduler_state=self.experiment.scheduler_state,
-            )
+        # Initialize the engine's internal state by calling the start handler directly
+        self.runtime_engine._handle_start_run({
+            "experiment_definition": self.experiment.to_dict()
+        })
 
     def test_work_unit_error_sets_trial_to_failed(self):
         """Test that if a work unit result contains an error, the trial's status
-        is set to FAILED and the UI callback is notified.
+        is set to FAILED and a TRIAL_UPDATED event is emitted.
         """
-        work_unit = WorkUnit(trial_id='trial1', type=WorkUnitType.TRAIN_EPOCH)
+        work_unit = WorkUnit(trial_id='trial1', type=WorkUnitType.TRAIN_EPOCH, payload={})
         error_result = {"error": "CUDA out of memory"}
 
         # Directly call the method that processes results
         self.runtime_engine._process_completed_work_unit(work_unit, error_result)
 
         # 1. Check that the datastore has the updated trial status
-        # (We need to access the internal datastore for this check)
         updated_trial = self.runtime_engine.datastore.get_trial('trial1')
         self.assertEqual(updated_trial.status, TrialStatus.FAILED)
 
-        # 2. Check that the UI callback was called with the failure
-        self.mock_trial_updated_callback.assert_called_once()
-        callback_args = self.mock_trial_updated_callback.call_args[0][0]
-        self.assertEqual(callback_args['id'], 'trial1')
-        self.assertEqual(callback_args['status'], 'FAILED')
+        # 2. Check that a TRIAL_UPDATED event was emitted with the failure
+        self.mock_event_callback.assert_called_with(
+            "TRIAL_UPDATED",
+            {"trial": updated_trial.to_dict()}
+        )
 
         # 3. Check that no new work was scheduled
         self.mock_adaptive_scheduler.get_next_work_units.assert_not_called()
