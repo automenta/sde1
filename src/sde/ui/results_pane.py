@@ -1,12 +1,16 @@
 from datetime import datetime
 
 import pyqtgraph as pg
+from PyQt6.QtCore import QPropertyAnimation
 from PyQt6.QtCore import Qt
 from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QAbstractItemView
+from PyQt6.QtWidgets import QComboBox
 from PyQt6.QtWidgets import QGroupBox
 from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6.QtWidgets import QHeaderView
+from PyQt6.QtWidgets import QLabel
 from PyQt6.QtWidgets import QListWidget
 from PyQt6.QtWidgets import QListWidgetItem
 from PyQt6.QtWidgets import QMenu
@@ -33,6 +37,19 @@ class InsightListItem(QListWidgetItem):
         self.setToolTip(ui_insight.message)
 
 
+class NumericTableWidgetItem(QTableWidgetItem):
+    """A custom QTableWidgetItem that implements numeric sorting."""
+    def __lt__(self, other):
+        # Try to convert text to float for numeric comparison
+        try:
+            self_float = float(self.text())
+            other_float = float(other.text())
+            return self_float < other_float
+        except (ValueError, TypeError):
+            # Fallback to string comparison if conversion fails
+            return super().__lt__(other)
+
+
 class ResultsPane(QWidget):
     """The right-hand pane for displaying experiment results, including the plot,
     trials table, insights, and log.
@@ -56,7 +73,9 @@ class ResultsPane(QWidget):
         self.legend = None
         self.selected_insight_item = None
         self.displayed_insight_count = 0
-        self.view_model = None # To access trial data in context menu
+        self.view_model = None  # To access trial data in context menu
+        self.insight_animation = None
+        self.available_metrics = set()
 
         self._init_ui()
         self._connect_signals()
@@ -71,8 +90,23 @@ class ResultsPane(QWidget):
         main_layout.addWidget(splitter)
 
         # --- Plot Widget ---
+        plot_container = QWidget()
+        plot_layout = QVBoxLayout(plot_container)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
         self.plot_widget = pg.PlotWidget()
         self.setup_plot()
+
+        # Metric selection UI
+        metric_selection_layout = QHBoxLayout()
+        metric_selection_layout.addStretch()
+        metric_selection_layout.addWidget(QLabel("Plot Metric:"))
+        self.metric_combo = QComboBox()
+        self.metric_combo.setMinimumWidth(120)
+        metric_selection_layout.addWidget(self.metric_combo)
+
+        plot_layout.addLayout(metric_selection_layout)
+        plot_layout.addWidget(self.plot_widget)
+
 
         # --- Bottom Pane (Table, Insights, Log) ---
         bottom_pane = QWidget()
@@ -84,13 +118,13 @@ class ResultsPane(QWidget):
         right_bottom_splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Insights Group
-        insights_group = QGroupBox("Insights")
-        insights_layout = QVBoxLayout(insights_group)
+        self.insights_group = QGroupBox("Insights")
+        insights_layout = QVBoxLayout(self.insights_group)
         self.insights_list = QListWidget()
         self.insights_list.setWordWrap(True)
         insights_layout.addWidget(self.insights_list)
         insights_layout.setContentsMargins(0, 5, 0, 0)
-        insights_group.setLayout(insights_layout)
+        self.insights_group.setLayout(insights_layout)
 
         # Log Group
         log_group = QGroupBox("Log")
@@ -111,7 +145,7 @@ class ResultsPane(QWidget):
 
         self.clear_log_button = clear_log_button
 
-        right_bottom_splitter.addWidget(insights_group)
+        right_bottom_splitter.addWidget(self.insights_group)
         right_bottom_splitter.addWidget(log_group)
         right_bottom_splitter.setSizes([100, 200])
 
@@ -123,7 +157,7 @@ class ResultsPane(QWidget):
         bottom_layout.addWidget(bottom_splitter)
         bottom_pane.setLayout(bottom_layout)
 
-        splitter.addWidget(self.plot_widget)
+        splitter.addWidget(plot_container)
         splitter.addWidget(bottom_pane)
         splitter.setSizes([500, 300])
 
@@ -134,6 +168,7 @@ class ResultsPane(QWidget):
         self.insights_list.itemClicked.connect(self._on_insight_selected)
         self.clear_log_button.clicked.connect(self.clear_log)
         self.trials_table.customContextMenuRequested.connect(self._show_trial_context_menu)
+        self.metric_combo.currentIndexChanged.connect(self._on_metric_changed)
 
 
     # --- Public Methods for Updating the View ---
@@ -175,6 +210,7 @@ class ResultsPane(QWidget):
         header = self.trials_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
+        self.trials_table.setSortingEnabled(True)
         self.trials_table.setColumnWidth(0, 100)
         self.trials_table.setColumnWidth(1, 120)
         self.trials_table.setColumnWidth(2, 100)
@@ -191,7 +227,10 @@ class ResultsPane(QWidget):
 
     def update_trials_and_plots(self, view_model: ExperimentViewModel):
         """Updates the trials table and plot widget from the ViewModel."""
-        metric_name = view_model.performance_metric_name
+        # Use the combo box's current selection as the metric to display
+        metric_name = self.metric_combo.currentText() or view_model.performance_metric_name
+        self._update_available_metrics(view_model)
+
 
         current_trial_ids = set(view_model.trials.keys())
         existing_ui_trial_ids = set(self.trial_row_map.keys())
@@ -216,6 +255,12 @@ class ResultsPane(QWidget):
     def _update_trial_ui(self, ui_trial, metric_name: str):
         """Updates or creates a row in the trials table for a given UITrial."""
         trial_id = ui_trial.id
+
+        # Create a rich HTML tooltip with all hyperparameters
+        hparam_tooltip = "<b>Hyperparameters:</b><br>" + "<br>".join(
+            f"<b>{k}:</b> {v}" for k, v in ui_trial.hyperparameters.items()
+        )
+
         if trial_id not in self.trial_row_map:
             row_position = self.trials_table.rowCount()
             self.trials_table.insertRow(row_position)
@@ -231,20 +276,21 @@ class ResultsPane(QWidget):
         self.plot_curve_map[trial_id].setPen(ui_trial.pen)
         background_color = ui_trial.row_background_color
 
-        self.trials_table.setItem(row, 0, QTableWidgetItem(trial_id))
-        self.trials_table.setItem(row, 1, QTableWidgetItem(ui_trial.algorithm_name))
-        self.trials_table.setItem(row, 2, QTableWidgetItem(ui_trial.status))
-        self.trials_table.setItem(row, 3, QTableWidgetItem(ui_trial.display_epoch))
-        self.trials_table.setItem(row, 4, QTableWidgetItem(ui_trial.get_latest_metric(metric_name)))
-        self.trials_table.setItem(row, 5, QTableWidgetItem(ui_trial.get_latest_metric("loss")))
-        self.trials_table.setItem(row, 6, QTableWidgetItem(ui_trial.display_est_time))
+        # Use a mix of regular and numeric items for appropriate sorting
+        items = [
+            QTableWidgetItem(trial_id),
+            QTableWidgetItem(ui_trial.algorithm_name),
+            QTableWidgetItem(ui_trial.status),
+            NumericTableWidgetItem(ui_trial.display_epoch),
+            NumericTableWidgetItem(ui_trial.get_latest_metric(metric_name)),
+            NumericTableWidgetItem(ui_trial.get_latest_metric("loss")),
+            QTableWidgetItem(ui_trial.display_est_time),
+        ]
 
-        for col in range(self.trials_table.columnCount()):
-            item = self.trials_table.item(row, col)
-            if not item:
-                item = QTableWidgetItem()
-                self.trials_table.setItem(row, col, item)
+        for col, item in enumerate(items):
             item.setBackground(background_color)
+            item.setToolTip(hparam_tooltip)
+            self.trials_table.setItem(row, col, item)
 
     def update_insights_list(self, view_model: ExperimentViewModel):
         """Updates the insights list from the ViewModel efficiently."""
@@ -259,6 +305,30 @@ class ResultsPane(QWidget):
 
         self.displayed_insight_count = len(view_model.insights)
         self.insights_list.scrollToBottom()
+
+        # Trigger animation only if there are new insights
+        if num_new_insights > 0:
+            self._trigger_insight_animation()
+
+    def _trigger_insight_animation(self):
+        """Animates the border of the 'Insights' group box to signal a new insight."""
+        if self.insight_animation and self.insight_animation.state() == QPropertyAnimation.State.Running:
+            return  # Don't start a new animation if one is already running
+
+        self.insight_animation = QPropertyAnimation(self, b"insightBorderColor")
+        self.insight_animation.setDuration(1500)
+        self.insight_animation.setStartValue(QColor("#0078D7"))  # Start with highlight color
+        self.insight_animation.setEndValue(QColor("lightgray"))  # End with default color
+        self.insight_animation.setEasingCurve(Qt.EasingCurve.OutCubic)
+        self.insight_animation.start()
+
+    # This is a custom property setter required for QPropertyAnimation to work on a non-standard property
+    def _set_insight_border_color(self, color: QColor):
+        """Sets the border color of the insights group box."""
+        self.insights_group.setStyleSheet(f"QGroupBox {{ border: 1px solid {color.name()}; margin-top: 1em; }}")
+
+    # This registers the custom property with Qt's meta-object system
+    insightBorderColor = pyqtProperty(QColor, fset=_set_insight_border_color)
 
     def update_plot_highlight(self, highlight_ids: set, view_model: ExperimentViewModel):
         """Highlights a specific set of trials on the plot."""
@@ -314,7 +384,10 @@ class ResultsPane(QWidget):
         self.plot_widget.clear()
         self.trial_row_map.clear()
         self.plot_curve_map.clear()
+        self.metric_combo.clear()
+        self.available_metrics.clear()
         self.insights_list.clear()
+        self.insights_group.setStyleSheet("")  # Reset stylesheet
         self.displayed_insight_count = 0
         self.setup_plot()  # Re-add legend and titles
 
@@ -363,6 +436,56 @@ class ResultsPane(QWidget):
             if trial_id in highlight_ids:
                 self.trials_table.selectRow(row)
         self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+
+    def _on_metric_changed(self):
+        """Handles the metric selection change by replotting all data."""
+        if not self.view_model:
+            return
+
+        metric_name = self.metric_combo.currentText()
+        if not metric_name:
+            return
+
+        # Update plot labels
+        self.plot_widget.setLabel("left", metric_name.replace("_", " ").title())
+        self.plot_widget.setTitle(f"Real-Time Trial Performance: {metric_name.replace('_', ' ').title()}", color="k", size="16pt")
+
+
+        # Update plot data for all existing curves
+        for trial_id, curve in self.plot_curve_map.items():
+            ui_trial = self.view_model.trials.get(trial_id)
+            if ui_trial:
+                metric_list = ui_trial.results.get(metric_name, [])
+                if metric_list:
+                    try:
+                        epochs, metrics = zip(*metric_list)
+                        curve.setData(epochs, metrics)
+                    except ValueError:
+                        curve.clear()
+                else:
+                    curve.clear()
+
+    def _update_available_metrics(self, view_model: ExperimentViewModel):
+        """Discovers and populates the metric combo box from trial data."""
+        new_metrics = set()
+        for trial in view_model.trials.values():
+            new_metrics.update(trial.results.keys())
+
+        if new_metrics != self.available_metrics:
+            self.available_metrics = new_metrics
+            current_selection = self.metric_combo.currentText()
+            self.metric_combo.blockSignals(True)
+            self.metric_combo.clear()
+            sorted_metrics = sorted(list(self.available_metrics))
+            if sorted_metrics:
+                self.metric_combo.addItems(sorted_metrics)
+                # Try to restore previous selection
+                if current_selection in sorted_metrics:
+                    self.metric_combo.setCurrentText(current_selection)
+                # Or set a sensible default
+                elif view_model.performance_metric_name in sorted_metrics:
+                    self.metric_combo.setCurrentText(view_model.performance_metric_name)
+            self.metric_combo.blockSignals(False)
 
     def _show_trial_context_menu(self, pos):
         """Creates and shows a context menu for a trial."""

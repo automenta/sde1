@@ -225,8 +225,6 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def append_log_message(self, log_data: dict):
-        if log_data.get("level") == "INSIGHT":
-            QMessageBox.information(self, "New Insight", log_data.get("message", ""))
         self.results_pane.append_log_message(log_data)
 
     def add_models_to_run(self):

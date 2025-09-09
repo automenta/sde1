@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QGroupBox
 from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtWidgets import QLabel
+from PyQt6.QtWidgets import QLineEdit
 from PyQt6.QtWidgets import QListWidget
 from PyQt6.QtWidgets import QListWidgetItem
 from PyQt6.QtWidgets import QProgressBar
@@ -54,8 +55,14 @@ class SetupPane(QWidget):
 
         # --- Experiment Setup Group ---
         self.setup_group = QGroupBox("1. Experiment Setup")
-        setup_form_layout = QFormLayout(self.setup_group)
+        setup_layout = QVBoxLayout(self.setup_group)
+        setup_form_layout = QFormLayout()
+
         self.dataset_combo = QComboBox()
+        setup_form_layout.addRow("Dataset:", self.dataset_combo)
+
+        self.model_search_input = QLineEdit()
+        self.model_search_input.setPlaceholderText("Filter models by name...")
         self.model_list = QListWidget()
         self.model_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.model_list.setMinimumHeight(150)
@@ -63,8 +70,10 @@ class SetupPane(QWidget):
             "Select one or more models to include in the experiment.\n"
             "Models compatible with the selected dataset will appear here."
         )
-        setup_form_layout.addRow("Dataset:", self.dataset_combo)
-        setup_form_layout.addRow("Models:", self.model_list)
+        setup_layout.addLayout(setup_form_layout)
+        setup_layout.addWidget(QLabel("Models:"))
+        setup_layout.addWidget(self.model_search_input)
+        setup_layout.addWidget(self.model_list)
 
         # --- Execution Settings Group ---
         self.settings_group = QGroupBox("2. Execution Settings")
@@ -179,6 +188,7 @@ class SetupPane(QWidget):
     def _connect_signals(self):
         """Connects internal UI signals to the pane's public signals."""
         self.dataset_combo.currentIndexChanged.connect(self._on_dataset_changed)
+        self.model_search_input.textChanged.connect(self._update_model_filter)
         self.start_button.clicked.connect(self._on_start_simple_run)
         self.tune_button.clicked.connect(self.tune_run_requested)
         self.add_models_button.clicked.connect(self.add_models_requested)
@@ -195,6 +205,17 @@ class SetupPane(QWidget):
         self.dataset_changed.emit(dataset_name)
         # Also update the model list directly when the dataset changes
         self.update_model_list(dataset_name)
+        # Clear the filter when the dataset changes
+        self.model_search_input.clear()
+
+    def _update_model_filter(self):
+        """Filters the model list based on the search input text."""
+        filter_text = self.model_search_input.text().lower()
+        for i in range(self.model_list.count()):
+            item = self.model_list.item(i)
+            item_text = item.text().lower()
+            # The item is hidden if the filter text is not a substring of the item text
+            item.setHidden(filter_text not in item_text)
 
     def _on_start_simple_run(self):
         """Gathers settings and emits the start signal."""
