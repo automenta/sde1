@@ -132,18 +132,6 @@ class MainWindow(QMainWindow):
             self.append_log_message({"level": "INFO", "message": "Experiment start cancelled by user."})
             return
 
-        # --- Proceed with experiment setup ---
-        self.append_log_message({
-            "level": "INFO",
-            "message": f"Configuring experiment on '{dataset_name}' with models: {selected_models_names}"
-        })
-        self._clear_previous_experiment()
-
-        challenge_def = AVAILABLE_DATASETS[dataset_name]
-        self.orchestrator.dispatch(
-            ActionType.SET_CHALLENGE, {"name": dataset_name, "type": challenge_def.type}
-        )
-
         custom_hparams = {}
         if result == SimpleRunDialog.RunWithEdits:
             custom_hparams = dialog.get_hyperparameters()
@@ -151,26 +139,19 @@ class MainWindow(QMainWindow):
         else: # RunWithDefaults
             self.append_log_message({"level": "INFO", "message": "Starting run with default hyperparameters."})
 
-
+        algorithms_to_add = []
         for model_name in selected_models_names:
             model_def = AVAILABLE_MODELS[model_name]
-            # For a simple run, the parameter space IS the set of single values.
-            # The backend will create a single trial from this.
             param_space = {}
-            # Use custom hparams if they exist for this model
             if model_name in custom_hparams:
                  param_space = custom_hparams[model_name]
             else:
-                # Otherwise, extract defaults from the schema
                 for param_type, params in model_def.hyperparameter_schema.items():
                     for param_name, properties in params.items():
                         param_space[param_name] = properties.get("default")
+            algorithms_to_add.append({"name": model_name, "parameter_space": param_space, "is_simple_run": True})
 
-            self.orchestrator.dispatch(
-                ActionType.ADD_ALGORITHM, {"name": model_name, "parameter_space": param_space, "is_simple_run": True}
-            )
-
-        self.orchestrator.dispatch(ActionType.START_RUN, settings)
+        self._configure_new_experiment(dataset_name, algorithms_to_add, settings)
 
     def open_tuning_dialog(self, settings: dict):
         """Opens the tuning dialog and configures the experiment via the orchestrator."""
@@ -185,16 +166,9 @@ class MainWindow(QMainWindow):
             return
 
         config = dialog.get_configuration()
-        self.append_log_message({
-            "level": "INFO",
-            "message": f"Configuring tuning experiment with scheduler '{config['adaptive_scheduler']}'."
-        })
-        self._clear_previous_experiment()
-
-        challenge_def = AVAILABLE_DATASETS[dataset_name]
-        self.orchestrator.dispatch(ActionType.SET_CHALLENGE, {"name": dataset_name, "type": challenge_def.type})
         self.orchestrator.dispatch(ActionType.SET_ADAPTIVE_POLICY, {"policy_name": config["adaptive_scheduler"]})
 
+        algorithms_to_add = []
         for model_name, model_params in config["models"].items():
             full_param_space = {}
             for param_type in model_params.values():
@@ -203,24 +177,32 @@ class MainWindow(QMainWindow):
                         "type": "float", "min": properties["min"], "max": properties["max"],
                         "scale": properties.get("scale", "linear"),
                     }
-            self.orchestrator.dispatch(ActionType.ADD_ALGORITHM, {"name": model_name, "parameter_space": full_param_space})
+            algorithms_to_add.append({"name": model_name, "parameter_space": full_param_space})
 
+        self._configure_new_experiment(dataset_name, algorithms_to_add, settings)
+
+    def _configure_new_experiment(self, dataset_name, algorithms, settings):
         self.append_log_message({
             "level": "INFO",
-            "message": f"Starting run. The '{config['adaptive_scheduler']}' policy will now generate trials."
+            "message": f"Configuring experiment on '{dataset_name}'"
         })
-        # Get the latest execution settings from the pane
+        self._clear_previous_experiment()
+
+        challenge_def = AVAILABLE_DATASETS[dataset_name]
+        self.orchestrator.dispatch(
+            ActionType.SET_CHALLENGE, {"name": dataset_name, "type": challenge_def.type}
+        )
+
+        for algo_config in algorithms:
+            self.orchestrator.dispatch(ActionType.ADD_ALGORITHM, algo_config)
+
         self.orchestrator.dispatch(ActionType.START_RUN, settings)
 
     # --- UI Update and State Management ---
 
     def _update_all_widgets(self):
         """Refreshes all UI components based on the current ViewModel state."""
-        self.setup_pane.update_button_states(
-            self.view_model.valid_actions,
-            self.view_model.status,
-            bool(self.view_model.challenge_name)
-        )
+        self.setup_pane.update_button_states(self.view_model)
         self.setup_pane.update_algorithm_table(
             self.view_model.algorithms, self.view_model.valid_actions
         )
@@ -249,7 +231,7 @@ class MainWindow(QMainWindow):
     def on_trial_selected(self, trial_id: str):
         """Handles trial selection from the results pane."""
         highlight_ids = {trial_id} if trial_id else set()
-        self.results_pane.update_plot_highlight(highlight_ids, self.view_model)
+        self.results_pane.update_plot_highlight(highlight_ids)
 
     def on_trial_double_clicked(self, trial_id: str):
         """Handles double-clicking a trial to show its hyperparameters."""
@@ -259,7 +241,7 @@ class MainWindow(QMainWindow):
 
     def on_insight_selected(self, highlight_ids: set):
         """Handles insight selection from the results pane."""
-        self.results_pane.update_plot_highlight(highlight_ids, self.view_model)
+        self.results_pane.update_plot_highlight(highlight_ids)
 
     def show_hyperparameter_dialog(self, hparams: dict):
         """Shows the hyperparameter viewer dialog for the given parameters."""

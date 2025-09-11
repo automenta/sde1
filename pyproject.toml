@@ -31,6 +31,7 @@ dependencies = [
     "torchvision",
     "numpy",
     "platformdirs",
+    "scikit-learn",
 ]
 
 [project.optional-dependencies]

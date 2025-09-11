@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import QWidget
 
 from ..challenges import AVAILABLE_DATASETS
 from ..models import AVAILABLE_MODELS
+from .view_model import ExperimentViewModel
 
 
 class SetupPane(QWidget):
@@ -205,12 +206,29 @@ class SetupPane(QWidget):
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setFormat("Progress: %p%")
 
+        # --- Status Display Group ---
+        self.status_group = QGroupBox("Experiment Status")
+        status_layout = QFormLayout(self.status_group)
+        self.total_trials_label = QLabel("N/A")
+        self.active_trials_label = QLabel("N/A")
+        self.completed_trials_label = QLabel("N/A")
+        self.pruned_trials_label = QLabel("N/A")
+        self.best_perf_label = QLabel("N/A")
+        status_layout.addRow("Total Trials:", self.total_trials_label)
+        status_layout.addRow("Active:", self.active_trials_label)
+        status_layout.addRow("Completed:", self.completed_trials_label)
+        status_layout.addRow("Pruned:", self.pruned_trials_label)
+        status_layout.addRow("Best Performance:", self.best_perf_label)
+        self.status_group.setVisible(False)
+
+
         # --- Assemble Pane ---
         main_layout.addWidget(self.setup_group)
         main_layout.addWidget(self.settings_group)
         main_layout.addWidget(run_config_group)
         main_layout.addWidget(controls_group)
         main_layout.addWidget(self.algorithms_group)
+        main_layout.addWidget(self.status_group)
         main_layout.addStretch(1)
         main_layout.addWidget(self.progress_bar)
 
@@ -333,7 +351,11 @@ class SetupPane(QWidget):
         all_selected_models = {item.text() for item in self.model_list.selectedItems()}
         return all_selected_models - existing_algo_names
 
-    def update_button_states(self, valid_actions: dict, status: str, has_challenge: bool):
+    def update_button_states(self, view_model: ExperimentViewModel):
+        valid_actions = view_model.valid_actions
+        status = view_model.status
+        has_challenge = bool(view_model.challenge_name)
+
         global_actions = valid_actions.get("global", [])
 
         can_start = "START_RUN" in global_actions
@@ -355,6 +377,7 @@ class SetupPane(QWidget):
         self.dataset_combo.setEnabled(not has_challenge)
         self.model_list.setEnabled("ADD_ALGORITHM" in global_actions)
         self.settings_group.setEnabled(status == "DEFINING")
+        self.update_status_display(view_model)
 
     def update_algorithm_table(self, algorithms: dict, valid_actions: dict):
         self.algorithms_table.setRowCount(0)
@@ -382,3 +405,21 @@ class SetupPane(QWidget):
     def clear_algorithms_table(self):
         """Clears the algorithm table."""
         self.algorithms_table.setRowCount(0)
+
+    def update_status_display(self, view_model: ExperimentViewModel):
+        is_running = view_model.status in ["RUNNING", "PAUSED", "COMPLETED", "STOPPED"]
+        self.status_group.setVisible(is_running)
+
+        if not is_running:
+            return
+
+        self.total_trials_label.setText(str(view_model.num_trials))
+        self.active_trials_label.setText(str(view_model.num_active_trials))
+        self.completed_trials_label.setText(str(view_model.num_completed_trials))
+        self.pruned_trials_label.setText(str(view_model.num_pruned_trials))
+
+        best_perf = view_model.best_performance
+        if best_perf is not None:
+            self.best_perf_label.setText(f"{best_perf:.4f}")
+        else:
+            self.best_perf_label.setText("N/A")

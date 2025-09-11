@@ -4,135 +4,40 @@ from typing import Optional
 from typing import Set
 
 import pyqtgraph as pg
-from PyQt6.QtCore import pyqtProperty
-from PyQt6.QtCore import QPropertyAnimation
-from PyQt6.QtCore import Qt
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtCore import QEasingCurve
+from typing import Dict, Optional, Set
+
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QAbstractItemView
-from PyQt6.QtWidgets import QComboBox
-from PyQt6.QtWidgets import QGroupBox
-from PyQt6.QtWidgets import QHBoxLayout
-from PyQt6.QtWidgets import QHeaderView
-from PyQt6.QtWidgets import QLabel
-from PyQt6.QtWidgets import QLineEdit
-from PyQt6.QtWidgets import QListWidget
-from PyQt6.QtWidgets import QListWidgetItem
-from PyQt6.QtWidgets import QMenu
-from PyQt6.QtWidgets import QPushButton
-from PyQt6.QtWidgets import QSplitter
-from PyQt6.QtWidgets import QStyle
-from PyQt6.QtWidgets import QTableWidget
-from PyQt6.QtWidgets import QTableWidgetItem
-from PyQt6.QtWidgets import QTextEdit
-from PyQt6.QtWidgets import QVBoxLayout
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtWidgets import QSplitter, QVBoxLayout, QWidget, QTabWidget
 
-from .models import UIInsight, UITrial
+from .components.insights_widget import InsightsWidget
+from .components.log_widget import LogWidget
+from .components.trials_table_widget import TrialsTableWidget
+from .models import UITrial
 from .view_model import ExperimentViewModel
-
-
-class ClickableLabelItem(pg.LabelItem):
-    """A LabelItem that emits a signal when clicked."""
-    clicked = pyqtSignal(object, object)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.curve = None
-        self.label = None
-
-    def mouseClickEvent(self, ev):
-        self.clicked.emit(self.curve, self.label)
-
-
-class CustomLegendItem(pg.LegendItem):
-    """A LegendItem that uses ClickableLabelItems and emits a signal when an item is clicked."""
-    itemClicked = pyqtSignal(object, object)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def addItem(self, item, name):
-        """Overrides the default addItem to use a ClickableLabelItem."""
-        label = ClickableLabelItem(text=name, color=self.opts['labelTextColor'], size=self.opts['labelTextSize'])
-        label.curve = item
-        label.label = label
-        label.clicked.connect(self.itemClicked.emit)
-        sample = pg.graphicsItems.LegendItem.ItemSample(item)
-        self.items.append((sample, label))
-        self._updateLayout()
-
-    def _updateLayout(self):
-        """A simplified layout update. Assumes single column."""
-        for i in range(self.layout.count()):
-            self.layout.removeAt(0)
-        for sample, label in self.items:
-            row = self.layout.rowCount()
-            self.layout.addItem(sample, row, 0)
-            self.layout.addItem(label, row, 1)
-        self.update()
-
-
-class InsightListItem(QListWidgetItem):
-    """A custom QListWidgetItem that stores the full UIInsight object."""
-
-    def __init__(
-        self, ui_insight: UIInsight, parent: Optional[QListWidget] = None
-    ):
-        super().__init__(parent)
-        self.insight = ui_insight
-        self.setIcon(ui_insight.icon)
-        self.setText(f"[{ui_insight.timestamp}] {ui_insight.message}")
-        self.setToolTip(ui_insight.message)
-
-
-class NumericTableWidgetItem(QTableWidgetItem):
-    """A custom QTableWidgetItem that implements numeric sorting."""
-
-    def __lt__(self, other):
-        # Try to convert text to float for numeric comparison
-        try:
-            self_float = float(self.text())
-            other_float = float(other.text())
-            return self_float < other_float
-        except (ValueError, TypeError):
-            # Fallback to string comparison if conversion fails
-            return super().__lt__(other)
+from .visualizations.performance_plot import PerformancePlotPlugin
+from .visualizations.hyperparameter_pca import HyperparameterPCAPlugin
 
 
 class ResultsPane(QWidget):
-    """The right-hand pane for displaying experiment results, including the plot,
-    trials table, insights, and log.
+    """The right-hand pane for displaying experiment results. It acts as a
+    container for the modular component widgets.
     """
 
     # Signals for user interactions that the parent window needs to handle
-    trial_selected = pyqtSignal(str)  # Emits trial_id
-    trial_double_clicked = pyqtSignal(str)  # Emits trial_id
-    insight_selected = pyqtSignal(set)  # Emits a set of trial_ids to highlight
+    trial_selected = pyqtSignal(str)
+    trial_double_clicked = pyqtSignal(str)
     prune_trial_requested = pyqtSignal(str)
     prioritize_trial_requested = pyqtSignal(str)
     spawn_trial_requested = pyqtSignal(str)
     refresh_requested = pyqtSignal()
 
-
-    def __init__(self, parent=None):
+    def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-
-        # --- UI State and Data Maps ---
         self.trial_view_cache: Dict[str, UITrial] = {}
-        self.trial_row_map: Dict[str, int] = {}
-        self.plot_curve_map: Dict[str, pg.PlotDataItem] = {}
-        self.legend: Optional[pg.LegendItem] = None
-        self.selected_insight_item: Optional[InsightListItem] = None
-        self.displayed_insight_count = 0
         self.view_model: Optional[ExperimentViewModel] = None
-        self.insight_animation: Optional[QPropertyAnimation] = None
-        self.available_metrics: Set[str] = set()
-        self.plot_curve_visibility: Dict[str, bool] = {}
-        self.star_icon = self.style().standardIcon(
-            QStyle.StandardPixmap.SP_DialogApplyButton
-        )
+        self.visualization_plugins = []
+        self.visualization_widgets = []
 
         self._init_ui()
         self._connect_signals()
@@ -142,622 +47,104 @@ class ResultsPane(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # --- Main Content Splitter ---
         splitter = QSplitter(Qt.Orientation.Vertical)
         main_layout.addWidget(splitter)
 
-        # --- Plot Widget ---
-        plot_container = QWidget()
-        plot_layout = QVBoxLayout(plot_container)
-        plot_layout.setContentsMargins(0, 0, 0, 0)
-        self.plot_widget = pg.PlotWidget()
-        self.setup_plot()
+        self.vis_tabs = QTabWidget()
+        self.load_visualization_plugins()
+        for plugin in self.visualization_plugins:
+            widget = plugin.create_widget(self, self.view_model)
+            self.visualization_widgets.append(widget)
+            self.vis_tabs.addTab(widget, plugin.name)
 
-        # Metric selection UI
-        metric_selection_layout = QHBoxLayout()
-        metric_selection_layout.addStretch()
-        metric_label = QLabel("<b>Plotting Metric:</b>")
-        metric_selection_layout.addWidget(metric_label)
-        self.metric_combo = QComboBox()
-        self.metric_combo.setMinimumWidth(150)
-        metric_selection_layout.addWidget(self.metric_combo)
-
-        plot_layout.addLayout(metric_selection_layout)
-        plot_layout.addWidget(self.plot_widget)
-
-
-        # --- Bottom Pane (Table, Insights, Log) ---
         bottom_pane = QWidget()
-        bottom_layout = QVBoxLayout(bottom_pane) # Changed to QVBoxLayout
-
-        # --- Filter Controls ---
-        filter_widget = QWidget()
-        filter_layout = QHBoxLayout(filter_widget)
-        filter_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.filter_status_combo = QComboBox()
-        self.filter_status_combo.addItems(["All Statuses", "ACTIVE", "PRUNED", "COMPLETED", "PENDING"])
-        self.filter_status_combo.setToolTip("Filter trials by their status.")
-
-        self.filter_text_input = QLineEdit()
-        self.filter_text_input.setPlaceholderText("Filter by Trial ID or Algorithm Name...")
-        self.filter_text_input.setClearButtonEnabled(True)
-
-        filter_layout.addWidget(QLabel("Filter by:"))
-        filter_layout.addWidget(self.filter_status_combo)
-        filter_layout.addWidget(self.filter_text_input, 1) # Stretch the text input
-
-        # --- Trials Table ---
-        self.trials_table = QTableWidget()
-        self.setup_table()
-
-        # Add filter controls and table to a container
-        table_container = QWidget()
-        table_layout = QVBoxLayout(table_container)
-        table_layout.addWidget(filter_widget)
-        table_layout.addWidget(self.trials_table)
-        table_layout.setContentsMargins(0, 0, 0, 0)
-
-
+        bottom_layout = QVBoxLayout(bottom_pane)
         right_bottom_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Insights Group
-        self.insights_group = QGroupBox("Insights")
-        insights_layout = QVBoxLayout(self.insights_group)
-        self.insights_list = QListWidget()
-        self.insights_list.setWordWrap(True)
-        insights_layout.addWidget(self.insights_list)
-        insights_layout.setContentsMargins(0, 5, 0, 0)
-        self.insights_group.setLayout(insights_layout)
-
-        # Store the original stylesheet to be able to reset the animation
-        self.original_insights_stylesheet = self.insights_group.styleSheet()
-
-        # Log Group
-        log_group = QGroupBox("Log")
-        log_outer_layout = QVBoxLayout()
-        log_group.setLayout(log_outer_layout)
-
-        log_header_layout = QHBoxLayout()
-        log_header_layout.addStretch()
-        self.refresh_button = QPushButton("Refresh")
-        clear_log_button = QPushButton("Clear Log")
-        log_header_layout.addWidget(self.refresh_button)
-        log_header_layout.addWidget(clear_log_button)
-
-        self.log_text_edit = QTextEdit()
-        self.log_text_edit.setReadOnly(True)
-
-        log_outer_layout.addLayout(log_header_layout)
-        log_outer_layout.addWidget(self.log_text_edit)
-        log_outer_layout.setContentsMargins(0, 5, 0, 0)
-
-        self.clear_log_button = clear_log_button
-
-        right_bottom_splitter.addWidget(self.insights_group)
-        right_bottom_splitter.addWidget(log_group)
+        self.insights_widget = InsightsWidget()
+        self.log_widget = LogWidget()
+        right_bottom_splitter.addWidget(self.insights_widget)
+        right_bottom_splitter.addWidget(self.log_widget)
         right_bottom_splitter.setSizes([100, 200])
 
-        # Bottom Splitter
         bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
-        bottom_splitter.addWidget(table_container)
+        self.trials_table_widget = TrialsTableWidget()
+        bottom_splitter.addWidget(self.trials_table_widget)
         bottom_splitter.addWidget(right_bottom_splitter)
         bottom_splitter.setSizes([750, 450])
         bottom_layout.addWidget(bottom_splitter)
-        # This was incorrect, bottom_layout is already on bottom_pane
-        # bottom_pane.setLayout(bottom_layout)
 
-        splitter.addWidget(plot_container)
+        splitter.addWidget(self.vis_tabs)
         splitter.addWidget(bottom_pane)
         splitter.setSizes([500, 300])
 
     def _connect_signals(self):
         """Connects internal widget signals to the pane's public signals."""
-        self.trials_table.itemSelectionChanged.connect(self._on_trial_selection_changed)
-        self.trials_table.itemDoubleClicked.connect(self._on_trial_double_clicked)
-        self.insights_list.itemClicked.connect(self._on_insight_selected)
-        self.clear_log_button.clicked.connect(self.clear_log)
-        self.refresh_button.clicked.connect(self.refresh_requested)
-        self.trials_table.customContextMenuRequested.connect(self._show_trial_context_menu)
-        self.metric_combo.currentIndexChanged.connect(self._on_metric_changed)
-        self.filter_status_combo.currentIndexChanged.connect(self._update_trial_filter)
-        self.filter_text_input.textChanged.connect(self._update_trial_filter)
-        if self.legend:
-            self.legend.itemClicked.connect(self._on_legend_item_clicked)
-
-
-    # --- Public Methods for Updating the View ---
+        self.insights_widget.insight_selected.connect(self._on_insight_selected)
+        self.log_widget.refresh_requested.connect(self.refresh_requested)
+        self.trials_table_widget.trial_selected.connect(self.trial_selected)
+        self.trials_table_widget.trial_double_clicked.connect(self.trial_double_clicked)
+        self.trials_table_widget.prune_trial_requested.connect(self.prune_trial_requested)
+        self.trials_table_widget.prioritize_trial_requested.connect(
+            self.prioritize_trial_requested
+        )
+        self.trials_table_widget.spawn_trial_requested.connect(self.spawn_trial_requested)
 
     def update_view(self, view_model: ExperimentViewModel):
         """The main entry point for refreshing the entire results view."""
         self.view_model = view_model
-        self.update_trials_and_plots(view_model)
-        self.update_insights_list(view_model)
+        self.trials_table_widget.set_view_model(view_model)
 
-    def setup_plot(self):
-        self.plot_widget.setBackground("w")
-        self.plot_widget.setTitle("Real-Time Trial Performance", color="k", size="16pt")
-        self.plot_widget.setLabel(
-            "left", "Accuracy", color="k", **{"font-size": "12pt"}
+        for widget in self.visualization_widgets:
+            if hasattr(widget, "set_view_model"):
+                widget.set_view_model(view_model)
+            if hasattr(widget, "update_plots"):
+                widget.update_plots(view_model.trials)
+
+        self.trials_table_widget.update_table(
+            view_model.trials,
+            view_model.performance_metric_name,
+            self.trial_view_cache,
         )
-        self.plot_widget.setLabel("bottom", "Epoch", color="k", **{"font-size": "12pt"})
-        self.plot_widget.showGrid(x=True, y=True)
-        self.legend = CustomLegendItem()
-        self.legend.setParentItem(self.plot_widget.getPlotItem())
-        self.legend.anchor((1, 0), (1, 0), offset=(-10, 10))
-        self.plot_curve_visibility = {} # trial_id -> bool
-
-    def setup_table(self):
-        self.trials_table.setColumnCount(7)
-        self.trials_table.setHorizontalHeaderLabels(
-            [
-                "Trial ID",
-                "Algorithm",
-                "Status",
-                "Epoch",
-                "Accuracy",
-                "Loss",
-                "Est. Time/Epoch",
-            ]
-        )
-        self.trials_table.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers
-        )
-        self.trials_table.setToolTip("Double-click a row to view its hyperparameters.\nRight-click for more options.")
-        self.trials_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        header = self.trials_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(False)
-        self.trials_table.setSortingEnabled(True)
-        self.trials_table.setColumnWidth(0, 100)
-        self.trials_table.setColumnWidth(1, 120)
-        self.trials_table.setColumnWidth(2, 100)
-        self.trials_table.setColumnWidth(3, 60)
-        self.trials_table.setColumnWidth(4, 100)
-        self.trials_table.setColumnWidth(5, 100)
-        self.trials_table.setColumnWidth(6, 120)
-        self.trials_table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.trials_table.setSelectionMode(
-            QAbstractItemView.SelectionMode.SingleSelection
-        )
-
-    def _update_trial_filter(self):
-        """Filters the trials table based on the status combo box and text input."""
-        status_filter = self.filter_status_combo.currentText()
-        text_filter = self.filter_text_input.text().lower()
-
-        for row in range(self.trials_table.rowCount()):
-            # Column indices: 0 = Trial ID, 1 = Algorithm, 2 = Status
-            trial_id_item = self.trials_table.item(row, 0)
-            algorithm_item = self.trials_table.item(row, 1)
-            status_item = self.trials_table.item(row, 2)
-
-            if not all([trial_id_item, algorithm_item, status_item]):
-                continue
-
-            # Check status filter
-            status_match = (status_filter == "All Statuses" or status_item.text() == status_filter)
-
-            # Check text filter
-            text_match = (
-                text_filter in trial_id_item.text().lower() or
-                text_filter in algorithm_item.text().lower()
-            )
-
-            # Show or hide the row
-            self.trials_table.setRowHidden(row, not (status_match and text_match))
-
-    def update_trials_and_plots(self, view_model: ExperimentViewModel):
-        """Updates the trials table and plot widget from the ViewModel efficiently."""
-        metric_name = self.metric_combo.currentText() or view_model.performance_metric_name
-        self._update_available_metrics(view_model)
-
-        current_trial_ids = set(view_model.trials.keys())
-        cached_trial_ids = set(self.trial_view_cache.keys())
-
-        # --- Step 1: Remove trials that are no longer in the state ---
-        for trial_id in cached_trial_ids - current_trial_ids:
-            if trial_id in self.trial_row_map:
-                self.trials_table.removeRow(self.trial_row_map.pop(trial_id))
-            if trial_id in self.plot_curve_map:
-                self.plot_widget.removeItem(self.plot_curve_map.pop(trial_id))
-            del self.trial_view_cache[trial_id]
-
-        # --- Step 2: Add or update trials that have changed ---
-        for trial_id, ui_trial in view_model.trials.items():
-            if ui_trial != self.trial_view_cache.get(trial_id):
-                # Update the UI (table row and plot)
-                self._update_trial_ui(ui_trial, metric_name)
-                if trial_id in self.plot_curve_map:
-                    metric_list = ui_trial.results.get(metric_name, [])
-                    if metric_list:
-                        try:
-                            epochs, metrics = zip(*metric_list)
-                            self.plot_curve_map[trial_id].setData(epochs, metrics)
-                        except ValueError:
-                            self.plot_curve_map[trial_id].clear() # Handles empty list after zip
-
-                # Update the cache with the new state
-                self.trial_view_cache[trial_id] = ui_trial
-
-        # --- Step 3: Apply filters to the updated table ---
-        self._update_trial_filter()
-
-    def _update_trial_ui(self, ui_trial, metric_name: str):
-        """Updates or creates a row in the trials table for a given UITrial."""
-        trial_id = ui_trial.id
-
-        # Create a rich HTML tooltip with all hyperparameters
-        hparam_tooltip = "<b>Hyperparameters:</b><br>" + "<br>".join(
-            f"<b>{k}:</b> {v}" for k, v in ui_trial.hyperparameters.items()
-        )
-
-        if trial_id not in self.trial_row_map:
-            row_position = self.trials_table.rowCount()
-            self.trials_table.insertRow(row_position)
-            self.trial_row_map[trial_id] = row_position
-            self.plot_curve_visibility[trial_id] = True # Default to visible
-
-            name = f"{ui_trial.algorithm_name} ({trial_id[:6]})"
-            pen = ui_trial.pen
-            self.plot_curve_map[trial_id] = self.plot_widget.plot(
-                [], [], name=name, pen=pen, symbol="o", symbolSize=6, symbolBrush=pen.color()
-            )
-
-        row = self.trial_row_map[trial_id]
-        background_color = ui_trial.row_background_color
-        self._apply_plot_curve_styles()
-
-        # Use a mix of regular and numeric items for appropriate sorting
-        trial_id_item = QTableWidgetItem(trial_id)
-        if ui_trial.prioritized:
-            trial_id_item.setIcon(self.star_icon)
-
-        items = [
-            trial_id_item,
-            QTableWidgetItem(ui_trial.algorithm_name),
-            QTableWidgetItem(ui_trial.status),
-            NumericTableWidgetItem(ui_trial.display_epoch),
-            NumericTableWidgetItem(ui_trial.get_latest_metric(metric_name)),
-            NumericTableWidgetItem(ui_trial.get_latest_metric("loss")),
-            QTableWidgetItem(ui_trial.display_est_time),
-        ]
-
-        for col, item in enumerate(items):
-            item.setBackground(background_color)
-            item.setToolTip(hparam_tooltip)
-            self.trials_table.setItem(row, col, item)
-
-    def update_insights_list(self, view_model: ExperimentViewModel):
-        """Updates the insights list from the ViewModel efficiently."""
-        num_new_insights = len(view_model.insights) - self.displayed_insight_count
-        if num_new_insights <= 0:
-            return
-
-        new_insights = view_model.insights[-num_new_insights:]
-        for ui_insight in new_insights:
-            item = InsightListItem(ui_insight, self.insights_list)
-            self.insights_list.addItem(item)
-
-        self.displayed_insight_count = len(view_model.insights)
-        self.insights_list.scrollToBottom()
-
-        # Trigger animation only if there are new insights
-        if num_new_insights > 0:
-            self._trigger_insight_animation()
-
-    def _trigger_insight_animation(self):
-        """Animates the border and title of the 'Insights' group box to signal a new insight."""
-        # If animation is running, restart it to make it noticeable again
-        if self.insight_animation and self.insight_animation.state() == QPropertyAnimation.State.Running:
-            self.insight_animation.stop()
-
-        self.insight_animation = QPropertyAnimation(self, b"insightBorderColor")
-        self.insight_animation.setDuration(2000)  # A bit longer for a fade-out effect
-        self.insight_animation.setStartValue(QColor("#FFD700"))  # Gold color for highlight
-        # End with a transparent color to fade out the custom styling
-        self.insight_animation.setEndValue(QColor(0, 0, 0, 0))
-        self.insight_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        # Reset to original stylesheet when animation finishes
-        self.insight_animation.finished.connect(self._reset_insight_style)
-        self.insight_animation.start()
-
-    def _reset_insight_style(self):
-        """Resets the insights group box to its original, default stylesheet."""
-        self.insights_group.setStyleSheet(self.original_insights_stylesheet)
-
-    def _set_insight_border_color(self, color: QColor):
-        """Sets a prominent border and title background color for the insights group box."""
-        # Determine text color based on the background brightness for readability
-        text_color = "black" if color.lightnessF() > 0.5 else "white"
-        self.insights_group.setStyleSheet(f"""
-            QGroupBox {{
-                border: 2px solid {color.name(QColor.NameFormat.HexArgb)};
-                margin-top: 1em;
-                border-radius: 6px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-                background-color: {color.name(QColor.NameFormat.HexArgb)};
-                color: {text_color};
-                border-radius: 4px;
-            }}
-        """)
-
-    # This registers the custom property with Qt's meta-object system
-    insightBorderColor = pyqtProperty(QColor, fset=_set_insight_border_color)
-
-    def update_plot_highlight(
-        self, highlight_ids: set, view_model: ExperimentViewModel
-    ):
-        """Highlights a specific set of trials on the plot by re-applying all styles."""
-        # The new logic is now centralized in _apply_plot_curve_styles.
-        # We just need to trigger it. The highlight_ids are read from self.selected_insight_item.
-        self._apply_plot_curve_styles()
+        self.insights_widget.update_insights_list(view_model)
 
     def append_log_message(self, log_data: dict):
-        """Appends a structured log message to the text edit with color-coding."""
-        level = log_data.get("level", "INFO").upper()
-        message = log_data.get("message", "")
-
-        color_map = {
-            "INFO": "#000000",      # Black
-            "WARN": "#FFA500",      # Orange
-            "ERROR": "#DC143C",     # Crimson
-            "INSIGHT": "#8A2BE2",   # BlueViolet
-        }
-        color = color_map.get(level, "black")
-
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        formatted_message = (
-            f'<span style="color: #808080;">[{timestamp}]</span> '
-            f'<b style="color: {color};">[{level}]</b> '
-            f'<span style="color: #36454F;">{message}</span>'
-        )
-        self.log_text_edit.append(formatted_message)
-        self.log_text_edit.verticalScrollBar().setValue(
-            self.log_text_edit.verticalScrollBar().maximum()
-        )
-
-    def clear_log(self):
-        """Clears the log text edit."""
-        self.log_text_edit.clear()
-        self.append_log_message({"level": "INFO", "message": "Log cleared."})
+        """Delegates appending a log message to the LogWidget."""
+        self.log_widget.append_log_message(log_data)
 
     def clear_all(self):
         """Clears all UI elements for a new experiment."""
-        self.trials_table.setRowCount(0)
-        self.plot_widget.clear()
-        self.trial_row_map.clear()
-        self.plot_curve_map.clear()
         self.trial_view_cache.clear()
-        self.metric_combo.clear()
-        self.available_metrics.clear()
-        self.insights_list.clear()
-        self.insights_group.setStyleSheet("")  # Reset stylesheet
-        self.displayed_insight_count = 0
-        self.setup_plot()  # Re-add legend and titles
+        for widget in self.visualization_widgets:
+            if hasattr(widget, "clear"):
+                widget.clear()
+        self.insights_widget.clear()
+        self.log_widget.clear_log()
+        self.trials_table_widget.clear()
 
-    # --- Internal Signal Handlers ---
+    def _on_insight_selected(self, item: "InsightListItem"):
+        """Handles insight selection and highlights the plot and table."""
+        self.trials_table_widget.clear_highlights()
 
-    def _on_trial_selection_changed(self):
-        """Emits the ID of the selected trial."""
-        selected_items = self.trials_table.selectedItems()
-        if not selected_items:
-            self.trial_selected.emit("")  # Emit empty string to clear selection
+        selected_item = self.insights_widget.get_selected_item()
+        if not item or not selected_item or item != selected_item:
+            for widget in self.visualization_widgets:
+                if hasattr(widget, "update_plot_highlight"):
+                    widget.update_plot_highlight(set())
+            self.insights_widget.clear_selection()
             return
 
-        selected_row = self.trials_table.currentRow()
-        for tid, r in self.trial_row_map.items():
-            if r == selected_row:
-                self.trial_selected.emit(tid)
-                break
-
-    def _on_trial_double_clicked(self, item: QTableWidgetItem):
-        """Emits the ID of the double-clicked trial."""
-        row = item.row()
-        for tid, r in self.trial_row_map.items():
-            if r == row:
-                self.trial_double_clicked.emit(tid)
-                break
-
-    def _clear_table_highlights(self):
-        """Resets the background color of all table rows to their default."""
-        if not self.view_model:
-            return
-        for row in range(self.trials_table.rowCount()):
-            trial_id_item = self.trials_table.item(row, 0)
-            if trial_id_item:
-                ui_trial = self.view_model.trials.get(trial_id_item.text())
-                if ui_trial:
-                    for col in range(self.trials_table.columnCount()):
-                        self.trials_table.item(row, col).setBackground(
-                            ui_trial.row_background_color
-                        )
-
-    def _on_insight_selected(self, item: InsightListItem):
-        """Handles insight selection, emits trial IDs, and highlights the plot and table."""
-        if not isinstance(item, InsightListItem):
-            return
-
-        # --- Clear existing highlights and selection ---
-        self._clear_table_highlights()
-        if self.selected_insight_item == item:
-            self.insights_list.clearSelection()
-            self.selected_insight_item = None
-            self.insight_selected.emit(set())  # Emit empty set to clear plot highlights
-            return
-
-        # --- Set new selection and highlight ---
-        self.selected_insight_item = item
         highlight_ids = set(item.insight.trial_ids)
-        self.insight_selected.emit(highlight_ids)  # Signal for plot to highlight
+        for widget in self.visualization_widgets:
+            if hasattr(widget, "update_plot_highlight"):
+                widget.update_plot_highlight(highlight_ids)
+        highlight_color = QColor("#FFFACD")  # LemonChiffon
+        self.trials_table_widget.highlight_rows(highlight_ids, highlight_color)
 
-        # --- Highlight Table Rows ---
-        highlight_color = QColor("#FFFACD")  # LemonChiffon, a light yellow
-        for row in range(self.trials_table.rowCount()):
-            trial_id_item = self.trials_table.item(row, 0)
-            if trial_id_item and trial_id_item.text() in highlight_ids:
-                for col in range(self.trials_table.columnCount()):
-                    self.trials_table.item(row, col).setBackground(highlight_color)
+    def load_visualization_plugins(self):
+        """Loads all visualization plugins."""
+        # For now, we just hardcode the plugins.
+        # In the future, we could discover them dynamically.
+        self.visualization_plugins.append(PerformancePlotPlugin())
+        self.visualization_plugins.append(HyperparameterPCAPlugin())
 
-    def _on_legend_item_clicked(self, curve_item, label_item):
-        """Toggles the visibility of a plot curve when its legend item is clicked."""
-        # Find the trial_id associated with the clicked curve
-        clicked_trial_id = None
-        for trial_id, curve in self.plot_curve_map.items():
-            if curve is curve_item:
-                clicked_trial_id = trial_id
-                break
-
-        if clicked_trial_id:
-            # Toggle visibility state
-            self.plot_curve_visibility[clicked_trial_id] = not self.plot_curve_visibility.get(clicked_trial_id, True)
-            self._apply_plot_curve_styles()
-
-    def _apply_plot_curve_styles(self):
-        """Applies visibility and highlight styles to all plot curves."""
-        if not self.view_model:
-            return
-
-        # Get the set of highlighted trials from the currently selected insight, if any
-        highlight_ids = set()
-        if self.selected_insight_item:
-            highlight_ids = set(self.selected_insight_item.insight.trial_ids)
-
-        for trial_id, curve in self.plot_curve_map.items():
-            ui_trial = self.view_model.trials.get(trial_id)
-            if not ui_trial:
-                continue
-
-            pen = ui_trial.pen
-            color = pen.color()
-            is_visible = self.plot_curve_visibility.get(trial_id, True)
-            is_highlighted = trial_id in highlight_ids
-
-            if is_highlighted:
-                color.setAlpha(255)
-                curve.setPen(pg.mkPen(color=color, width=4))
-                curve.setZValue(100)
-            elif is_visible:
-                color.setAlpha(200) # Slightly less opaque than highlighted
-                curve.setPen(pg.mkPen(color=color, width=2))
-                curve.setZValue(0)
-            else:
-                color.setAlpha(15) # Barely visible
-                curve.setPen(pg.mkPen(color=color, width=1, style=Qt.PenStyle.DotLine))
-                curve.setZValue(-100)
-
-            # Update legend label color
-            for _, label in self.legend.items:
-                if label.text == curve.name():
-                    label.setText(label.text, color='k' if is_visible else 'gray')
-                    break
-
-
-    def _on_metric_changed(self):
-        """Handles the metric selection change by replotting all data."""
-        if not self.view_model:
-            return
-
-        metric_name = self.metric_combo.currentText()
-        if not metric_name:
-            return
-
-        # Update plot labels
-        self.plot_widget.setLabel("left", metric_name.replace("_", " ").title())
-        self.plot_widget.setTitle(f"Real-Time Trial Performance: {metric_name.replace('_', ' ').title()}", color="k", size="16pt")
-
-
-        # Update plot data for all existing curves
-        for trial_id, curve in self.plot_curve_map.items():
-            ui_trial = self.view_model.trials.get(trial_id)
-            if ui_trial:
-                metric_list = ui_trial.results.get(metric_name, [])
-                if metric_list:
-                    try:
-                        epochs, metrics = zip(*metric_list)
-                        curve.setData(epochs, metrics)
-                    except ValueError:
-                        curve.clear()
-                else:
-                    curve.clear()
-
-    def _update_available_metrics(self, view_model: ExperimentViewModel):
-        """Discovers and populates the metric combo box from trial data."""
-        new_metrics: Set[str] = set()
-        for trial in view_model.trials.values():
-            new_metrics.update(trial.results.keys())
-
-        if new_metrics != self.available_metrics:
-            self.available_metrics = new_metrics
-            current_selection = self.metric_combo.currentText()
-            self.metric_combo.blockSignals(True)
-            self.metric_combo.clear()
-            sorted_metrics = sorted(list(self.available_metrics))
-            if sorted_metrics:
-                self.metric_combo.addItems(sorted_metrics)
-                # Try to restore previous selection
-                if current_selection in sorted_metrics:
-                    self.metric_combo.setCurrentText(current_selection)
-                # Or set a sensible default
-                elif view_model.performance_metric_name in sorted_metrics:
-                    self.metric_combo.setCurrentText(view_model.performance_metric_name)
-            self.metric_combo.blockSignals(False)
-
-    def _show_trial_context_menu(self, pos):
-        """Creates and shows a context menu for a trial."""
-        trial_id = self._get_selected_trial_id()
-        if not trial_id or not self.view_model:
-            return
-
-        menu = QMenu()
-        prune_action = menu.addAction("Prune Trial")
-        prioritize_action = menu.addAction("Increase Priority")
-        spawn_action = menu.addAction("Spawn Similar Trial...")
-
-        # Disable actions based on trial status if needed
-        trial = self.view_model.trials.get(trial_id)
-        if trial and trial.status not in ["ACTIVE", "PENDING"]:
-            prune_action.setEnabled(False)
-            prioritize_action.setEnabled(False)
-
-        action = menu.exec(self.trials_table.mapToGlobal(pos))
-
-        if action == prune_action:
-            self._prune_selected_trial()
-        elif action == prioritize_action:
-            self._prioritize_selected_trial()
-        elif action == spawn_action:
-            self._spawn_similar_trial()
-
-    def _get_selected_trial_id(self) -> Optional[str]:
-        """Helper to get the ID of the currently selected trial."""
-        selected_items = self.trials_table.selectedItems()
-        if not selected_items:
-            return None
-
-        row = selected_items[0].row()
-        for tid, r in self.trial_row_map.items():
-            if r == row:
-                return tid
-        return None
-
-    def _prune_selected_trial(self):
-        trial_id = self._get_selected_trial_id()
-        if trial_id:
-            self.prune_trial_requested.emit(trial_id)
-
-    def _prioritize_selected_trial(self):
-        trial_id = self._get_selected_trial_id()
-        if trial_id:
-            self.prioritize_trial_requested.emit(trial_id)
-
-    def _spawn_similar_trial(self):
-        trial_id = self._get_selected_trial_id()
-        if trial_id:
-            self.spawn_trial_requested.emit(trial_id)
