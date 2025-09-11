@@ -8,6 +8,7 @@ from PyQt6.QtCore import pyqtProperty
 from PyQt6.QtCore import QPropertyAnimation
 from PyQt6.QtCore import Qt
 from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QEasingCurve
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QAbstractItemView
 from PyQt6.QtWidgets import QComboBox
@@ -28,7 +29,7 @@ from PyQt6.QtWidgets import QTextEdit
 from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWidgets import QWidget
 
-from .models import UIInsight
+from .models import UIInsight, UITrial
 from .view_model import ExperimentViewModel
 
 
@@ -119,6 +120,7 @@ class ResultsPane(QWidget):
         super().__init__(parent)
 
         # --- UI State and Data Maps ---
+        self.trial_view_cache: Dict[str, UITrial] = {}
         self.trial_row_map: Dict[str, int] = {}
         self.plot_curve_map: Dict[str, pg.PlotDataItem] = {}
         self.legend: Optional[pg.LegendItem] = None
@@ -207,6 +209,9 @@ class ResultsPane(QWidget):
         insights_layout.addWidget(self.insights_list)
         insights_layout.setContentsMargins(0, 5, 0, 0)
         self.insights_group.setLayout(insights_layout)
+
+        # Store the original stylesheet to be able to reset the animation
+        self.original_insights_stylesheet = self.insights_group.styleSheet()
 
         # Log Group
         log_group = QGroupBox("Log")
@@ -345,32 +350,39 @@ class ResultsPane(QWidget):
             self.trials_table.setRowHidden(row, not (status_match and text_match))
 
     def update_trials_and_plots(self, view_model: ExperimentViewModel):
-        """Updates the trials table and plot widget from the ViewModel."""
-        # Use the combo box's current selection as the metric to display
+        """Updates the trials table and plot widget from the ViewModel efficiently."""
         metric_name = self.metric_combo.currentText() or view_model.performance_metric_name
         self._update_available_metrics(view_model)
 
-
         current_trial_ids = set(view_model.trials.keys())
-        existing_ui_trial_ids = set(self.trial_row_map.keys())
+        cached_trial_ids = set(self.trial_view_cache.keys())
 
-        for trial_id in existing_ui_trial_ids - current_trial_ids:
-            row = self.trial_row_map.pop(trial_id)
-            self.trials_table.removeRow(row)
+        # --- Step 1: Remove trials that are no longer in the state ---
+        for trial_id in cached_trial_ids - current_trial_ids:
+            if trial_id in self.trial_row_map:
+                self.trials_table.removeRow(self.trial_row_map.pop(trial_id))
             if trial_id in self.plot_curve_map:
                 self.plot_widget.removeItem(self.plot_curve_map.pop(trial_id))
+            del self.trial_view_cache[trial_id]
 
+        # --- Step 2: Add or update trials that have changed ---
         for trial_id, ui_trial in view_model.trials.items():
-            self._update_trial_ui(ui_trial, metric_name)
-            if trial_id in self.plot_curve_map:
-                metric_list = ui_trial.results.get(metric_name, [])
-                if metric_list:
-                    try:
-                        epochs, metrics = zip(*metric_list)
-                        self.plot_curve_map[trial_id].setData(epochs, metrics)
-                    except ValueError:
-                        self.plot_curve_map[trial_id].clear()
+            if ui_trial != self.trial_view_cache.get(trial_id):
+                # Update the UI (table row and plot)
+                self._update_trial_ui(ui_trial, metric_name)
+                if trial_id in self.plot_curve_map:
+                    metric_list = ui_trial.results.get(metric_name, [])
+                    if metric_list:
+                        try:
+                            epochs, metrics = zip(*metric_list)
+                            self.plot_curve_map[trial_id].setData(epochs, metrics)
+                        except ValueError:
+                            self.plot_curve_map[trial_id].clear() # Handles empty list after zip
 
+                # Update the cache with the new state
+                self.trial_view_cache[trial_id] = ui_trial
+
+        # --- Step 3: Apply filters to the updated table ---
         self._update_trial_filter()
 
     def _update_trial_ui(self, ui_trial, metric_name: str):
@@ -437,21 +449,44 @@ class ResultsPane(QWidget):
             self._trigger_insight_animation()
 
     def _trigger_insight_animation(self):
-        """Animates the border of the 'Insights' group box to signal a new insight."""
+        """Animates the border and title of the 'Insights' group box to signal a new insight."""
+        # If animation is running, restart it to make it noticeable again
         if self.insight_animation and self.insight_animation.state() == QPropertyAnimation.State.Running:
-            return  # Don't start a new animation if one is already running
+            self.insight_animation.stop()
 
         self.insight_animation = QPropertyAnimation(self, b"insightBorderColor")
-        self.insight_animation.setDuration(1500)
-        self.insight_animation.setStartValue(QColor("#0078D7"))  # Start with highlight color
-        self.insight_animation.setEndValue(QColor("lightgray"))  # End with default color
-        self.insight_animation.setEasingCurve(Qt.EasingCurve.OutCubic)
+        self.insight_animation.setDuration(2000)  # A bit longer for a fade-out effect
+        self.insight_animation.setStartValue(QColor("#FFD700"))  # Gold color for highlight
+        # End with a transparent color to fade out the custom styling
+        self.insight_animation.setEndValue(QColor(0, 0, 0, 0))
+        self.insight_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        # Reset to original stylesheet when animation finishes
+        self.insight_animation.finished.connect(self._reset_insight_style)
         self.insight_animation.start()
 
-    # This is a custom property setter required for QPropertyAnimation to work on a non-standard property
+    def _reset_insight_style(self):
+        """Resets the insights group box to its original, default stylesheet."""
+        self.insights_group.setStyleSheet(self.original_insights_stylesheet)
+
     def _set_insight_border_color(self, color: QColor):
-        """Sets the border color of the insights group box."""
-        self.insights_group.setStyleSheet(f"QGroupBox {{ border: 1px solid {color.name()}; margin-top: 1em; }}")
+        """Sets a prominent border and title background color for the insights group box."""
+        # Determine text color based on the background brightness for readability
+        text_color = "black" if color.lightnessF() > 0.5 else "white"
+        self.insights_group.setStyleSheet(f"""
+            QGroupBox {{
+                border: 2px solid {color.name(QColor.NameFormat.HexArgb)};
+                margin-top: 1em;
+                border-radius: 6px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                background-color: {color.name(QColor.NameFormat.HexArgb)};
+                color: {text_color};
+                border-radius: 4px;
+            }}
+        """)
 
     # This registers the custom property with Qt's meta-object system
     insightBorderColor = pyqtProperty(QColor, fset=_set_insight_border_color)
@@ -499,6 +534,7 @@ class ResultsPane(QWidget):
         self.plot_widget.clear()
         self.trial_row_map.clear()
         self.plot_curve_map.clear()
+        self.trial_view_cache.clear()
         self.metric_combo.clear()
         self.available_metrics.clear()
         self.insights_list.clear()
@@ -529,42 +565,45 @@ class ResultsPane(QWidget):
                 self.trial_double_clicked.emit(tid)
                 break
 
+    def _clear_table_highlights(self):
+        """Resets the background color of all table rows to their default."""
+        if not self.view_model:
+            return
+        for row in range(self.trials_table.rowCount()):
+            trial_id_item = self.trials_table.item(row, 0)
+            if trial_id_item:
+                ui_trial = self.view_model.trials.get(trial_id_item.text())
+                if ui_trial:
+                    for col in range(self.trials_table.columnCount()):
+                        self.trials_table.item(row, col).setBackground(
+                            ui_trial.row_background_color
+                        )
+
     def _on_insight_selected(self, item: InsightListItem):
-        """Handles insight selection and emits the relevant trial IDs."""
+        """Handles insight selection, emits trial IDs, and highlights the plot and table."""
         if not isinstance(item, InsightListItem):
             return
 
+        # --- Clear existing highlights and selection ---
+        self._clear_table_highlights()
         if self.selected_insight_item == item:
             self.insights_list.clearSelection()
             self.selected_insight_item = None
-            self.insight_selected.emit(set())  # Emit empty set to clear highlights
+            self.insight_selected.emit(set())  # Emit empty set to clear plot highlights
             return
 
+        # --- Set new selection and highlight ---
         self.selected_insight_item = item
         highlight_ids = set(item.insight.trial_ids)
-        self.insight_selected.emit(highlight_ids)
+        self.insight_selected.emit(highlight_ids)  # Signal for plot to highlight
 
-        # --- Insight Focus Mode ---
-        if self.selected_insight_item:
-            # When an insight is selected, filter the table to show only relevant trials
-            short_ids = [tid[:8] for tid in highlight_ids]
-            filter_text = "|".join(short_ids)
-            self.filter_text_input.setText(filter_text)
-            self.filter_status_combo.setCurrentText("All Statuses")
-        else:
-            # When selection is cleared, clear the filter
-            self.filter_text_input.clear()
-
-        # Also select the rows in the table
-        self.trials_table.clearSelection()
-        self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        # --- Highlight Table Rows ---
+        highlight_color = QColor("#FFFACD")  # LemonChiffon, a light yellow
         for row in range(self.trials_table.rowCount()):
-            # Check if row is visible before selecting
-            if not self.trials_table.isRowHidden(row):
-                trial_id_item = self.trials_table.item(row, 0)
-                if trial_id_item and any(tid.startswith(trial_id_item.text()) for tid in highlight_ids):
-                     self.trials_table.selectRow(row)
-        self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            trial_id_item = self.trials_table.item(row, 0)
+            if trial_id_item and trial_id_item.text() in highlight_ids:
+                for col in range(self.trials_table.columnCount()):
+                    self.trials_table.item(row, col).setBackground(highlight_color)
 
     def _on_legend_item_clicked(self, curve_item, label_item):
         """Toggles the visibility of a plot curve when its legend item is clicked."""

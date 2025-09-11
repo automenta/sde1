@@ -35,6 +35,7 @@ class ExperimentViewModel(QObject):
         self.valid_actions: Dict[str, Any] = {}
         self.challenge_name: str = ""
         self.performance_metric_name: str = "accuracy"  # Default
+        self.progress: int = 0
 
         self._setup_icons()
         self._trial_plot_colors: Dict[str, pg.QtGui.QColor] = {}

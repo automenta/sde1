@@ -33,40 +33,54 @@ class UITrial:
 
     @property
     def pen(self) -> pg.QtGui.QPen:
-        """Determines the pen style for this trial's plot curve."""
-        # Start with the base color assigned by the ViewModel
+        """Determines the pen style for this trial's plot curve based on its status."""
         color = self.plot_color
         style = pg.QtCore.Qt.PenStyle.SolidLine
         width = 2
 
+        # The 'best' trial gets a unique, standout style
         if self.is_best:
-            color = pg.mkColor("#FFD700")  # Gold
-            width = 4
-        elif self.status == "FAILED":
-            color = pg.mkColor("#DC143C")  # Crimson
-            style = pg.QtCore.Qt.PenStyle.DotLine
-        elif self.status == "PRUNED":
-            color = pg.mkColor("#808080")  # Gray
-            style = pg.QtCore.Qt.PenStyle.DotLine
-        elif self.status == "COMPLETED":
-            color = pg.mkColor("#0000FF")  # Blue
+            pen = pg.mkPen(color="#FFD700", width=4) # Gold
+            pen.setCosmetic(True) # Ensures width is consistent when zooming
+            return pen
 
-        pen = pg.mkPen(color=color, width=width)
-        pen.setStyle(style)
+        # Other statuses modify the base plot color and style
+        if self.status == "ACTIVE":
+            width = 3 # Make active trials slightly thicker
+        elif self.status == "PRUNED":
+            style = pg.QtCore.Qt.PenStyle.DotLine
+            color.setAlphaF(0.6) # Make it semi-transparent
+        elif self.status == "FAILED":
+            style = pg.QtCore.Qt.PenStyle.DashLine
+            color.setAlphaF(0.7)
+        elif self.status == "COMPLETED":
+            # Completed trials are solid but slightly less prominent than active ones
+            width = 2
+        elif self.status == "PENDING":
+             width = 1
+             style = pg.QtCore.Qt.PenStyle.DotLine
+
+        pen = pg.mkPen(color=color, width=width, style=style)
+        pen.setCosmetic(True)
         return pen
 
     @property
     def row_background_color(self) -> QColor:
-        """Determines the background color for this trial's row in the table."""
+        """Determines a subtle background color for this trial's row in the table."""
         if self.is_best:
-            return QColor("#FFFACD")  # LemonChiffon
-        if self.status == "FAILED":
-            return QColor("#F08080")  # LightCoral
-        if self.status == "PRUNED":
-            return QColor("#D3D3D3")  # LightGray
-        if self.status == "COMPLETED":
-            return QColor("#ADD8E6")  # LightBlue
-        return QColor("white")
+            return QColor("#FFFACD")  # LemonChiffon (for gold)
+        if self.prioritized:
+            return QColor("#E6F7FF") # Very light blue for prioritized trials
+
+        # Colors are subtle to avoid a "rainbow" effect and keep focus on the data
+        status_colors = {
+            "ACTIVE": QColor("#E9FEE9"),      # A hint of green
+            "COMPLETED": QColor("#F0F8FF"),   # AliceBlue
+            "PRUNED": QColor("#F5F5F5"),      # A light gray (WhiteSmoke)
+            "FAILED": QColor("#FFF0F0"),      # A hint of red (Snow)
+            "PENDING": QColor("white"),
+        }
+        return status_colors.get(self.status, QColor("white"))
 
     def get_latest_metric(self, metric_name: str) -> str:
         """Formats the latest metric value for display."""

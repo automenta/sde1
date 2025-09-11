@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import QPushButton
 from PyQt6.QtWidgets import QSlider
 from PyQt6.QtWidgets import QSpinBox
 from PyQt6.QtWidgets import QTableWidget
+from PyQt6.QtWidgets import QTableWidgetItem
 from PyQt6.QtWidgets import QTextEdit
 from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWidgets import QWidget
@@ -375,7 +376,7 @@ class SetupPane(QWidget):
         for algo_id, algo_data in algorithms.items():
             row_position = self.algorithms_table.rowCount()
             self.algorithms_table.insertRow(row_position)
-            self.algorithms_table.setItem(row_position, 0, QListWidgetItem(algo_data.name))
+            self.algorithms_table.setItem(row_position, 0, QTableWidgetItem(algo_data.name))
 
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
