@@ -336,3 +336,109 @@ class SpawnDialog(QDialog):
             elif isinstance(widget, QLineEdit):
                 new_hparams[key] = widget.text()
         return new_hparams
+
+
+class SimpleRunDialog(QDialog):
+    """A dialog to show default hyperparameters for a simple run and allow edits."""
+
+    # Custom return codes
+    RunWithDefaults = 100
+    RunWithEdits = 101
+
+    def __init__(self, models: list[ModelDefinition], parent=None):
+        super().__init__(parent)
+        self.models = models
+        self.setWindowTitle("Confirm Hyperparameters for Simple Run")
+        self.setMinimumSize(500, 400)
+
+        main_layout = QVBoxLayout(self)
+        self.editor_widgets: Dict[str, Dict[str, QWidget]] = {}
+
+        # --- Parameters ---
+        params_group = QGroupBox("Default Hyperparameters")
+        params_main_layout = QVBoxLayout(params_group)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        self.params_layout = QVBoxLayout(scroll_content)
+        scroll_area.setWidget(scroll_content)
+        params_main_layout.addWidget(scroll_area)
+
+        # --- Dialog Buttons ---
+        self.button_box = QDialogButtonBox()
+        self.run_defaults_button = self.button_box.addButton(
+            "Run with Defaults", QDialogButtonBox.ButtonRole.AcceptRole
+        )
+        self.run_edits_button = self.button_box.addButton(
+            "Run with Edits", QDialogButtonBox.ButtonRole.AcceptRole
+        )
+        self.cancel_button = self.button_box.addButton(
+            QDialogButtonBox.StandardButton.Cancel
+        )
+
+        self.run_defaults_button.clicked.connect(self.accept_defaults)
+        self.run_edits_button.clicked.connect(self.accept_edits)
+        self.cancel_button.clicked.connect(self.reject)
+
+        main_layout.addWidget(params_group, 1)
+        main_layout.addWidget(self.button_box)
+
+        self._populate_hyperparameters()
+
+    def _populate_hyperparameters(self):
+        """Create widgets for each model's default hyperparameters."""
+        for model_def in self.models:
+            model_group = QGroupBox(model_def.name)
+            form_layout = QFormLayout(model_group)
+            self.editor_widgets[model_def.name] = {}
+
+            schema = model_def.hyperparameter_schema
+            for param_type in ["model_params", "optimizer_params"]:
+                if param_type not in schema:
+                    continue
+                for param_name, properties in schema[param_type].items():
+                    default_value = properties.get("default")
+                    widget: QWidget
+
+                    if properties["type"] == "float":
+                        widget = QDoubleSpinBox()
+                        widget.setRange(properties["min"], properties["max"])
+                        widget.setDecimals(6)
+                        widget.setValue(default_value or properties["min"])
+                    elif properties["type"] == "int":
+                        widget = QSpinBox()
+                        widget.setRange(properties["min"], properties["max"])
+                        widget.setValue(default_value or properties["min"])
+                    elif "options" in properties:
+                        widget = QComboBox()
+                        widget.addItems([str(o) for o in properties["options"]])
+                        if default_value:
+                            widget.setCurrentText(str(default_value))
+                    else:
+                        widget = QLineEdit(str(default_value or ""))
+
+                    self.editor_widgets[model_def.name][param_name] = widget
+                    form_layout.addRow(param_name, widget)
+
+            if self.params_layout is not None:
+                self.params_layout.addWidget(model_group)
+
+    def get_hyperparameters(self) -> dict:
+        """Constructs the hyperparameter dictionary from the UI widgets."""
+        hparams = {}
+        for model_name, widgets in self.editor_widgets.items():
+            hparams[model_name] = {}
+            for param_name, widget in widgets.items():
+                if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
+                    hparams[model_name][param_name] = widget.value()
+                elif isinstance(widget, QComboBox):
+                    hparams[model_name][param_name] = widget.currentText()
+                elif isinstance(widget, QLineEdit):
+                    hparams[model_name][param_name] = widget.text()
+        return hparams
+
+    def accept_defaults(self):
+        self.done(self.RunWithDefaults)
+
+    def accept_edits(self):
+        self.done(self.RunWithEdits)

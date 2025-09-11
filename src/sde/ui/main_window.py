@@ -19,6 +19,7 @@ from ..engine.orchestrator import ExperimentOrchestrator
 from ..models import AVAILABLE_MODELS
 from .hyperparameters import HyperparameterDialog
 from .hyperparameters import HyperparameterViewerDialog
+from .hyperparameters import SimpleRunDialog
 from .hyperparameters import SpawnDialog
 from .results_pane import ResultsPane
 from .setup_pane import SetupPane
@@ -39,7 +40,6 @@ class MainWindow(QMainWindow):
         # --- Backend and ViewModel ---
         self.orchestrator = ExperimentOrchestrator()
         self.view_model = ExperimentViewModel(self.style())
-        self.simple_run_hparams = {}
 
         self._init_ui()
         self._connect_signals()
@@ -85,7 +85,6 @@ class MainWindow(QMainWindow):
         self.setup_pane.stop_run_requested.connect(self.stop_experiment)
         self.setup_pane.save_run_requested.connect(self.save_experiment)
         self.setup_pane.load_run_requested.connect(self.load_experiment)
-        self.setup_pane.edit_hparams_requested.connect(self.edit_simple_hyperparameters)
         self.setup_pane.throttle_changed.connect(self.update_throttle)
         self.setup_pane.remove_algorithm_requested.connect(self.remove_algorithm)
 
@@ -119,74 +118,59 @@ class MainWindow(QMainWindow):
             self.append_log_message({"level": "ERROR", "message": f"Unknown run mode: {run_mode}"})
 
     def start_simple_experiment(self, settings: dict):
-        """Dispatches actions to the orchestrator to build and start an experiment.
-        """
-        dataset_name, selected_models = self.setup_pane.get_experiment_settings()
-        if not dataset_name or not selected_models:
-            QMessageBox.warning(
-                self,
-                "Missing Information",
-                "Please select a dataset and at least one model before starting an experiment."
-            )
+        """Handles the 'Simple' run mode by showing the SimpleRunDialog."""
+        dataset_name, selected_models_names = self.setup_pane.get_experiment_settings()
+        if not dataset_name or not selected_models_names:
+            QMessageBox.warning(self, "Missing Information", "Please select a dataset and at least one model.")
             return
 
+        selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
+        dialog = SimpleRunDialog(selected_model_defs, self)
+        result = dialog.exec()
+
+        if result == QDialog.DialogCode.Rejected:
+            self.append_log_message({"level": "INFO", "message": "Experiment start cancelled by user."})
+            return
+
+        # --- Proceed with experiment setup ---
         self.append_log_message({
             "level": "INFO",
-            "message": f"Configuring experiment on '{dataset_name}' with models: {selected_models}"
+            "message": f"Configuring experiment on '{dataset_name}' with models: {selected_models_names}"
         })
         self._clear_previous_experiment()
 
-        # --- Dispatch Actions ---
         challenge_def = AVAILABLE_DATASETS[dataset_name]
         self.orchestrator.dispatch(
             ActionType.SET_CHALLENGE, {"name": dataset_name, "type": challenge_def.type}
         )
 
-        # Use custom hparams if they exist, otherwise use defaults
-        custom_hparams = self.simple_run_hparams.get("models", {}) if self.simple_run_hparams else {}
+        custom_hparams = {}
+        if result == SimpleRunDialog.RunWithEdits:
+            custom_hparams = dialog.get_hyperparameters()
+            self.append_log_message({"level": "INFO", "message": "Starting run with custom hyperparameters."})
+        else: # RunWithDefaults
+            self.append_log_message({"level": "INFO", "message": "Starting run with default hyperparameters."})
 
-        for model_name in selected_models:
+
+        for model_name in selected_models_names:
+            model_def = AVAILABLE_MODELS[model_name]
+            # For a simple run, the parameter space IS the set of single values.
+            # The backend will create a single trial from this.
+            param_space = {}
+            # Use custom hparams if they exist for this model
             if model_name in custom_hparams:
-                # This logic is now similar to the tuning dialog's logic
-                model_params = custom_hparams[model_name]
-                param_space = {}
-                for param_type in model_params.values():
-                    for param_name, properties in param_type.items():
-                         param_space[param_name] = {
-                            "type": "float", "min": properties["min"], "max": properties["max"],
-                            "scale": properties.get("scale", "linear"),
-                        }
-                self.append_log_message({"level": "INFO", "message": f"Using custom hyperparameter space for {model_name}."})
+                 param_space = custom_hparams[model_name]
             else:
-                model_def = AVAILABLE_MODELS[model_name]
-                param_space = self._create_default_param_space(model_def)
-                self.append_log_message({"level": "INFO", "message": f"Using default hyperparameter space for {model_name}."})
+                # Otherwise, extract defaults from the schema
+                for param_type, params in model_def.hyperparameter_schema.items():
+                    for param_name, properties in params.items():
+                        param_space[param_name] = properties.get("default")
 
             self.orchestrator.dispatch(
-                ActionType.ADD_ALGORITHM, {"name": model_name, "parameter_space": param_space}
+                ActionType.ADD_ALGORITHM, {"name": model_name, "parameter_space": param_space, "is_simple_run": True}
             )
 
-        # The settings dict already contains all execution settings from the SetupPane
         self.orchestrator.dispatch(ActionType.START_RUN, settings)
-
-    def edit_simple_hyperparameters(self):
-        """Opens a dialog to let the user edit the hyperparameter space for a simple run."""
-        _, selected_models_names = self.setup_pane.get_experiment_settings()
-        if not selected_models_names:
-            QMessageBox.warning(self, "Warning", "Please select at least one model to edit its parameters.")
-            return
-
-        # If there are cached hparams, use them to pre-populate the dialog
-        initial_config = self.simple_run_hparams or None
-
-        selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
-        dialog = HyperparameterDialog(selected_model_defs, self, initial_config=initial_config)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.simple_run_hparams = dialog.get_configuration()
-            self.append_log_message({
-                "level": "INFO",
-                "message": "Custom hyperparameter space saved. It will be used for the next 'Simple' run."
-            })
 
     def open_tuning_dialog(self, settings: dict):
         """Opens the tuning dialog and configures the experiment via the orchestrator."""
@@ -248,7 +232,6 @@ class MainWindow(QMainWindow):
         self.view_model.clear()
         self.results_pane.clear_all()
         self.setup_pane.clear_algorithms_table()
-        self.simple_run_hparams = {}
 
     def _create_default_param_space(self, model_def: dict) -> dict:
         """Creates a detailed, default parameter space for a given model,

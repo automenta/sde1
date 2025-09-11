@@ -40,7 +40,6 @@ class SetupPane(QWidget):
     stop_run_requested = pyqtSignal()
     save_run_requested = pyqtSignal()
     load_run_requested = pyqtSignal()
-    edit_hparams_requested = pyqtSignal()
     dataset_changed = pyqtSignal(str)
     throttle_changed = pyqtSignal(int)
     remove_algorithm_requested = pyqtSignal(str)
@@ -139,12 +138,6 @@ class SetupPane(QWidget):
         run_config_form_layout.addRow("Run Mode:", self.run_mode_combo)
         run_config_form_layout.addRow("Trials per Algorithm:", self.trials_per_algo_spinbox)
 
-        self.edit_hparams_button = QPushButton("Edit Hyperparameters...")
-        self.edit_hparams_button.setToolTip(
-            "For 'Simple' mode, this allows you to view and override the default\n"
-            "hyperparameter sampling space for the selected models."
-        )
-        run_config_form_layout.addRow(self.edit_hparams_button)
 
 
         # --- Experiment Controls ---
@@ -233,7 +226,6 @@ class SetupPane(QWidget):
         self.stop_button.clicked.connect(self.stop_run_requested)
         self.save_button.clicked.connect(self.save_run_requested)
         self.load_button.clicked.connect(self.load_run_requested)
-        self.edit_hparams_button.clicked.connect(self.edit_hparams_requested)
         self.throttle_slider.valueChanged.connect(self.throttle_changed)
         self.throttle_slider.valueChanged.connect(lambda v: self.throttle_label.setText(f"{v}%"))
 
@@ -363,11 +355,6 @@ class SetupPane(QWidget):
         self.dataset_combo.setEnabled(not has_challenge)
         self.model_list.setEnabled("ADD_ALGORITHM" in global_actions)
         self.settings_group.setEnabled(status == "DEFINING")
-        is_simple_mode = self.run_mode_combo.currentText() == "Simple"
-        can_edit_hparams = (
-            status == "DEFINING" and is_simple_mode and self.model_list.selectedItems()
-        )
-        self.edit_hparams_button.setEnabled(can_edit_hparams)
 
     def update_algorithm_table(self, algorithms: dict, valid_actions: dict):
         self.algorithms_table.setRowCount(0)
