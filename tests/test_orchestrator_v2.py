@@ -3,12 +3,12 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 from sde.core.actions import ActionType
-from sde.core.types import AlgorithmConfig
-from sde.core.types import ExecutionSettings
-from sde.core.types import Experiment
-from sde.core.types import ExperimentStatus
-from sde.core.types import Trial
-from sde.core.types import TrialStatus
+from sde.core.domain import AlgorithmConfig
+from sde.core.domain import ExecutionSettings
+from sde.core.domain import Experiment
+from sde.core.domain import ExperimentStatus
+from sde.core.domain import Trial
+from sde.core.domain import TrialStatus
 from sde.engine.action_validator import ActionValidator
 from sde.engine.orchestrator import ExperimentOrchestrator
 

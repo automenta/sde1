@@ -7,8 +7,8 @@ from sde.core.domain import Trial
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
 from sde.engine.worker import Worker
-from sde.models.types import DatasetType
-from sde.models.types import ModelDefinition
+from sde.core.types import DatasetType
+from sde.core.types import ModelDefinition
 
 
 # Mock SdeModel to avoid needing a real torch model

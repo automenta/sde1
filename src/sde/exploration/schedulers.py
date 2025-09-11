@@ -8,12 +8,12 @@ from typing import Dict
 from typing import List
 from typing import Tuple
 
-from ..challenges.utils import _generate_random_hyperparameters
-from ..core.types import AlgorithmConfig
-from ..core.types import Trial
-from ..core.types import TrialStatus
-from ..core.types import WorkUnit
-from ..core.types import WorkUnitType
+from sde.challenges.utils import _generate_random_hyperparameters
+from sde.core.domain import AlgorithmConfig
+from sde.core.domain import Trial
+from sde.core.domain import TrialStatus
+from sde.core.domain import WorkUnit
+from sde.core.domain import WorkUnitType
 
 
 class AdaptiveScheduler(ABC):

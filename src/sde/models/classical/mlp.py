@@ -1,8 +1,8 @@
 import numpy as np
 import torch.nn as nn
 
-from ...models.types import DatasetType
-from ...models.types import ModelDefinition
+from sde.core.types import DatasetType
+from sde.core.types import ModelDefinition
 
 # --- 1. The PyTorch Model ---
 

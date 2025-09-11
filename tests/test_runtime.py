@@ -2,11 +2,11 @@ import unittest
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
-from sde.core.types import Experiment, Trial
-from sde.core.types import ExecutionSettings
-from sde.core.types import TrialStatus
-from sde.core.types import WorkUnit
-from sde.core.types import WorkUnitType
+from sde.core.domain import Experiment, Trial
+from sde.core.domain import ExecutionSettings
+from sde.core.domain import TrialStatus
+from sde.core.domain import WorkUnit
+from sde.core.domain import WorkUnitType
 from sde.engine.runtime import SdeRuntimeEngine
 
 

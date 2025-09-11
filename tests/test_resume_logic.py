@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from sde.core.types import Experiment, Trial, TrialStatus, WorkUnit, WorkUnitType, ExecutionSettings, ExperimentStatus
+from sde.core.domain import Experiment, Trial, TrialStatus, WorkUnit, WorkUnitType, ExecutionSettings, ExperimentStatus
 from sde.exploration.schedulers import SuccessiveHalvingScheduler
 from sde.engine.runtime import SdeRuntimeEngine
 

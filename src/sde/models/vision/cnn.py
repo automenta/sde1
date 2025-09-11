@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ...models.types import DatasetType
-from ...models.types import ModelDefinition
-from ...models.types import SdeModel
+from sde.core.types import DatasetType
+from sde.core.types import ModelDefinition
+from sde.core.types import SdeModel
 
 
 class SimpleCNN(SdeModel):

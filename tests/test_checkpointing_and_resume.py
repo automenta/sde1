@@ -9,9 +9,9 @@ from unittest.mock import patch
 import numpy as np
 import torch
 from sde.challenges import AVAILABLE_DATASETS
-from sde.core.types import Trial
-from sde.core.types import WorkUnit
-from sde.core.types import WorkUnitType
+from sde.core.domain import Trial
+from sde.core.domain import WorkUnit
+from sde.core.domain import WorkUnitType
 from sde.engine.worker import Worker
 from sde.models import AVAILABLE_MODELS
 

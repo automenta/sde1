@@ -13,8 +13,8 @@ from ..config import get_checkpoints_dir
 from sde.core.domain import Trial
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
-from ..models.types import DatasetDefinition
-from ..models.types import ModelDefinition
+from sde.core.types import DatasetDefinition
+from sde.core.types import ModelDefinition
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)

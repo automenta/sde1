@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import QTreeWidgetItem
 from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWidgets import QWidget
 
-from ..models.types import ModelDefinition
+from sde.core.types import ModelDefinition
 
 
 class HyperparameterViewerDialog(QDialog):
