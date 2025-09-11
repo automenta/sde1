@@ -160,13 +160,15 @@ This step-by-step process is the "heartbeat" of the SDE:
 1.  **Action:** A user performs an action in the UI (e.g., clicks "Start Run").
 2.  **Dispatch:** The UI sends a corresponding action (e.g., `{'type': 'START_RUN', ...}`) to the `ExperimentOrchestrator`.
 3.  **Validation:** The `Orchestrator` uses the `ActionValidator` to check if the action is valid. If not, it logs a warning and stops.
-4.  **Command:** The `Orchestrator` mutates its state (e.g., sets `experiment.status` to `RUNNING`) and issues a command to the `SdeRuntimeEngine` (e.g., `runtime.start()`).
-5.  **Initialization:** The `RuntimeEngine`, on starting its background thread, consults the `AdaptiveScheduler` to generate the initial set of `WorkUnit`s and adds them to its `PriorityQueue`.
-6.  **Dispatch:** The `RuntimeEngine`'s loop pulls a batch of the highest-priority `WorkUnit`s from the queue and sends them to the `Compute Scheduler`.
-7.  **Execute:** The `Compute Scheduler` assigns each `WorkUnit` to a free `Worker` process, which executes the task (e.g., trains one epoch).
-8.  **Report:** The `Worker` returns the results to the `Compute Scheduler`, which yields them back to the `RuntimeEngine`.
-9.  **Update:** The `RuntimeEngine` receives the result and passes it to the `DataStore`'s `record_work_unit_result` method, which updates the relevant `Trial` object. The `RuntimeEngine` then sends the updated trial data to the `Orchestrator` via a callback.
-10. **Analyze & Reschedule:** The `RuntimeEngine` does two things in parallel:
+4.  **Command:** The `Orchestrator` dispatches a command (e.g., `START_RUN`) to the `SdeRuntimeEngine`. **Crucially, the Orchestrator does *not* mutate its own state at this point.** It waits for confirmation.
+5.  **Initialization:** The `RuntimeEngine`, running in a background thread, receives the command. On `START_RUN`, it consults the `AdaptiveScheduler` to generate the initial `WorkUnit`s and adds them to its internal work queue.
+6.  **Confirmation & Execution:**
+    *   The `RuntimeEngine` emits a confirmation event back to the `Orchestrator` (e.g., `RUN_STARTED`).
+    *   Simultaneously, it begins dispatching `WorkUnit`s from its queue to the `Compute Scheduler`, which assigns them to `Worker` processes.
+7.  **Report:** The `Worker` executes the task (e.g., trains one epoch) and returns the result (e.g., metrics, errors) to the `Compute Scheduler`, which yields it back to the `RuntimeEngine`.
+8.  **Event-Based Update:** The `RuntimeEngine` receives the result and emits a granular event (e.g., `WORK_UNIT_COMPLETED`, payload: `{trial_id, metrics, ...}`). It does **not** manage the canonical state itself.
+9.  **State Mutation:** The `Orchestrator`'s `on_engine_event` handler receives the event. **This is the only place where the canonical `Experiment` state is mutated.** It updates the relevant `Trial` object within its `Experiment` instance.
+10. **Analyze & Reschedule:** After processing the result, the `RuntimeEngine` consults the `AdaptiveScheduler`, which decides what `WorkUnit`(s) to do next and adds them to the `RuntimeEngine`'s `PriorityQueue`.
     *   It passes the updated trial to the `InsightEngine` to check for new discoveries.
     *   It passes the updated trial to the `AdaptiveScheduler`, which decides what `WorkUnit`(s) to do next and adds them to the `RuntimeEngine`'s `PriorityQueue`.
 11. **Loop:** The cycle returns to Step 6. This continues until the budget is exhausted or all trials are complete.
@@ -184,17 +186,21 @@ This step-by-step process is the "heartbeat" of the SDE:
 
 ---
 
-## **6.0 Python Implementation Specification**
+## **6.0 Core Data Structures**
 
-This outlines the key classes and their interactions, reflecting the asynchronous architecture.
+This section outlines the key data structures from `sde/core/domain.py` that define the state of the application.
 
 ```python
-# sde/core/types.py
+# sde/core/domain.py
+import uuid
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Tuple, Optional
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
+# --- Core Runtime Engine & Experiment State ---
 
 class WorkUnitType(Enum):
+    PROFILE_SPEED = "PROFILE_SPEED"
     TRAIN_EPOCH = "TRAIN_EPOCH"
     EVALUATE = "EVALUATE"
 
@@ -208,99 +214,52 @@ class WorkUnit:
 class TrialStatus(Enum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
     PRUNED = "PRUNED"
     COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
 
 @dataclass
 class Trial:
-    """A container for state and time-series results."""
+    """A container for an algorithm's state and time-series results."""
     id: str
     algorithm_name: str
     hyperparameters: Dict[str, Any]
     status: TrialStatus = TrialStatus.PENDING
-    
-    # State for pausing/resuming
+    priority: int = 0  # Higher value means higher priority
+
     current_epoch: int = 0
     checkpoint_path: Optional[str] = None
-    
-    # Time-series results
-    results: Dict[str, List[Tuple[int, float]]] = field(default_factory=dict) # e.g., {'accuracy': [(1, 0.8), (2, 0.9)]}
+    est_time_per_epoch: Optional[float] = None
+    results: Dict[str, List[Tuple[int, float]]] = field(default_factory=dict)
 
-# --- sde/engine/scheduler.py ---
-import concurrent.futures
+class ExperimentStatus(Enum):
+    DEFINING = "DEFINING"
+    RUNNING = "RUNNING"
+    PAUSED = "PAUSED"
+    STOPPED = "STOPPED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
 
-class Scheduler:
-    def __init__(self, experiment_config, max_workers=4):
-        self.datastore = ...
-        self.worker = ...
-        self.insight_engine = ...
-        self.adaptive_scheduler = ... # e.g., SuccessiveHalvingScheduler()
-        self.budget_manager = ...
-        self.worker_pool = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
-        self.work_queue = []
-        self.running_futures = {} # Maps future -> WorkUnit
+@dataclass
+class Experiment:
+    """The single, canonical data structure holding the entire application state.
+    This object is managed exclusively by the ExperimentOrchestrator.
+    """
+    id: str = field(default_factory=lambda: f"exp_{uuid.uuid4().hex[:8]}")
+    status: ExperimentStatus = ExperimentStatus.DEFINING
 
-    def run(self):
-        # 1. Get initial work from the adaptive scheduler
-        self.work_queue = self.adaptive_scheduler.get_initial_work_units(...)
-        
-        while not self.budget_manager.is_exhausted():
-            # 2. Dispatch work to available workers
-            self._dispatch_work()
+    # Core Definition
+    challenge: Optional[Dict[str, Any]] = None
+    algorithms: Dict[str, "AlgorithmConfig"] = field(default_factory=dict)
 
-            # 3. Process completed work units asynchronously
-            done_futures = self._await_completed_work()
-            
-            for future in done_futures:
-                work_unit, result = self._get_result(future)
-                
-                # 4. Update datastore
-                self.datastore.append_result(work_unit.trial_id, result['metrics'])
-                self.datastore.update_trial_state(work_unit.trial_id, result['state_updates'])
-                
-                # 5. Trigger analysis
-                self.insight_engine.analyze()
-                
-                # 6. Get next set of work from the adaptive scheduler
-                self.work_queue = self.adaptive_scheduler.get_next_work_units(self.datastore)
+    # Runtime State
+    trials: Dict[str, Trial] = field(default_factory=dict)
+    insights: List[Dict[str, Any]] = field(default_factory=list)
 
-# --- sde/engine/worker.py ---
-class Worker:
-    def execute_work_unit(self, work_unit: WorkUnit, trial: Trial, algorithm_class: type) -> Dict:
-        # 1. Load model and optimizer state from trial.checkpoint_path
-        model = self._load_state(...)
-        
-        # 2. Execute the work (e.g., train one epoch)
-        metrics = self._train_one_epoch(...)
-        
-        # 3. Save new state to a new checkpoint file
-        new_checkpoint_path = self._save_state(model, ...)
-        
-        # 4. Return results and state update instructions
-        return {
-            'metrics': metrics,
-            'state_updates': {'checkpoint_path': new_checkpoint_path, 'current_epoch': trial.current_epoch + 1}
-        }
-
-# --- sde/exploration/schedulers.py ---
-from abc import ABC, abstractmethod
-
-class AdaptiveScheduler(ABC):
-    @abstractmethod
-    def get_initial_work_units(self, datastore) -> List[WorkUnit]: ...
-
-    @abstractmethod
-    def get_next_work_units(self, datastore) -> List[WorkUnit]: ...
-
-class SuccessiveHalvingScheduler(AdaptiveScheduler):
-    """Prunes the worst-performing half of trials at periodic intervals ('rungs')."""
-    def get_next_work_units(self, datastore) -> List[WorkUnit]:
-        # Logic:
-        # 1. Check if any trials have reached a "rung" (e.g., epoch 4, 8, 16).
-        # 2. For trials on a rung, compare their performance.
-        # 3. Mark the bottom 50% as 'PRUNED'.
-        # 4. For the top 50% and other active trials, generate the next 'TRAIN_EPOCH' WorkUnit.
-        # 5. Prioritize work for more promising trials.
-        # 6. Return a prioritized list of WorkUnits.
-        ...
+    # Strategy & Constraints
+    adaptive_policy: str = "SuccessiveHalving"
+    patience_budget: Optional[Dict[str, int]] = None
+    execution_settings: Optional["ExecutionSettings"] = None
+    scheduler_state: Dict[str, Any] = field(default_factory=dict)
 ```

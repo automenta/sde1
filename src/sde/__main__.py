@@ -26,14 +26,18 @@ def main():
             "name": "SimpleCNN",
             "parameter_space": {
                 "dropout_rate": {"type": "float", "min": 0.1, "max": 0.5},
-                "learning_rate": {"type": "float", "min": 1e-4, "max": 1e-2, "log": True},
-            }
+                "learning_rate": {
+                    "type": "float", "min": 1e-4, "max": 1e-2, "log": True
+                },
+            },
         },
         {
             "name": "LogisticRegression",
             "parameter_space": {
-                 "learning_rate": {"type": "float", "min": 1e-3, "max": 1e-1, "log": True},
-            }
+                "learning_rate": {
+                    "type": "float", "min": 1e-3, "max": 1e-1, "log": True
+                },
+            },
         },
     ]
     execution_settings = {

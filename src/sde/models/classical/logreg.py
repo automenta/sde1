@@ -2,9 +2,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from sde.core.types import DatasetType
-from sde.core.types import ModelDefinition
-from sde.core.types import SdeModel
+from sde.core.domain import DatasetType
+from sde.core.domain import ModelDefinition
+from sde.core.domain import SdeModel
 
 
 class LogisticRegression(SdeModel):
@@ -30,7 +30,7 @@ LOGISTIC_REGRESSION_MODEL = ModelDefinition(
     name="LogisticRegression",
     description="A classical Logistic Regression model for baseline performance.",
     model_class=LogisticRegression,
-    supported_dataset_types=[DatasetType.IMAGE_CLASSIFICATION],
+    model_type=DatasetType.IMAGE_CLASSIFICATION,
     hyperparameter_schema={
         "optimizer_params": {
             "lr": {"type": "float", "min": 1e-5, "max": 1e-2, "default": 1e-3}

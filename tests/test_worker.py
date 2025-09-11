@@ -6,9 +6,9 @@ import torch
 from sde.core.domain import Trial
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
+from sde.core.domain import DatasetType
+from sde.core.domain import ModelDefinition
 from sde.engine.worker import Worker
-from sde.core.types import DatasetType
-from sde.core.types import ModelDefinition
 
 
 # Mock SdeModel to avoid needing a real torch model
@@ -37,7 +37,7 @@ class TestWorker(unittest.TestCase):
             name="test_model",
             description="A test model",
             model_class=MockModel,
-            supported_dataset_types=[DatasetType.IMAGE_CLASSIFICATION]
+            model_type=DatasetType.IMAGE_CLASSIFICATION
         )
         mock_dataset_def = MagicMock()
         mock_dataset_def.loader_factory.return_value = (mock_train_loader, mock_val_loader)

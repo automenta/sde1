@@ -1,9 +1,9 @@
 import torch.nn as nn
 import torch.nn.functional as F
 
-from sde.core.types import DatasetType
-from sde.core.types import ModelDefinition
-from sde.core.types import SdeModel
+from sde.core.domain import DatasetType
+from sde.core.domain import ModelDefinition
+from sde.core.domain import SdeModel
 
 
 class ResidualBlock(nn.Module):
@@ -109,7 +109,7 @@ CONFIGURABLE_RESNET_MODEL = ModelDefinition(
     name="ConfigurableResNet",
     description="A ResNet-style model where the number of blocks per layer is a configurable hyperparameter.",
     model_class=ConfigurableResNet,
-    supported_dataset_types=[DatasetType.IMAGE_CLASSIFICATION],
+    model_type=DatasetType.IMAGE_CLASSIFICATION,
     hyperparameter_schema={
         "model_params": {
             "block_config": {

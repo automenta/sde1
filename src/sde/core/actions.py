@@ -2,8 +2,10 @@ from enum import Enum
 
 
 class ActionType(str, Enum):
-    """Defines the types of actions that can be dispatched to the ExperimentOrchestrator.
-    Using a StrEnum makes it serializable and backward-compatible with the old string-based system.
+    """Defines actions that can be dispatched to the ExperimentOrchestrator.
+
+    Using a StrEnum makes it serializable and backward-compatible with the old
+    string-based system.
     """
 
     # Experiment Setup

@@ -9,11 +9,12 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
-from sde.core.domain import Experiment
+from sde.core.domain import ExecutionSettings
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
 from sde.core.domain import WorkUnit
-from ..exploration.schedulers import AdaptiveScheduler
+from sde.exploration.schedulers import AdaptiveScheduler
+
 from .compute_scheduler import ComputeScheduler
 from .datastore import DataStore
 from .factory import SchedulerFactory
@@ -35,9 +36,9 @@ class SdeRuntimeEngine:
         Args:
             event_callback: A function to call to emit events to the outside world.
                 The function should accept an event type (str) and a payload (dict).
+
         """
         # Core components are initialized on START_RUN
-        self.experiment: Optional[Experiment] = None
         self.datastore: Optional[DataStore] = None
         self.adaptive_scheduler: Optional[AdaptiveScheduler] = None
         self.insight_engine: Optional[InsightEngine] = None
@@ -63,14 +64,20 @@ class SdeRuntimeEngine:
         """Adds a command to the command queue for the engine to process."""
         self.command_queue.put((command, payload))
 
-    def _initialize_from_experiment(self, experiment: Experiment):
-        """Sets up all the core components based on an experiment definition."""
-        self.experiment = experiment
-        self.datastore = DataStore(list(self.experiment.trials.values()))
+    def _initialize_runtime(
+        self,
+        trials: List[Trial],
+        challenge_name: str,
+        policy_name: str,
+        patience_budget: Dict[str, Any],
+        execution_settings: ExecutionSettings,
+    ):
+        """Sets up all the core components based on configuration data."""
+        self.datastore = DataStore(trials)
         self.adaptive_scheduler = SchedulerFactory.create_scheduler(
-            policy_name=self.experiment.adaptive_policy,
-            challenge_name=self.experiment.challenge["name"],
-            patience_budget=self.experiment.patience_budget,
+            policy_name=policy_name,
+            challenge_name=challenge_name,
+            patience_budget=patience_budget,
         )
         self.insight_engine = InsightEngine(
             self.datastore.get_all_trials(),
@@ -79,12 +86,12 @@ class SdeRuntimeEngine:
         )
         self.compute_scheduler = ComputeScheduler(
             datastore=self.datastore,
-            dataset_name=self.experiment.challenge["name"],
-            max_workers=self.experiment.execution_settings.num_workers,
-            enable_checkpointing=self.experiment.execution_settings.enable_checkpointing,
-            work_unit_timeout=self.experiment.execution_settings.work_unit_timeout_seconds,
+            dataset_name=challenge_name,
+            max_workers=execution_settings.num_workers,
+            enable_checkpointing=execution_settings.enable_checkpointing,
+            work_unit_timeout=execution_settings.work_unit_timeout_seconds,
         )
-        logger.info(f"Runtime engine initialized with {self.experiment.adaptive_policy} scheduler.")
+        logger.info(f"Runtime engine initialized with {policy_name} scheduler.")
 
     def _put_work_in_queue(self, work_unit: WorkUnit):
         """Adds a work unit to the priority queue with a tie-breaker."""
@@ -97,40 +104,43 @@ class SdeRuntimeEngine:
 
     def _handle_start_run(self, payload: Dict[str, Any]):
         """Handles the START_RUN command."""
-        print("RUNTIME: _handle_start_run called")
         if self._thread is not None:
-            logger.warning("START_RUN command received, but engine is already running.")
+            logger.warning("START_RUN received, but engine is already running.")
             return
 
-        experiment_definition = payload.get("experiment_definition", {})
+        exp_def = payload.get("experiment_definition", {})
         start_paused = payload.get("start_paused", False)
-        experiment = Experiment.from_dict(experiment_definition)
 
-        # 1. Initialize all core components
-        self._initialize_from_experiment(experiment)
+        trials = [Trial.from_dict(t) for t in exp_def.get("trials", {}).values()]
+        execution_settings = ExecutionSettings.from_dict(exp_def.get("execution_settings"))
 
-        # Assertions to help mypy after initialization
+        # 1. Initialize all core components from the definition
+        self._initialize_runtime(
+            trials=trials,
+            challenge_name=exp_def.get("challenge", {}).get("name"),
+            policy_name=exp_def.get("adaptive_policy"),
+            patience_budget=exp_def.get("patience_budget"),
+            execution_settings=execution_settings,
+        )
+
         assert self.datastore is not None
         assert self.adaptive_scheduler is not None
-        assert self.experiment is not None
         assert self.compute_scheduler is not None
 
         # 2. Get initial work units
         all_trials = self.datastore.get_all_trials()
+        scheduler_state = exp_def.get("scheduler_state", {})
         is_resumed_run = any(t.status != TrialStatus.PENDING for t in all_trials.values())
 
         if is_resumed_run:
             logger.info("Resuming experiment. Rehydrating work queue...")
-            work_units = self.adaptive_scheduler.rehydrate_work_units(
-                all_trials, self.experiment.scheduler_state
-            )
+            work_units = self.adaptive_scheduler.rehydrate_work_units(all_trials, scheduler_state)
         else:
             logger.info("Starting fresh experiment. Generating initial work units...")
-            work_units, updated_scheduler_state = self.adaptive_scheduler.get_initial_work_units(
-                all_trials, self.experiment.scheduler_state
+            # Note: The scheduler does not mutate the state it's given
+            work_units, _ = self.adaptive_scheduler.get_initial_work_units(
+                all_trials, scheduler_state
             )
-            if updated_scheduler_state:
-                self.experiment.scheduler_state.update(updated_scheduler_state)
 
         for work_unit in work_units:
             self._put_work_in_queue(work_unit)
@@ -144,7 +154,10 @@ class SdeRuntimeEngine:
         self._thread = threading.Thread(target=self._execution_loop, daemon=True)
         self._thread.start()
         logger.info("SdeRuntimeEngine started successfully.")
-        self._emit_event("RUN_STARTED", self.experiment.to_dict())
+        # The payload now only contains the data the orchestrator doesn't know:
+        # the initial state of the trials created by the adaptive scheduler.
+        initial_trials_dict = [t.to_dict() for t in self.datastore.get_all_trials().values()]
+        self._emit_event("RUN_STARTED", {"trials": initial_trials_dict})
 
     def _handle_stop_run(self, payload: Dict[str, Any]):
         """Handles the STOP_RUN command."""

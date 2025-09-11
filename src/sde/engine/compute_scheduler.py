@@ -9,12 +9,12 @@ from typing import Iterator
 from typing import List
 from typing import Tuple
 
-from ..challenges import AVAILABLE_DATASETS
+from sde.challenges import AVAILABLE_DATASETS
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
 from sde.core.domain import WorkUnit
-from ..models import AVAILABLE_MODELS
 from sde.engine.datastore import DataStore
+from sde.models import AVAILABLE_MODELS
 
 logger = logging.getLogger(__name__)
 

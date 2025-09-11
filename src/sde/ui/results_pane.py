@@ -1,14 +1,12 @@
 from datetime import datetime
-from typing import Any
 from typing import Dict
 from typing import Optional
 from typing import Set
-from typing import Union
 
 import pyqtgraph as pg
+from PyQt6.QtCore import Property  # type: ignore
 from PyQt6.QtCore import QPropertyAnimation
 from PyQt6.QtCore import Qt
-from PyQt6.QtCore import Property  # type: ignore
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QAbstractItemView
@@ -47,6 +45,7 @@ class InsightListItem(QListWidgetItem):
 
 class NumericTableWidgetItem(QTableWidgetItem):
     """A custom QTableWidgetItem that implements numeric sorting."""
+
     def __lt__(self, other):
         # Try to convert text to float for numeric comparison
         try:

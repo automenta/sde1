@@ -17,10 +17,10 @@ class EngineProxy:
     """
 
     def __init__(self, event_callback: Callable[[str, Dict[str, Any]], None]):
-        """
-        Args:
-            event_callback: A callback function in the Orchestrator to which
-                            the proxy will forward all events from the engine.
+        """Args:
+        event_callback: A callback function in the Orchestrator to which
+                        the proxy will forward all events from the engine.
+
         """
         self.orchestrator_callback = event_callback
         self.runtime_engine = SdeRuntimeEngine(self._on_event_from_engine)

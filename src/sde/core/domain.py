@@ -4,14 +4,69 @@ from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
-from typing import Union
+from typing import Type
+
+import torch.nn as nn
+
+# --- Foundational Definitions (from former types.py) ---
+
+
+class SdeModel(nn.Module):
+    """Base class for all models in the Scientific Discovery Engine.
+    It standardizes the model interface across different architectures.
+    """
+
+    def __init__(self, input_shape: Tuple[int, ...], output_shape: int, **kwargs):
+        super().__init__()
+        self.input_shape = input_shape
+        self.output_shape = output_shape
+
+
+class DatasetType(Enum):
+    """Enum to categorize the type of a dataset.
+    This is used to ensure that models are only used with compatible datasets.
+    """
+
+    IMAGE_CLASSIFICATION = "IMAGE_CLASSIFICATION"
+    TABULAR_REGRESSION = "TABULAR_REGRESSION"
+
+
+@dataclass(frozen=True)
+class DatasetDefinition:
+    """A metadata container for a dataset, treated as a static definition."""
+
+    name: str
+    type: DatasetType
+    description: str
+    loader_factory: Callable[..., Tuple[Any, Any]]  # Returns (train, val) loaders
+    input_shape: Tuple[int, ...]  # e.g., (1, 28, 28) for MNIST
+    output_shape: int  # Number of output classes or features
+    loss_function_factory: Callable[[], Any]
+    performance_metric_name: str  # e.g., "accuracy"
+
+
+@dataclass(frozen=True)
+class ModelDefinition:
+    """A metadata container for a model/algorithm, treated as a static definition."""
+
+    name: str
+    description: str
+    model_class: Type[SdeModel]
+    model_type: DatasetType  # The type of dataset this model is designed for
+    hyperparameter_schema: dict = field(default_factory=dict)
+
+
+# --- Core Runtime Engine & Experiment State ---
 
 
 class WorkUnitType(Enum):
+    """The type of task to be performed by a computational worker."""
+
     PROFILE_SPEED = "PROFILE_SPEED"
     TRAIN_EPOCH = "TRAIN_EPOCH"
     EVALUATE = "EVALUATE"
@@ -19,7 +74,7 @@ class WorkUnitType(Enum):
 
 @dataclass(frozen=True)
 class WorkUnit:
-    """The smallest schedulable quantum of work."""
+    """The smallest schedulable quantum of work. This is a stateless, immutable task."""
 
     trial_id: str
     type: WorkUnitType
@@ -27,78 +82,68 @@ class WorkUnit:
 
 
 class TrialStatus(Enum):
-    PENDING = "PENDING"
-    ACTIVE = "ACTIVE"
-    PAUSED = "PAUSED"
-    PRUNED = "PRUNED"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
+    """The lifecycle status of a single trial."""
+
+    PENDING = "PENDING"  # The trial has been defined but not yet started.
+    ACTIVE = "ACTIVE"  # The trial is currently being actively trained and evaluated.
+    PAUSED = "PAUSED"  # The trial is temporarily stopped but can be resumed.
+    PRUNED = "PRUNED"  # The trial was terminated early by an adaptive scheduler.
+    COMPLETED = "COMPLETED"  # The trial has finished all its work.
+    FAILED = "FAILED"  # The trial terminated due to an unrecoverable error.
 
 
 @dataclass
 class Trial:
-    """A container for state and time-series results."""
+    """A container for the dynamic state and results of a single algorithm instance."""
 
     id: str
     algorithm_name: str
     hyperparameters: Dict[str, Any]
     status: TrialStatus = TrialStatus.PENDING
-    priority: int = 0  # Higher value means higher priority
+    priority: int = 0  # Higher value means higher priority in the work queue
 
-    # State for pausing/resuming
+    # State for pausing/resuming and scheduling
     current_epoch: int = 0
     checkpoint_path: Optional[str] = None
+    est_time_per_epoch: Optional[float] = None # In seconds
 
-    # Performance metrics
-    est_time_per_epoch: Optional[float] = None
-
-    # Time-series results
+    # Time-series results, e.g., {'accuracy': [(1, 0.8), (2, 0.9)]}
     results: Dict[str, List[Tuple[int, float]]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        """Converts the Trial to a dictionary, handling enum serialization."""
+        """Serializes the Trial to a dictionary, converting enums to strings."""
         d = dataclasses.asdict(self)
         d["status"] = self.status.value
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Trial":
-        """Creates a Trial instance from a dictionary.
-
-        This method is robust to extra keys in the input dictionary,
-        which allows for forward compatibility if the Trial class is
-        extended with new fields.
-        """
-        # Ensure status is converted from string to Enum
+        """Creates a Trial from a dictionary, robustly handling missing/extra keys."""
         if "status" in d and isinstance(d["status"], str):
             d["status"] = TrialStatus(d["status"])
-
-        # Get the names of the fields defined in the Trial dataclass
         known_fields = {f.name for f in dataclasses.fields(cls)}
-
-        # Filter the input dictionary to only include known fields
         filtered_dict = {k: v for k, v in d.items() if k in known_fields}
-
         return cls(**filtered_dict)
 
 
-# --- V2 Unified Specification Types ---
-
-
 class ExperimentStatus(Enum):
-    DEFINING = "DEFINING"  # The initial state, no compute is running.
-    RUNNING = "RUNNING"
-    PAUSED = "PAUSED"
-    STOPPED = "STOPPED"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"  # The experiment terminated due to an unrecoverable error.
+    """The overall status of an experiment run."""
+
+    DEFINING = "DEFINING"  # Initial state, user is configuring the experiment.
+    RUNNING = "RUNNING"  # The experiment is actively being executed by the engine.
+    PAUSED = "PAUSED"  # The entire experiment run is paused.
+    STOPPED = "STOPPED"  # The experiment was manually stopped by the user.
+    COMPLETED = "COMPLETED"  # The experiment finished naturally.
+    FAILED = "FAILED"  # The experiment terminated due to a critical error.
 
 
 @dataclass
 class AlgorithmConfig:
+    """Configuration for an algorithm to be included in the experiment."""
+
     id: str
     name: str
-    parameter_space: Dict[str, Any]  # e.g., {'lr': (0.001, 0.1), ...}
+    parameter_space: Dict[str, Any]  # Defines the search space for HPO
     is_active: bool = True
 
     def to_dict(self) -> dict:
@@ -106,13 +151,12 @@ class AlgorithmConfig:
 
     @classmethod
     def from_dict(cls, d: dict) -> "AlgorithmConfig":
-        """Creates an AlgorithmConfig instance from a dictionary."""
         return cls(**d)
 
 
 @dataclass
 class ExecutionSettings:
-    """Settings that control the execution of the experiment run."""
+    """Settings that control the execution environment of the experiment."""
 
     num_trials_per_algo: int
     num_workers: int
@@ -121,8 +165,6 @@ class ExecutionSettings:
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExecutionSettings":
-        """Creates an ExecutionSettings instance from a dictionary."""
-        # This is robust to extra keys in the dictionary
         known_fields = {f.name for f in dataclasses.fields(cls)}
         filtered_dict = {k: v for k, v in d.items() if k in known_fields}
         return cls(**filtered_dict)
@@ -130,24 +172,26 @@ class ExecutionSettings:
 
 @dataclass
 class Experiment:
+    """The single, canonical data structure holding the entire application state.
+    This object is managed exclusively by the ExperimentOrchestrator.
+    """
+
     id: str = field(default_factory=lambda: f"exp_{uuid.uuid4().hex[:8]}")
     status: ExperimentStatus = ExperimentStatus.DEFINING
 
-    # Core Definition
+    # Core Definition: What the experiment IS
     challenge: Optional[Dict[str, Any]] = None
     algorithms: Dict[str, AlgorithmConfig] = field(default_factory=dict)
 
-    # Runtime State
+    # Runtime State: What is HAPPENING in the experiment
     trials: Dict[str, Trial] = field(default_factory=dict)
     insights: List[Dict[str, Any]] = field(default_factory=list)
 
-    # Strategy & Constraints
-    adaptive_policy: str = "SuccessiveHalving"  # Default policy
+    # Strategy & Constraints: HOW the experiment is run
+    adaptive_policy: str = "SuccessiveHalving"
     patience_budget: Optional[Dict[str, int]] = None
-    execution_settings: Optional[ExecutionSettings] = None  # For num_workers etc.
-    scheduler_state: Dict[str, Any] = field(
-        default_factory=dict
-    )  # For schedulers that need to persist state
+    execution_settings: Optional[ExecutionSettings] = None
+    scheduler_state: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Serializes the entire experiment state to a dictionary."""
@@ -170,27 +214,21 @@ class Experiment:
     def from_dict(cls, d: dict) -> "Experiment":
         """Creates an Experiment instance from a dictionary."""
         d_copy = d.copy()
-
         if "status" in d_copy and isinstance(d_copy["status"], str):
             d_copy["status"] = ExperimentStatus(d_copy["status"])
-
         if "algorithms" in d_copy and d_copy["algorithms"] is not None:
             d_copy["algorithms"] = {
                 k: AlgorithmConfig.from_dict(v)
                 for k, v in d_copy["algorithms"].items()
             }
-
         if "trials" in d_copy and d_copy["trials"] is not None:
             d_copy["trials"] = {
                 k: Trial.from_dict(v) for k, v in d_copy["trials"].items()
             }
-
         if "execution_settings" in d_copy and d_copy["execution_settings"] is not None:
             d_copy["execution_settings"] = ExecutionSettings.from_dict(
                 d_copy["execution_settings"]
             )
-
         known_fields = {f.name for f in dataclasses.fields(cls)}
         filtered_dict = {k: v for k, v in d_copy.items() if k in known_fields}
-
         return cls(**filtered_dict)

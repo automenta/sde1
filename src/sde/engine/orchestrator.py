@@ -3,14 +3,15 @@ import traceback
 from typing import Any
 from typing import Dict
 
-from ..core.actions import ActionType
-from ..core.domain import AlgorithmConfig
-from ..core.domain import ExecutionSettings
-from ..core.domain import Experiment
-from ..core.domain import ExperimentStatus
-from ..core.domain import Trial
-from ..core.domain import TrialStatus
-from ..events import Signal
+from sde.core.actions import ActionType
+from sde.core.domain import AlgorithmConfig
+from sde.core.domain import ExecutionSettings
+from sde.core.domain import Experiment
+from sde.core.domain import ExperimentStatus
+from sde.core.domain import Trial
+from sde.core.domain import TrialStatus
+from sde.events import Signal
+
 from .action_validator import ActionValidator
 from .proxy import EngineProxy
 
@@ -78,10 +79,23 @@ class ExperimentOrchestrator:
             self.experiment.trials[trial.id] = trial
         elif event_type == "INSIGHTS_GENERATED":
             self.experiment.insights.extend(payload["insights"])
-        elif event_type in ("RUN_STARTED", "RUN_PAUSED", "RUN_RESUMED", "RUN_STOPPED"):
-            # The engine may have updated the experiment state (e.g. scheduler state)
-            if "experiment" in payload:
-                self.experiment = Experiment.from_dict(payload["experiment"])
+        elif event_type == "RUN_STARTED":
+            self.experiment.status = ExperimentStatus.RUNNING
+            # The engine might send back initial state, like trial IDs
+            if "trials" in payload:
+                self.experiment.trials = {
+                    t["id"]: Trial.from_dict(t) for t in payload["trials"]
+                }
+            self.log_message.emit({"level": "INFO", "message": "Experiment run has started."})
+        elif event_type == "RUN_PAUSED":
+            self.experiment.status = ExperimentStatus.PAUSED
+            self.log_message.emit({"level": "INFO", "message": "Experiment run has been paused."})
+        elif event_type == "RUN_RESUMED":
+            self.experiment.status = ExperimentStatus.RUNNING
+            self.log_message.emit({"level": "INFO", "message": "Experiment run has been resumed."})
+        elif event_type == "RUN_STOPPED":
+            self.experiment.status = ExperimentStatus.STOPPED
+            self.log_message.emit({"level": "INFO", "message": "Experiment run has been stopped."})
         elif event_type == "OPERATION_FINISHED":
             self.operation_finished.emit(payload.get("message", ""))
         elif event_type == "LOG_MESSAGE":
@@ -215,40 +229,43 @@ class ExperimentOrchestrator:
         return True
 
     def handle_start_run(self, payload: Dict[str, Any]) -> bool:
-        """Dispatches the command to start the experiment run."""
+        """Validates and dispatches the command to start the experiment run.
+
+        State mutation is deferred until the `RUN_STARTED` event is received.
+        """
         if not self.experiment.algorithms:
             self.log_message.emit(
                 {"level": "ERROR", "message": "Cannot start run without at least one algorithm."}
             )
-            return True
+            return True # No command sent, so no event expected. UI can update immediately.
 
-        self.experiment.status = ExperimentStatus.RUNNING
+        # Temporarily store execution settings to be applied on confirmation
         self.experiment.execution_settings = ExecutionSettings(**payload)
         command_payload = {"experiment_definition": self.experiment.to_dict()}
         self.engine_proxy.post_command("START_RUN", command_payload)
         self.log_message.emit({"level": "INFO", "message": "Dispatched START_RUN command to engine."})
-        return False # Wait for RUN_STARTED event
+
+        # Return False to indicate that we are waiting for an event from the
+        # engine before emitting a full state_changed signal.
+        return False
 
     def handle_pause_run(self, payload: Dict[str, Any]) -> bool:
         """Dispatches the command to pause the current experiment run."""
-        self.experiment.status = ExperimentStatus.PAUSED
         self.engine_proxy.post_command("PAUSE_RUN")
         self.log_message.emit({"level": "INFO", "message": "Dispatched PAUSE_RUN command."})
-        return False
+        return False  # Wait for confirmation
 
     def handle_resume_run(self, payload: Dict[str, Any]) -> bool:
         """Dispatches the command to resume a paused experiment run."""
-        self.experiment.status = ExperimentStatus.RUNNING
         self.engine_proxy.post_command("RESUME_RUN")
         self.log_message.emit({"level": "INFO", "message": "Dispatched RESUME_RUN command."})
-        return False
+        return False  # Wait for confirmation
 
     def handle_stop_run(self, payload: Dict[str, Any]) -> bool:
         """Dispatches the command to stop the current experiment run."""
-        self.experiment.status = ExperimentStatus.STOPPED
         self.engine_proxy.post_command("STOP_RUN")
         self.log_message.emit({"level": "INFO", "message": "Dispatched STOP_RUN command."})
-        return False
+        return False  # Wait for confirmation
 
     def handle_save_experiment(self, payload: Dict[str, Any]) -> bool:
         """Dispatches the command to save the experiment state."""

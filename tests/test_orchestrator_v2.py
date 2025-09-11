@@ -26,34 +26,44 @@ class TestExperimentOrchestrator(unittest.TestCase):
         mock_emit.assert_any_call({'level': 'INFO', 'message': 'Orchestrator initialized.'})
 
     def test_dispatch_start_run(self, MockProxy, mock_emit):
-        """Test that START_RUN dispatches a command to the proxy."""
+        """Test that START_RUN dispatches a command and waits for an event."""
         orchestrator = ExperimentOrchestrator()
         orchestrator.experiment.challenge = {"name": "MNIST"}
         algo = AlgorithmConfig(id='algo1', name='TestAlgo', parameter_space={'lr': (0.01, 0.1)})
         orchestrator.experiment.algorithms['algo1'] = algo
         start_payload = {"num_workers": 2, "num_trials_per_algo": 5, "enable_checkpointing": False, "work_unit_timeout_seconds": 300}
 
+        # Dispatch the action
         orchestrator.dispatch(ActionType.START_RUN, start_payload)
 
+        # Assert that the state has NOT changed yet (no optimistic update)
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.DEFINING)
+        orchestrator.engine_proxy.post_command.assert_called_once_with("START_RUN", unittest.mock.ANY)
+
+        # Simulate the confirmation event from the engine
+        orchestrator.on_engine_event("RUN_STARTED", {})
+
+        # Now assert that the state has changed
         self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
-        orchestrator.engine_proxy.post_command.assert_called_once()
-        command_name = orchestrator.engine_proxy.post_command.call_args[0][0]
-        command_payload = orchestrator.engine_proxy.post_command.call_args[0][1]
-        self.assertEqual(command_name, "START_RUN")
-        self.assertIn("experiment_definition", command_payload)
 
     def test_dispatch_pause_and_resume(self, MockProxy, mock_emit):
-        """Test that PAUSE_RUN and RESUME_RUN dispatch commands."""
+        """Test that PAUSE_RUN and RESUME_RUN dispatch commands and wait for events."""
         orchestrator = ExperimentOrchestrator()
         orchestrator.experiment.status = ExperimentStatus.RUNNING
 
+        # Test PAUSE
         orchestrator.dispatch(ActionType.PAUSE_RUN, {})
-        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.PAUSED)
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING) # State doesn't change yet
         orchestrator.engine_proxy.post_command.assert_called_with("PAUSE_RUN")
+        orchestrator.on_engine_event("RUN_PAUSED", {}) # Simulate confirmation
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.PAUSED)
 
+        # Test RESUME
         orchestrator.dispatch(ActionType.RESUME_RUN, {})
-        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.PAUSED) # State doesn't change yet
         orchestrator.engine_proxy.post_command.assert_called_with("RESUME_RUN")
+        orchestrator.on_engine_event("RUN_RESUMED", {}) # Simulate confirmation
+        self.assertEqual(orchestrator.experiment.status, ExperimentStatus.RUNNING)
 
     def test_engine_event_updates_state(self, MockProxy, mock_emit):
         """Test that the orchestrator correctly processes an event from the engine."""

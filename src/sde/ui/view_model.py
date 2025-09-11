@@ -3,7 +3,6 @@ from typing import Any
 from typing import Dict
 from typing import List
 from typing import Optional
-from typing import Union
 
 import pyqtgraph as pg
 from PyQt6.QtCore import QObject

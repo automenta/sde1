@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from sde.core.types import DatasetType
-from sde.core.types import ModelDefinition
-from sde.core.types import SdeModel
+from sde.core.domain import DatasetType
+from sde.core.domain import ModelDefinition
+from sde.core.domain import SdeModel
 
 
 class SimpleCNN(SdeModel):
@@ -51,7 +51,7 @@ SIMPLE_CNN_MODEL = ModelDefinition(
     name="SimpleCNN",
     description="A simple Convolutional Neural Network for image classification.",
     model_class=SimpleCNN,
-    supported_dataset_types=[DatasetType.IMAGE_CLASSIFICATION],
+    model_type=DatasetType.IMAGE_CLASSIFICATION,
     hyperparameter_schema={
         "model_params": {
             "dropout_rate": {"type": "float", "min": 0.0, "max": 0.9, "default": 0.5}

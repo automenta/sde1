@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import QPushButton
 from PyQt6.QtWidgets import QSlider
 from PyQt6.QtWidgets import QSpinBox
 from PyQt6.QtWidgets import QTableWidget
+from PyQt6.QtWidgets import QTextEdit
 from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWidgets import QWidget
 
@@ -262,19 +263,20 @@ class SetupPane(QWidget):
             self.model_details_group.setVisible(True)
             return
 
-        # Build an HTML string for display
-        details_html = f"<h3>{model_def.get('name', model_name)}</h3>"
-        details_html += f"<p><i>{model_def.get('description', 'No description available.')}</i></p>"
-        details_html += f"<b>Architecture Type:</b> {model_def.get('architecture_type', 'N/A')}<br>"
+        # Build an HTML string for display using attribute access for the dataclass
+        details_html = f"<h3>{model_def.name}</h3>"
+        details_html += f"<p><i>{model_def.description}</i></p>"
+        details_html += f"<b>Model Type:</b> {model_def.model_type.value}<br>"
 
-        schema = model_def.get('hyperparameter_schema', {})
+        schema = model_def.hyperparameter_schema
         if schema:
             details_html += "<b>Hyperparameters:</b><ul>"
             for group, params in schema.items():
                 for param_name, properties in params.items():
                     details_html += f"<li><b>{param_name}</b>: "
-                    if 'values' in properties:
-                        details_html += f"Categorical {properties['values']}"
+                    # Using .get() here is fine as `properties` is a dict
+                    if 'options' in properties:
+                        details_html += f"Categorical {properties.get('options')}"
                     else:
                         scale = f" ({properties.get('scale', 'linear')} scale)"
                         details_html += f"Range [{properties.get('min', 'N/A')}, {properties.get('max', 'N/A')}]"
@@ -323,7 +325,7 @@ class SetupPane(QWidget):
         supported_models = [
             name
             for name, model_def in AVAILABLE_MODELS.items()
-            if dataset_def.type in model_def.supported_dataset_types
+            if dataset_def.type == model_def.model_type
         ]
         for model_name in supported_models:
             item = QListWidgetItem(model_name)

@@ -1,8 +1,8 @@
 import numpy as np
 import torch.nn as nn
 
-from sde.core.types import DatasetType
-from sde.core.types import ModelDefinition
+from sde.core.domain import DatasetType
+from sde.core.domain import ModelDefinition
 
 # --- 1. The PyTorch Model ---
 
@@ -51,7 +51,7 @@ MLP_MODEL = ModelDefinition(
     name="MLP",
     description="A simple Multi-Layer Perceptron for image classification.",
     model_class=MLP,
-    supported_dataset_types=[DatasetType.IMAGE_CLASSIFICATION],
+    model_type=DatasetType.IMAGE_CLASSIFICATION,
     hyperparameter_schema={
         "model_params": {
             "hidden_sizes": {

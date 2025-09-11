@@ -3,10 +3,10 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
-from ..challenges import AVAILABLE_DATASETS
-from ..exploration.schedulers import AdaptiveScheduler
-from ..exploration.schedulers import HyperbandScheduler
-from ..exploration.schedulers import SuccessiveHalvingScheduler
+from sde.challenges import AVAILABLE_DATASETS
+from sde.exploration.schedulers import AdaptiveScheduler
+from sde.exploration.schedulers import HyperbandScheduler
+from sde.exploration.schedulers import SuccessiveHalvingScheduler
 
 logger = logging.getLogger(__name__)
 
