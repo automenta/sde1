@@ -2,7 +2,7 @@ import unittest
 import math
 
 from sde.engine.insight import InsightEngine, Insight
-from sde.core.types import Trial, TrialStatus
+from sde.core.domain import Trial, TrialStatus
 
 class TestInsightEngine(unittest.TestCase):
 

@@ -1,9 +1,9 @@
 import unittest
 
-from sde.core.types import Experiment, Trial
-from sde.core.types import TrialStatus
-from sde.core.types import WorkUnit
-from sde.core.types import WorkUnitType
+from sde.core.domain import Experiment, Trial
+from sde.core.domain import TrialStatus
+from sde.core.domain import WorkUnit
+from sde.core.domain import WorkUnitType
 from sde.exploration.schedulers import SuccessiveHalvingScheduler
 
 

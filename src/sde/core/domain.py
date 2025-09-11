@@ -168,50 +168,29 @@ class Experiment:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Experiment":
-        """Creates an Experiment instance from a dictionary.
+        """Creates an Experiment instance from a dictionary."""
+        d_copy = d.copy()
 
-        This method is robust to extra keys in the input dictionary,
-        which allows for forward compatibility if the Experiment class is
-        extended with new fields.
-        """
-        # Get the names of the fields defined in the Experiment dataclass
+        if "status" in d_copy and isinstance(d_copy["status"], str):
+            d_copy["status"] = ExperimentStatus(d_copy["status"])
+
+        if "algorithms" in d_copy and d_copy["algorithms"] is not None:
+            d_copy["algorithms"] = {
+                k: AlgorithmConfig.from_dict(v)
+                for k, v in d_copy["algorithms"].items()
+            }
+
+        if "trials" in d_copy and d_copy["trials"] is not None:
+            d_copy["trials"] = {
+                k: Trial.from_dict(v) for k, v in d_copy["trials"].items()
+            }
+
+        if "execution_settings" in d_copy and d_copy["execution_settings"] is not None:
+            d_copy["execution_settings"] = ExecutionSettings.from_dict(
+                d_copy["execution_settings"]
+            )
+
         known_fields = {f.name for f in dataclasses.fields(cls)}
-        kwargs = {}
+        filtered_dict = {k: v for k, v in d_copy.items() if k in known_fields}
 
-        for name, field_type in cls.__annotations__.items():
-            if name not in d or name not in known_fields:
-                continue
-
-            data = d[name]
-            if data is None:
-                kwargs[name] = None
-                continue
-
-            # Handle complex nested types
-            origin = getattr(field_type, "__origin__", None)
-            args = getattr(field_type, "__args__", ())
-
-            if origin is dict and args and hasattr(args[1], "from_dict"):
-                # e.g., Dict[str, Trial]
-                item_class = args[1]
-                kwargs[name] = {k: item_class.from_dict(v) for k, v in data.items()}
-            elif hasattr(field_type, "from_dict"):
-                # e.g., ExecutionSettings
-                kwargs[name] = field_type.from_dict(data)
-            elif isinstance(field_type, type) and issubclass(field_type, Enum):
-                # e.g., ExperimentStatus
-                kwargs[name] = field_type(data)
-            elif origin is Optional or (
-                origin is Union and len(args) == 2 and args[1] is type(None)
-            ):
-                # Handle Optional[T] which is Union[T, None]
-                inner_type = args[0]
-                if hasattr(inner_type, "from_dict"):
-                    kwargs[name] = inner_type.from_dict(data)
-                else:
-                    kwargs[name] = data
-            else:
-                # For simple types like str, list, dict
-                kwargs[name] = data
-
-        return cls(**kwargs)
+        return cls(**filtered_dict)

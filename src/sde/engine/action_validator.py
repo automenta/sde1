@@ -1,9 +1,9 @@
 from typing import Any
 from typing import Dict
 
-from ..core.types import Experiment
-from ..core.types import ExperimentStatus
-from ..core.types import TrialStatus
+from sde.core.domain import Experiment
+from sde.core.domain import ExperimentStatus
+from sde.core.domain import TrialStatus
 
 
 class ActionValidator:

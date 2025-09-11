@@ -4,7 +4,7 @@ import time
 from typing import Dict
 
 from .core.actions import ActionType
-from .core.types import ExperimentStatus
+from .core.domain import ExperimentStatus
 from .engine.orchestrator import ExperimentOrchestrator
 
 

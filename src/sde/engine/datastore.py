@@ -4,10 +4,10 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
-from ..core.types import Trial
-from ..core.types import TrialStatus
-from ..core.types import WorkUnit
-from ..core.types import WorkUnitType
+from sde.core.domain import Trial
+from sde.core.domain import TrialStatus
+from sde.core.domain import WorkUnit
+from sde.core.domain import WorkUnitType
 
 
 class DataStore:

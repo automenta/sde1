@@ -279,6 +279,10 @@ class HyperbandScheduler(AdaptiveScheduler):
         """
         trial_pool = [t for t in new_trials if t.status == TrialStatus.PENDING]
 
+        # Reset state in case this is called multiple times on the same instance
+        self.brackets = []
+        self.trial_to_bracket = {}
+
         # 1. Calculate bracket configurations
         for s in range(self.s_max, -1, -1):
             n_s = math.ceil((self.s_max + 1) / (s + 1) * (self.eta**s))
@@ -419,6 +423,12 @@ class HyperbandScheduler(AdaptiveScheduler):
 
         # Advance the bracket to the next rung
         bracket.rung += 1
+
+        # If we have completed all rungs, the bracket is done.
+        if bracket.rung >= len(bracket.rung_resources):
+            for trial, _ in survivors:
+                trial.status = TrialStatus.COMPLETED
+            return []
 
         # Schedule work for survivors
         return [

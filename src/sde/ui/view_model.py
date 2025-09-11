@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import Any
 from typing import Dict
 from typing import List
+from typing import Optional
+from typing import Union
 
 import pyqtgraph as pg
 from PyQt6.QtCore import QObject
@@ -23,7 +25,7 @@ class ExperimentViewModel(QObject):
     that the UI needs to render itself.
     """
 
-    def __init__(self, style: QStyle, parent: QObject | None = None):
+    def __init__(self, style: QStyle, parent: Optional[QObject] = None):
         super().__init__(parent)
         self._style = style
         self._raw_state: Dict[str, Any] = {}
@@ -38,7 +40,7 @@ class ExperimentViewModel(QObject):
         self._setup_icons()
         self._trial_plot_colors: Dict[str, pg.QtGui.QColor] = {}
         self._next_color_index = 0
-        self.displayed_insight_messages = set()
+        self.displayed_insight_messages: set[str] = set()
 
     def update_state(self, new_state: Dict[str, Any]):
         """Updates the ViewModel with a new state dictionary from the backend."""
@@ -89,7 +91,7 @@ class ExperimentViewModel(QObject):
                 prioritized=trial_data.get("prioritized", False),
             )
 
-    def _find_best_trial(self, trials_data: Dict[str, Any]) -> str | None:
+    def _find_best_trial(self, trials_data: Dict[str, Any]) -> Optional[str]:
         """Determines the best trial based on the challenge's performance metric."""
         if not self.challenge_name or self.challenge_name not in AVAILABLE_DATASETS:
             return None

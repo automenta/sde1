@@ -2,15 +2,17 @@ import logging
 import os
 import time
 import traceback
+from typing import Dict
 from typing import Tuple
+from typing import Type
 
 import torch
 import torch.optim as optim
 
 from ..config import get_checkpoints_dir
-from ..core.types import Trial
-from ..core.types import WorkUnit
-from ..core.types import WorkUnitType
+from sde.core.domain import Trial
+from sde.core.domain import WorkUnit
+from sde.core.domain import WorkUnitType
 from ..models.types import DatasetDefinition
 from ..models.types import ModelDefinition
 
@@ -39,7 +41,9 @@ class Worker:
         self.model_def = model_def
         self.dataset_def = dataset_def
         self.checkpoints_dir = get_checkpoints_dir()
-        self._dataloader_cache = {}
+        self._dataloader_cache: Dict[
+            int, Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]
+        ] = {}
 
     def _get_dataloaders(
         self, trial: Trial
@@ -102,6 +106,7 @@ class Worker:
         optimizer_name = optimizer_hparams.get("name", "Adam").lower()
         optimizer_params = {k: v for k, v in optimizer_hparams.items() if k != "name"}
 
+        optimizer_class: Type[torch.optim.Optimizer]
         if optimizer_name == "adam":
             optimizer_class = optim.Adam
         elif optimizer_name == "sgd":
@@ -195,7 +200,7 @@ class Worker:
 
         # 4. Evaluation on validation set
         model.eval()
-        val_loss = 0
+        val_loss = 0.0
         correct = 0
         total = 0
         with torch.no_grad():

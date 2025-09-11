@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 from typing import Dict
+from typing import Optional
 
 from ..challenges import AVAILABLE_DATASETS
 from ..exploration.schedulers import AdaptiveScheduler
@@ -22,7 +23,7 @@ class SchedulerFactory:
     def create_scheduler(
         policy_name: str,
         challenge_name: str,
-        patience_budget: Dict[str, Any] = None,
+        patience_budget: Optional[Dict[str, Any]] = None,
     ) -> AdaptiveScheduler:
         """Creates an instance of an adaptive scheduler based on its name and config.
 

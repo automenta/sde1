@@ -4,12 +4,12 @@ from typing import Any
 from typing import Dict
 
 from ..core.actions import ActionType
-from ..core.types import AlgorithmConfig
-from ..core.types import ExecutionSettings
-from ..core.types import Experiment
-from ..core.types import ExperimentStatus
-from ..core.types import Trial
-from ..core.types import TrialStatus
+from ..core.domain import AlgorithmConfig
+from ..core.domain import ExecutionSettings
+from ..core.domain import Experiment
+from ..core.domain import ExperimentStatus
+from ..core.domain import Trial
+from ..core.domain import TrialStatus
 from ..events import Signal
 from .action_validator import ActionValidator
 from .proxy import EngineProxy

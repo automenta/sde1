@@ -1,9 +1,14 @@
 from datetime import datetime
+from typing import Any
+from typing import Dict
+from typing import Optional
+from typing import Set
+from typing import Union
 
 import pyqtgraph as pg
 from PyQt6.QtCore import QPropertyAnimation
 from PyQt6.QtCore import Qt
-from PyQt6.QtCore import pyqtProperty
+from PyQt6.QtCore import Property  # type: ignore
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QAbstractItemView
@@ -30,7 +35,9 @@ from .view_model import ExperimentViewModel
 class InsightListItem(QListWidgetItem):
     """A custom QListWidgetItem that stores the full UIInsight object."""
 
-    def __init__(self, ui_insight: UIInsight, parent: QListWidget | None = None):
+    def __init__(
+        self, ui_insight: UIInsight, parent: Optional[QListWidget] = None
+    ):
         super().__init__(parent)
         self.insight = ui_insight
         self.setIcon(ui_insight.icon)
@@ -70,14 +77,15 @@ class ResultsPane(QWidget):
         super().__init__(parent)
 
         # --- UI State and Data Maps ---
-        self.trial_row_map = {}  # trial.id -> table_row_index
-        self.plot_curve_map = {}  # trial.id -> plot_curve_item
-        self.legend = None
-        self.selected_insight_item = None
+        self.trial_row_map: Dict[str, int] = {}
+        self.plot_curve_map: Dict[str, pg.PlotDataItem] = {}
+        self.legend: Optional[pg.LegendItem] = None
+        self.selected_insight_item: Optional[InsightListItem] = None
         self.displayed_insight_count = 0
-        self.view_model = None  # To access trial data in context menu
-        self.insight_animation = None
-        self.available_metrics = set()
+        self.view_model: Optional[ExperimentViewModel] = None
+        self.insight_animation: Optional[QPropertyAnimation] = None
+        self.available_metrics: Set[str] = set()
+        self.plot_curve_visibility: Dict[str, bool] = {}
         self.star_icon = self.style().standardIcon(
             QStyle.StandardPixmap.SP_DialogApplyButton
         )
@@ -402,9 +410,11 @@ class ResultsPane(QWidget):
         self.insights_group.setStyleSheet(f"QGroupBox {{ border: 1px solid {color.name()}; margin-top: 1em; }}")
 
     # This registers the custom property with Qt's meta-object system
-    insightBorderColor = pyqtProperty(QColor, fset=_set_insight_border_color)
+    insightBorderColor = Property(QColor, fset=_set_insight_border_color)  # type: ignore
 
-    def update_plot_highlight(self, highlight_ids: set, view_model: ExperimentViewModel):
+    def update_plot_highlight(
+        self, highlight_ids: set, view_model: ExperimentViewModel
+    ):
         """Highlights a specific set of trials on the plot by re-applying all styles."""
         # The new logic is now centralized in _apply_plot_curve_styles.
         # We just need to trigger it. The highlight_ids are read from self.selected_insight_item.
@@ -596,7 +606,7 @@ class ResultsPane(QWidget):
 
     def _update_available_metrics(self, view_model: ExperimentViewModel):
         """Discovers and populates the metric combo box from trial data."""
-        new_metrics = set()
+        new_metrics: Set[str] = set()
         for trial in view_model.trials.values():
             new_metrics.update(trial.results.keys())
 
@@ -642,7 +652,7 @@ class ResultsPane(QWidget):
         elif action == spawn_action:
             self._spawn_similar_trial()
 
-    def _get_selected_trial_id(self) -> str | None:
+    def _get_selected_trial_id(self) -> Optional[str]:
         """Helper to get the ID of the currently selected trial."""
         selected_items = self.trials_table.selectedItems()
         if not selected_items:

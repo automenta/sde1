@@ -1,3 +1,7 @@
+from typing import Any
+from typing import Dict
+from typing import Optional
+
 from PyQt6.QtWidgets import QComboBox
 from PyQt6.QtWidgets import QDialog
 from PyQt6.QtWidgets import QDialogButtonBox
@@ -30,7 +34,9 @@ class HyperparameterViewerDialog(QDialog):
         self.tree = QTreeWidget()
         self.tree.setColumnCount(2)
         self.tree.setHeaderLabels(["Parameter", "Value"])
-        self.layout().addWidget(self.tree)
+        layout = self.layout()
+        if layout is not None:
+            layout.addWidget(self.tree)
 
         self.populate_tree(hparams)
         self.tree.expandAll()
@@ -39,9 +45,10 @@ class HyperparameterViewerDialog(QDialog):
 
         ok_button = QPushButton("OK")
         ok_button.clicked.connect(self.accept)
-        self.layout().addWidget(ok_button)
+        if layout is not None:
+            layout.addWidget(ok_button)
 
-    def populate_tree(self, data: dict, parent_item: QTreeWidgetItem = None):
+    def populate_tree(self, data: dict, parent_item: Optional[QTreeWidgetItem] = None):
         if parent_item is None:
             parent_item = self.tree.invisibleRootItem()
 
@@ -64,8 +71,8 @@ class HyperparameterDialog(QDialog):
     def __init__(self, models: list[ModelDefinition], parent=None):
         super().__init__(parent)
         self.models = models
-        self.config = {}
-        self.param_widgets = {}
+        self.config: Dict[str, Any] = {}
+        self.param_widgets: Dict[str, Any] = {}
 
         self.setWindowTitle("Configure Hyperparameter Tuning")
         self.setMinimumSize(600, 500)
@@ -190,7 +197,8 @@ class HyperparameterDialog(QDialog):
                             "scale"
                         ] = scale_combo
 
-            self.params_layout.addWidget(model_group)
+            if self.params_layout is not None:
+                self.params_layout.addWidget(model_group)
 
     def get_configuration(self):
         """Constructs the configuration dictionary from the UI widgets."""
@@ -229,10 +237,11 @@ class SpawnDialog(QDialog):
         self.setLayout(QVBoxLayout())
         self.resize(450, 350)
 
-        self.editor_widgets = {}
+        self.editor_widgets: Dict[str, QWidget] = {}
         form_layout = QFormLayout()
 
         for key, value in hparams.items():
+            widget: QWidget
             if isinstance(value, float):
                 widget = QDoubleSpinBox()
                 widget.setRange(-1e9, 1e9)
@@ -240,7 +249,7 @@ class SpawnDialog(QDialog):
                 widget.setValue(value)
             elif isinstance(value, int):
                 widget = QSpinBox()
-                widget.setRange(-1e9, 1e9)
+                widget.setRange(int(-1e9), int(1e9))
                 widget.setValue(value)
             else:
                 # Fallback to a line edit for strings or other types
@@ -249,26 +258,26 @@ class SpawnDialog(QDialog):
             self.editor_widgets[key] = widget
             form_layout.addRow(key, widget)
 
-        self.layout().addLayout(form_layout)
+        layout = self.layout()
+        if layout is not None:
+            container = QWidget()
+            container.setLayout(form_layout)
+            layout.addWidget(container)
 
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        self.layout().addWidget(button_box)
+            button_box = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Ok
+                | QDialogButtonBox.StandardButton.Cancel
+            )
+            button_box.accepted.connect(self.accept)
+            button_box.rejected.connect(self.reject)
+            layout.addWidget(button_box)
 
     def get_hyperparameters(self) -> dict:
         """Constructs a new hyperparameter dictionary from the editor widgets."""
-        new_hparams = {}
+        new_hparams: Dict[str, Any] = {}
         for key, widget in self.editor_widgets.items():
-            if isinstance(widget, QDoubleSpinBox) or isinstance(widget, QSpinBox):
+            if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
                 new_hparams[key] = widget.value()
-            else:
-                # Attempt to convert back to original type if possible
-                try:
-                    original_type = type(widget.text())
-                    new_hparams[key] = original_type(widget.text())
-                except (ValueError, TypeError):
-                    new_hparams[key] = widget.text() # Keep as string if conversion fails
+            elif isinstance(widget, QLineEdit):
+                new_hparams[key] = widget.text()
         return new_hparams

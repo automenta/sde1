@@ -3,17 +3,18 @@ import logging
 import multiprocessing
 import threading
 import traceback
+from typing import Any
 from typing import Dict
 from typing import Iterator
 from typing import List
 from typing import Tuple
 
 from ..challenges import AVAILABLE_DATASETS
-from ..core.types import Trial
-from ..core.types import TrialStatus
-from ..core.types import WorkUnit
-from .datastore import DataStore
+from sde.core.domain import Trial
+from sde.core.domain import TrialStatus
+from sde.core.domain import WorkUnit
 from ..models import AVAILABLE_MODELS
+from sde.engine.datastore import DataStore
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,9 @@ class ComputeScheduler:
                     f"Cancelled {cancelled_count}/{len(futures_to_cancel)} futures for trial {trial_id}."
                 )
 
-    def run(self, work_units: List[WorkUnit]) -> Iterator[Tuple[WorkUnit, dict]]:
+    def run(
+        self, work_units: List[WorkUnit]
+    ) -> Iterator[Tuple[WorkUnit, Dict[str, Any]]]:
         """Submits work units to the executor and yields results as they complete.
         This is a generator function.
         """
@@ -128,7 +131,6 @@ class ComputeScheduler:
                     trial.algorithm_name,
                     self.dataset_name,
                     self.enable_checkpointing,
-                    self.checkpoints_dir,
                 )
                 self.active_futures[future] = work_unit
                 self.trial_to_futures.setdefault(trial.id, []).append(future)

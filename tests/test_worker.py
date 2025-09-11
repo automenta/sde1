@@ -3,9 +3,9 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import torch
-from sde.core.types import Trial
-from sde.core.types import WorkUnit
-from sde.core.types import WorkUnitType
+from sde.core.domain import Trial
+from sde.core.domain import WorkUnit
+from sde.core.domain import WorkUnitType
 from sde.engine.worker import Worker
 from sde.models.types import DatasetType
 from sde.models.types import ModelDefinition

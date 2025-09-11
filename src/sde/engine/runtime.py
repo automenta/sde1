@@ -9,15 +9,15 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
-from ..core.types import Experiment
-from ..core.types import Trial
-from ..core.types import TrialStatus
-from ..core.types import WorkUnit
+from sde.core.domain import Experiment
+from sde.core.domain import Trial
+from sde.core.domain import TrialStatus
+from sde.core.domain import WorkUnit
+from ..exploration.schedulers import AdaptiveScheduler
 from .compute_scheduler import ComputeScheduler
 from .datastore import DataStore
 from .factory import SchedulerFactory
 from .insight import InsightEngine
-from ..exploration.schedulers import AdaptiveScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -44,19 +44,20 @@ class SdeRuntimeEngine:
         self.compute_scheduler: Optional[ComputeScheduler] = None
 
         # --- Threading and State Control ---
-        self.command_queue = queue.Queue()  # Thread-safe queue for commands
-        self.work_queue = queue.PriorityQueue()  # Thread-safe queue for pending work
+        self.command_queue: queue.Queue[Tuple[str, Dict[str, Any]]] = queue.Queue()
+        self.work_queue: queue.PriorityQueue[
+            Tuple[int, int, WorkUnit]
+        ] = queue.PriorityQueue()
         self._work_counter = 0  # Tie-breaker for priority queue
         self._pause_event = threading.Event()
-        self._cancelled_trials = set()
+        self._cancelled_trials: set[str] = set()
         self._thread: Optional[threading.Thread] = None
         self._is_running = False
         self.event_callback = event_callback
 
     def _emit_event(self, event_type: str, payload: Dict[str, Any]):
         """Emits an event to the orchestrator layer."""
-        if self.event_callback:
-            self.event_callback(event_type, payload)
+        self.event_callback(event_type, payload)
 
     def post_command(self, command: str, payload: Dict[str, Any]) -> None:
         """Adds a command to the command queue for the engine to process."""
@@ -87,10 +88,12 @@ class SdeRuntimeEngine:
 
     def _put_work_in_queue(self, work_unit: WorkUnit):
         """Adds a work unit to the priority queue with a tie-breaker."""
+        assert self.datastore is not None
         trial = self.datastore.get_trial(work_unit.trial_id)
-        priority = -trial.priority  # Negated for min-heap
-        self.work_queue.put((priority, self._work_counter, work_unit))
-        self._work_counter += 1
+        if trial:
+            priority = -trial.priority  # Negated for min-heap
+            self.work_queue.put((priority, self._work_counter, work_unit))
+            self._work_counter += 1
 
     def _handle_start_run(self, payload: Dict[str, Any]):
         """Handles the START_RUN command."""
@@ -105,6 +108,12 @@ class SdeRuntimeEngine:
 
         # 1. Initialize all core components
         self._initialize_from_experiment(experiment)
+
+        # Assertions to help mypy after initialization
+        assert self.datastore is not None
+        assert self.adaptive_scheduler is not None
+        assert self.experiment is not None
+        assert self.compute_scheduler is not None
 
         # 2. Get initial work units
         all_trials = self.datastore.get_all_trials()
@@ -144,7 +153,8 @@ class SdeRuntimeEngine:
 
         self._is_running = False
         self._pause_event.set()  # Ensure loop isn't blocked on pause
-        self.compute_scheduler.stop()
+        if self.compute_scheduler:
+            self.compute_scheduler.stop()
 
         if self._thread and self._thread.is_alive():
             self._thread.join()
@@ -231,11 +241,24 @@ class SdeRuntimeEngine:
 
     def _process_completed_work_unit(self, work_unit: WorkUnit, result: dict):
         """Handles the result of a single completed work unit."""
-        original_status = self.datastore.get_trial(work_unit.trial_id).status
-        updated_trial = self.datastore.record_work_unit_result(work_unit, result)
+        assert self.datastore is not None
+        assert self.insight_engine is not None
+        assert self.adaptive_scheduler is not None
 
+        trial = self.datastore.get_trial(work_unit.trial_id)
+        if not trial:
+            logger.warning(
+                f"Could not find trial {work_unit.trial_id} to record result."
+            )
+            return
+        original_status = trial.status
+
+        updated_trial = self.datastore.record_work_unit_result(work_unit, result)
         if not updated_trial:
-            logger.warning(f"Could not find trial {work_unit.trial_id} to record result.")
+            # This can happen if the trial was cancelled and removed concurrently
+            logger.warning(
+                f"Trial {work_unit.trial_id} disappeared before result was recorded."
+            )
             return
 
         if updated_trial.id in self._cancelled_trials:
@@ -243,20 +266,26 @@ class SdeRuntimeEngine:
             return
 
         if "error" in result:
-            logger.error(f"Work unit {work_unit.type} for trial {updated_trial.id} failed: {result['error']}")
+            logger.error(
+                f"Work unit {work_unit.type} for trial {updated_trial.id} failed: {result['error']}"
+            )
             updated_trial.status = TrialStatus.FAILED
         else:
-            is_newly_finished = (
-                updated_trial.status in (TrialStatus.COMPLETED, TrialStatus.PRUNED)
-                and original_status not in (TrialStatus.COMPLETED, TrialStatus.PRUNED)
-            )
+            is_newly_finished = updated_trial.status in (
+                TrialStatus.COMPLETED,
+                TrialStatus.PRUNED,
+            ) and original_status not in (TrialStatus.COMPLETED, TrialStatus.PRUNED)
             insights = self.insight_engine.analyze_on_epoch(updated_trial)
             if is_newly_finished:
-                logger.info(f"Trial {updated_trial.id} has finished. Running final analysis.")
+                logger.info(
+                    f"Trial {updated_trial.id} has finished. Running final analysis."
+                )
                 insights.extend(self.insight_engine.analyze_on_finish(updated_trial))
 
             if insights:
-                self._emit_event("INSIGHTS_GENERATED", {"insights": [i.__dict__ for i in insights]})
+                self._emit_event(
+                    "INSIGHTS_GENERATED", {"insights": [i.__dict__ for i in insights]}
+                )
 
             if updated_trial.status == TrialStatus.ACTIVE:
                 next_work_units = self.adaptive_scheduler.get_next_work_units(
@@ -267,8 +296,10 @@ class SdeRuntimeEngine:
 
         self._emit_event("TRIAL_UPDATED", {"trial": updated_trial.to_dict()})
 
-    def submit_work(self, work_units: List[WorkUnit]) -> Iterator[Tuple[WorkUnit, dict]]:
+    def submit_work(
+        self, work_units: List[WorkUnit]
+    ) -> Iterator[Tuple[WorkUnit, Dict[str, Any]]]:
         """Submits a list of work units to the scheduler and yields results."""
         if not self._is_running or not self.compute_scheduler:
             raise RuntimeError("Runtime Engine is not running.")
-        return self.compute_scheduler.run(work_units)
+        return self.compute_scheduler.run(work_units)  # type: ignore

@@ -2,6 +2,7 @@ import logging
 from typing import Any
 from typing import Callable
 from typing import Dict
+from typing import Optional
 
 from .runtime import SdeRuntimeEngine
 
@@ -31,7 +32,7 @@ class EngineProxy:
         # It passes the event along to the orchestrator's callback.
         self.orchestrator_callback(event_type, payload)
 
-    def post_command(self, command_type: str, payload: Dict[str, Any] = None):
+    def post_command(self, command_type: str, payload: Optional[Dict[str, Any]] = None):
         """A generic method to post a command to the engine."""
         if payload is None:
             payload = {}
