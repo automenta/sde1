@@ -4,7 +4,7 @@ from typing import Optional
 from typing import Set
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Property  # type: ignore
+from PyQt6.QtCore import pyqtProperty
 from PyQt6.QtCore import QPropertyAnimation
 from PyQt6.QtCore import Qt
 from PyQt6.QtCore import pyqtSignal
@@ -15,11 +15,13 @@ from PyQt6.QtWidgets import QGroupBox
 from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtWidgets import QLabel
+from PyQt6.QtWidgets import QLineEdit
 from PyQt6.QtWidgets import QListWidget
 from PyQt6.QtWidgets import QListWidgetItem
 from PyQt6.QtWidgets import QMenu
 from PyQt6.QtWidgets import QPushButton
 from PyQt6.QtWidgets import QSplitter
+from PyQt6.QtWidgets import QStyle
 from PyQt6.QtWidgets import QTableWidget
 from PyQt6.QtWidgets import QTableWidgetItem
 from PyQt6.QtWidgets import QTextEdit
@@ -28,6 +30,47 @@ from PyQt6.QtWidgets import QWidget
 
 from .models import UIInsight
 from .view_model import ExperimentViewModel
+
+
+class ClickableLabelItem(pg.LabelItem):
+    """A LabelItem that emits a signal when clicked."""
+    clicked = pyqtSignal(object, object)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.curve = None
+        self.label = None
+
+    def mouseClickEvent(self, ev):
+        self.clicked.emit(self.curve, self.label)
+
+
+class CustomLegendItem(pg.LegendItem):
+    """A LegendItem that uses ClickableLabelItems and emits a signal when an item is clicked."""
+    itemClicked = pyqtSignal(object, object)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def addItem(self, item, name):
+        """Overrides the default addItem to use a ClickableLabelItem."""
+        label = ClickableLabelItem(text=name, color=self.opts['labelTextColor'], size=self.opts['labelTextSize'])
+        label.curve = item
+        label.label = label
+        label.clicked.connect(self.itemClicked.emit)
+        sample = pg.graphicsItems.LegendItem.ItemSample(item)
+        self.items.append((sample, label))
+        self._updateLayout()
+
+    def _updateLayout(self):
+        """A simplified layout update. Assumes single column."""
+        for i in range(self.layout.count()):
+            self.layout.removeAt(0)
+        for sample, label in self.items:
+            row = self.layout.rowCount()
+            self.layout.addItem(sample, row, 0)
+            self.layout.addItem(label, row, 1)
+        self.update()
 
 
 class InsightListItem(QListWidgetItem):
@@ -234,7 +277,9 @@ class ResultsPane(QWidget):
         )
         self.plot_widget.setLabel("bottom", "Epoch", color="k", **{"font-size": "12pt"})
         self.plot_widget.showGrid(x=True, y=True)
-        self.legend = self.plot_widget.addLegend()
+        self.legend = CustomLegendItem()
+        self.legend.setParentItem(self.plot_widget.getPlotItem())
+        self.legend.anchor((1, 0), (1, 0), offset=(-10, 10))
         self.plot_curve_visibility = {} # trial_id -> bool
 
     def setup_table(self):
@@ -409,7 +454,7 @@ class ResultsPane(QWidget):
         self.insights_group.setStyleSheet(f"QGroupBox {{ border: 1px solid {color.name()}; margin-top: 1em; }}")
 
     # This registers the custom property with Qt's meta-object system
-    insightBorderColor = Property(QColor, fset=_set_insight_border_color)  # type: ignore
+    insightBorderColor = pyqtProperty(QColor, fset=_set_insight_border_color)
 
     def update_plot_highlight(
         self, highlight_ids: set, view_model: ExperimentViewModel

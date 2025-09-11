@@ -1,3 +1,4 @@
+import json
 from typing import Any
 from typing import Dict
 from typing import Optional
@@ -18,7 +19,8 @@ from PyQt6.QtWidgets import QTreeWidget
 from PyQt6.QtWidgets import QTreeWidgetItem
 from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWidgets import QWidget
-from sde.core.types import ModelDefinition
+
+from sde.core.domain import ModelDefinition
 
 
 class HyperparameterViewerDialog(QDialog):
@@ -195,6 +197,34 @@ class HyperparameterDialog(QDialog):
                         self.param_widgets[model_def.name][param_type][param_name][
                             "scale"
                         ] = scale_combo
+                    elif properties["type"] in ("int", "int_list"):
+                        if "options" in properties:
+                            combo = QComboBox()
+                            # For int_list, options are lists; for int, they are ints
+                            # We convert them all to strings for display.
+                            str_options = [
+                                str(opt) for opt in properties["options"]
+                            ]
+                            combo.addItems(str_options)
+                            if "default" in properties:
+                                combo.setCurrentText(str(properties["default"]))
+                            model_layout.addRow(f"{param_name}:", combo)
+                            self.param_widgets[model_def.name][param_type][
+                                param_name
+                            ] = combo
+                        else:
+                            # Fallback for int without options: QSpinBox
+                            if properties["type"] == "int":
+                                min_val = properties.get("min", 0)
+                                max_val = properties.get("max", 100)
+                                default = properties.get("default", min_val)
+                                spin_box = QSpinBox()
+                                spin_box.setRange(min_val, max_val)
+                                spin_box.setValue(default)
+                                model_layout.addRow(f"{param_name}:", spin_box)
+                                self.param_widgets[model_def.name][param_type][
+                                    param_name
+                                ] = spin_box
 
             if self.params_layout is not None:
                 self.params_layout.addWidget(model_group)
@@ -209,16 +239,42 @@ class HyperparameterDialog(QDialog):
         self.config["num_trials"] = self.num_trials_spinbox.value()
         self.config["models"] = {}
 
-        for model_name, param_types in self.param_widgets.items():
+        for model_def in self.models:
+            model_name = model_def.name
             self.config["models"][model_name] = {}
-            for param_type, params in param_types.items():
+            for param_type, params in self.param_widgets[model_name].items():
                 self.config["models"][model_name][param_type] = {}
-                for param_name, widgets in params.items():
-                    self.config["models"][model_name][param_type][param_name] = {
-                        "min": widgets["min"].value(),
-                        "max": widgets["max"].value(),
-                        "scale": widgets["scale"].currentText().lower(),
-                    }
+                for param_name, widget in params.items():
+                    schema = model_def.hyperparameter_schema[param_type][param_name]
+                    # Handle composite widgets (like for float ranges)
+                    if isinstance(widget, dict):
+                        self.config["models"][model_name][param_type][param_name] = {
+                            "min": widget["min"].value(),
+                            "max": widget["max"].value(),
+                            "scale": widget["scale"].currentText().lower(),
+                        }
+                    # Handle simple widgets (QComboBox, QSpinBox)
+                    elif isinstance(widget, QComboBox):
+                        value_str = widget.currentText()
+                        if schema["type"] == "int_list":
+                            # Safely parse string representation of list
+                            self.config["models"][model_name][param_type][
+                                param_name
+                            ] = json.loads(value_str)
+                        elif schema["type"] == "int":
+                            self.config["models"][model_name][param_type][
+                                param_name
+                            ] = int(value_str)
+                        else: # Potentially other simple types like string
+                             self.config["models"][model_name][param_type][
+                                param_name
+                            ] = value_str
+
+                    elif isinstance(widget, QSpinBox):
+                        self.config["models"][model_name][param_type][
+                            param_name
+                        ] = widget.value()
+
         return self.config
 
     def accept(self):
