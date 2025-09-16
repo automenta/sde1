@@ -1,10 +1,21 @@
+#
+# Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+#
+"""Data utilities"""
 import random
-from typing import Any
-from typing import Dict
+from typing import Any, Dict, Tuple, Type
 
 import numpy as np
-from torch.utils.data import DataLoader
-from torch.utils.data import Subset
+from torch.utils.data import Dataset, TensorDataset
+from torchvision.datasets import MNIST, FashionMNIST, CIFAR10
+
+from sde.config import get_user_cache_dir
 
 
 def _generate_random_hyperparameters(parameter_space: Dict[str, Any]) -> Dict[str, Any]:
@@ -22,14 +33,71 @@ def _generate_random_hyperparameters(parameter_space: Dict[str, Any]) -> Dict[st
             if p_def.get("type") == "int":
                 value = int(value)
         elif isinstance(p_def, (list, tuple)):
+            # Check for a simple 2-element tuple defining a uniform range
             if all(isinstance(x, (int, float)) for x in p_def) and len(p_def) == 2:
                 value = random.uniform(p_def[0], p_def[1])
             else:
+                # Otherwise, assume it's a list of choices
                 value = random.choice(p_def)
         else:
+            # If not a special dict or a list, treat as a fixed value
             value = p_def
         hparams[p_name] = value
     return hparams
+
+
+def _get_dataset(dataset_class: Type[Dataset]) -> Tuple[Dataset, Dataset]:
+    """
+    Generic function to get a dataset.
+    """
+    data_dir = get_user_cache_dir()
+    train_dataset = dataset_class(
+        root=data_dir,
+        train=True,
+        download=True,
+        transform=None,
+    )
+    test_dataset = dataset_class(
+        root=data_dir,
+        train=False,
+        download=True,
+        transform=None,
+    )
+    return train_dataset, test_dataset
+
+
+def get_mnist_dataset() -> Tuple[Dataset, Dataset]:
+    """
+    Returns the MNIST dataset.
+    """
+    return _get_dataset(MNIST)
+
+
+def get_fashion_mnist_dataset() -> Tuple[Dataset, Dataset]:
+    """
+    Returns the Fashion-MNIST dataset.
+    """
+    return _get_dataset(FashionMNIST)
+
+
+def get_cifar10_dataset() -> Tuple[Dataset, Dataset]:
+    """
+    Returns the CIFAR10 dataset.
+    """
+    return _get_dataset(CIFAR10)
+
+
+def get_dummy_dataset() -> Tuple[Dataset, Dataset]:
+    """
+    Returns a dummy dataset.
+    """
+    train_dataset = TensorDataset(
+        __import__("torch").randn(100, 10), __import__("torch").randn(100, 1)
+    )
+    test_dataset = TensorDataset(
+        __import__("torch").randn(100, 10), __import__("torch").randn(100, 1)
+    )
+    return train_dataset, test_dataset
 
 
 def create_train_val_dataloaders(
@@ -70,15 +138,15 @@ def create_train_val_dataloaders(
 
     train_idx, val_idx = indices[split:], indices[:split]
 
-    train_subset = Subset(full_train_dataset, train_idx)
-    val_subset = Subset(full_train_dataset, val_idx)
+    train_subset = __import__("torch").utils.data.Subset(full_train_dataset, train_idx)
+    val_subset = __import__("torch").utils.data.Subset(full_train_dataset, val_idx)
 
     # Use num_workers=0 for simplicity and to avoid multiprocessing issues
     # in some environments
-    train_loader = DataLoader(
+    train_loader = __import__("torch").utils.data.DataLoader(
         train_subset, batch_size=batch_size, shuffle=True, num_workers=0
     )
-    val_loader = DataLoader(
+    val_loader = __import__("torch").utils.data.DataLoader(
         val_subset, batch_size=batch_size, shuffle=False, num_workers=0
     )
 

@@ -10,6 +10,7 @@ from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
+from sde.discovery import discover_and_register_components
 from sde.engine.runtime import SdeRuntimeEngine
 from sde.exploration.schedulers import SuccessiveHalvingScheduler
 
@@ -20,6 +21,7 @@ class TestResumeLogic(unittest.TestCase):
     @patch("sde.engine.runtime.SchedulerFactory")
     def test_resume_from_saved_state(self, MockSchedulerFactory, MockComputeScheduler):
         # 1. Create an Experiment object that looks like it was saved mid-run
+        discover_and_register_components()
         experiment = Experiment(id="test_exp_1")
         experiment.status = ExperimentStatus.PAUSED
         experiment.challenge = {

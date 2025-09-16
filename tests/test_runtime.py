@@ -10,6 +10,7 @@ from sde.core.domain import TrialStatus
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
 from sde.core.events import EngineEvent
+from sde.discovery import discover_and_register_components
 from sde.engine.runtime import SdeRuntimeEngine
 
 
@@ -19,6 +20,7 @@ class TestSdeRuntimeEngine(unittest.TestCase):
     @patch("sde.engine.runtime.SchedulerFactory")
     def setUp(self, MockSchedulerFactory, MockComputeScheduler):
         """Set up a runtime engine instance for tests."""
+        discover_and_register_components()
         self.mock_event_callback = MagicMock()
         self.runtime_engine = SdeRuntimeEngine(event_callback=self.mock_event_callback)
 
