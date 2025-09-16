@@ -17,6 +17,8 @@ from ..challenges import AVAILABLE_DATASETS
 from ..core.actions import ActionType
 from ..engine.orchestrator import ExperimentOrchestrator
 from ..models import AVAILABLE_MODELS
+from .dialog_service import DialogService
+from .view_controller import ViewController
 from .hyperparameters import HyperparameterDialog
 from .hyperparameters import HyperparameterViewerDialog
 from .hyperparameters import SimpleRunDialog
@@ -39,7 +41,9 @@ class MainWindow(QMainWindow):
 
         # --- Backend and ViewModel ---
         self.orchestrator = ExperimentOrchestrator()
+        self.view_controller = ViewController(self.orchestrator)
         self.view_model = ExperimentViewModel(self.style())
+        self.dialog_service = DialogService(self)
 
         self._init_ui()
         self._connect_signals()
@@ -74,10 +78,10 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         """Connects all UI signals to their corresponding slots."""
         # Backend signals -> Main Window
-        self.orchestrator.log_message.connect(self.append_log_message)
-        self.orchestrator.state_changed.connect(self.on_state_changed)
-        self.orchestrator.operation_started.connect(self.on_operation_started)
-        self.orchestrator.operation_finished.connect(self.on_operation_finished)
+        self.view_controller.log_message.connect(self.append_log_message)
+        self.view_controller.state_changed.connect(self.on_state_changed)
+        self.view_controller.operation_started.connect(self.on_operation_started)
+        self.view_controller.operation_finished.connect(self.on_operation_finished)
 
         # Setup Pane -> Main Window
         self.setup_pane.start_experiment_requested.connect(self.start_experiment)
@@ -124,33 +128,30 @@ class MainWindow(QMainWindow):
         """Handles the 'Simple' run mode by showing the SimpleRunDialog."""
         dataset_name, selected_models_names = self.setup_pane.get_experiment_settings()
         if not dataset_name or not selected_models_names:
-            QMessageBox.warning(
-                self,
+            self.dialog_service.show_warning(
                 "Missing Information",
                 "Please select a dataset and at least one model.",
             )
             return
 
-        selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
-        dialog = SimpleRunDialog(selected_model_defs, self)
-        result = dialog.exec()
+        result, custom_hparams = self.dialog_service.show_simple_run_dialog(
+            selected_models_names
+        )
 
-        if result == QDialog.DialogCode.Rejected:
+        if result is None:
             self.append_log_message(
                 {"level": "INFO", "message": "Experiment start cancelled by user."}
             )
             return
 
-        custom_hparams = {}
-        if result == SimpleRunDialog.RunWithEdits:
-            custom_hparams = dialog.get_hyperparameters()
+        if custom_hparams:
             self.append_log_message(
                 {
                     "level": "INFO",
                     "message": "Starting run with custom hyperparameters.",
                 }
             )
-        else:  # RunWithDefaults
+        else:
             self.append_log_message(
                 {
                     "level": "INFO",
@@ -158,81 +159,34 @@ class MainWindow(QMainWindow):
                 }
             )
 
-        algorithms_to_add = []
-        for model_name in selected_models_names:
-            model_def = AVAILABLE_MODELS[model_name]
-            param_space = {}
-            if model_name in custom_hparams:
-                param_space = custom_hparams[model_name]
-            else:
-                for param_type, params in model_def.hyperparameter_schema.items():
-                    for param_name, properties in params.items():
-                        param_space[param_name] = properties.get("default")
-            algorithms_to_add.append(
-                {
-                    "name": model_name,
-                    "parameter_space": param_space,
-                    "is_simple_run": True,
-                }
-            )
-
-        self._configure_new_experiment(dataset_name, algorithms_to_add, settings)
+        self.append_log_message(
+            {"level": "INFO", "message": f"Configuring experiment on '{dataset_name}'"}
+        )
+        self._clear_previous_experiment()
+        self.view_controller.start_simple_experiment(
+            settings, dataset_name, selected_models_names, custom_hparams
+        )
 
     def open_tuning_dialog(self, settings: dict):
         """Opens the tuning dialog and configures the experiment via the orchestrator."""
         dataset_name, selected_models_names = self.setup_pane.get_experiment_settings()
         if not dataset_name or not selected_models_names:
-            QMessageBox.warning(
-                self,
+            self.dialog_service.show_warning(
                 "Warning",
                 "Please select a dataset and at least one model to tune.",
             )
             return
 
-        selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
-        dialog = HyperparameterDialog(selected_model_defs, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        config = self.dialog_service.show_tuning_dialog(selected_models_names)
+        if not config:
             return
 
-        config = dialog.get_configuration()
-        self.orchestrator.dispatch(
-            ActionType.SET_ADAPTIVE_POLICY,
-            {"policy_name": config["adaptive_scheduler"]},
-        )
-
-        algorithms_to_add = []
-        for model_name, model_params in config["models"].items():
-            full_param_space = {}
-            for param_type in model_params.values():
-                for param_name, properties in param_type.items():
-                    full_param_space[param_name] = {
-                        "type": "float",
-                        "min": properties["min"],
-                        "max": properties["max"],
-                        "scale": properties.get("scale", "linear"),
-                    }
-            algorithms_to_add.append(
-                {"name": model_name, "parameter_space": full_param_space}
-            )
-
-        self._configure_new_experiment(dataset_name, algorithms_to_add, settings)
-
-    def _configure_new_experiment(self, dataset_name, algorithms, settings):
         self.append_log_message(
             {"level": "INFO", "message": f"Configuring experiment on '{dataset_name}'"}
         )
         self._clear_previous_experiment()
 
-        challenge_def = AVAILABLE_DATASETS[dataset_name]
-        self.orchestrator.dispatch(
-            ActionType.SET_CHALLENGE,
-            {"name": dataset_name, "type": challenge_def.type.value},
-        )
-
-        for algo_config in algorithms:
-            self.orchestrator.dispatch(ActionType.ADD_ALGORITHM, algo_config)
-
-        self.orchestrator.dispatch(ActionType.START_RUN, settings)
+        self.view_controller.start_tuning_experiment(settings, dataset_name, config)
 
     # --- UI Update and State Management ---
 
@@ -273,7 +227,7 @@ class MainWindow(QMainWindow):
         """Handles double-clicking a trial to show its hyperparameters."""
         trial = self.view_model.trials.get(trial_id)
         if trial:
-            self.show_hyperparameter_dialog(trial.hyperparameters)
+            self.dialog_service.show_hyperparameter_viewer(trial.hyperparameters)
 
     def on_insight_selected(self, highlight_ids: set):
         """Handles insight selection from the results pane."""
@@ -281,11 +235,7 @@ class MainWindow(QMainWindow):
 
     def show_hyperparameter_dialog(self, hparams: dict):
         """Shows the hyperparameter viewer dialog for the given parameters."""
-        if not hparams:
-            QMessageBox.information(self, "Info", "No hyperparameters to display.")
-            return
-        dialog = HyperparameterViewerDialog(hparams, self)
-        dialog.exec()
+        self.dialog_service.show_hyperparameter_viewer(hparams)
 
     def append_log_message(self, log_data: dict):
         self.results_pane.append_log_message(log_data)
@@ -305,18 +255,11 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # Prompt the user for the number of trials to generate for the new models
-        num_trials, ok = QInputDialog.getInt(
-            self,
-            "Add Trials",
-            f"How many trials to generate for {len(newly_selected_models)} new model(s)?",
-            10,  # Default value
-            1,  # Minimum value
-            1000,  # Maximum value
-            1,  # Step
+        num_trials = self.dialog_service.show_add_trials_dialog(
+            len(newly_selected_models)
         )
 
-        if not ok:
+        if not num_trials:
             self.append_log_message(
                 {"level": "INFO", "message": "Add models operation cancelled by user."}
             )
@@ -331,38 +274,29 @@ class MainWindow(QMainWindow):
         for model_name in newly_selected_models:
             model_def = AVAILABLE_MODELS[model_name]
             param_space = self._create_default_param_space(model_def)
-            self.orchestrator.dispatch(
-                ActionType.ADD_ALGORITHM,
-                {
-                    "name": model_name,
-                    "parameter_space": param_space,
-                    "num_trials": num_trials,
-                },
+            self.view_controller.add_models_to_run(
+                model_name, param_space, num_trials
             )
 
     def remove_algorithm(self, algorithm_id: str):
         """Dispatches an action to remove an algorithm from the experiment."""
-        self.orchestrator.dispatch(
-            ActionType.REMOVE_ALGORITHM, {"algorithm_id": algorithm_id}
-        )
+        self.view_controller.remove_algorithm(algorithm_id)
 
     def update_throttle(self, value: int):
         """Dispatches an action to update the worker throttle percentage."""
-        self.orchestrator.dispatch(
-            ActionType.SET_BUDGET, {"worker_throttle_percent": value}
-        )
+        self.view_controller.update_throttle(value)
 
     def pause_experiment(self):
         """Dispatches an action to pause the current experiment run."""
-        self.orchestrator.dispatch(ActionType.PAUSE_RUN, {})
+        self.view_controller.pause_experiment()
 
     def resume_experiment(self):
         """Dispatches an action to resume a paused experiment run."""
-        self.orchestrator.dispatch(ActionType.RESUME_RUN, {})
+        self.view_controller.resume_experiment()
 
     def stop_experiment(self):
         """Dispatches an action to stop the current experiment run."""
-        self.orchestrator.dispatch(ActionType.STOP_RUN, {})
+        self.view_controller.stop_experiment()
 
     def on_operation_started(self, message: str):
         """Shows the modal progress dialog when a long operation starts."""
@@ -376,45 +310,25 @@ class MainWindow(QMainWindow):
 
     def save_experiment(self):
         """Opens a file dialog and dispatches the action to save the experiment."""
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, "Save Experiment", "", "SDE JSON Files (*.sde.json)"
-        )
+        filepath = self.dialog_service.show_save_experiment_dialog()
         if filepath:
-            self.orchestrator.dispatch(
-                ActionType.SAVE_EXPERIMENT, {"filepath": filepath}
-            )
+            self.view_controller.save_experiment(filepath)
 
     def load_experiment(self):
         """Opens a file dialog and dispatches the action to load an experiment."""
-        filepath, _ = QFileDialog.getOpenFileName(
-            self, "Load Experiment", "", "SDE JSON Files (*.sde.json)"
-        )
+        filepath = self.dialog_service.show_load_experiment_dialog()
         if filepath:
             # Clear the UI immediately for a better user experience
             self._clear_previous_experiment()
-            self.orchestrator.dispatch(
-                ActionType.LOAD_EXPERIMENT, {"filepath": filepath}
-            )
+            self.view_controller.load_experiment(filepath)
 
     def prune_trial(self, trial_id: str):
         """Dispatches an action to manually prune a trial."""
-        trial = self.view_model.trials.get(trial_id)
-        if trial:
-            trial.status = "PRUNED"
-            self.results_pane.update_view(self.view_model)
-        self.orchestrator.dispatch(
-            ActionType.MANUAL_PRUNE_TRIAL, {"trial_id": trial_id}
-        )
+        self.view_controller.prune_trial(trial_id)
 
     def prioritize_trial(self, trial_id: str):
         """Dispatches an action to increase a trial's priority."""
-        trial = self.view_model.trials.get(trial_id)
-        if trial:
-            trial.prioritized = True
-            self.results_pane.update_view(self.view_model)
-        self.orchestrator.dispatch(
-            ActionType.MANUAL_PRIORITIZE_TRIAL, {"trial_id": trial_id}
-        )
+        self.view_controller.prioritize_trial(trial_id)
 
     def spawn_trial(self, trial_id: str):
         """Opens a dialog to edit hyperparameters and spawn a new trial."""
@@ -422,17 +336,13 @@ class MainWindow(QMainWindow):
         if not source_trial:
             return
 
-        dialog = SpawnDialog(source_trial.hyperparameters, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_hparams = dialog.get_hyperparameters()
-            self.orchestrator.dispatch(
-                ActionType.SPAWN_SIMILAR_TRIAL,
-                {"source_trial_id": trial_id, "new_hparams": new_hparams},
-            )
+        new_hparams = self.dialog_service.show_spawn_dialog(source_trial.hyperparameters)
+        if new_hparams:
+            self.view_controller.spawn_trial(trial_id, new_hparams)
 
     def request_state_update(self):
         """Dispatches an action to request a full state update from the orchestrator."""
-        self.orchestrator.dispatch(ActionType.REQUEST_STATE_UPDATE, {})
+        self.view_controller.request_state_update()
 
     def closeEvent(self, event):
         """Handles the window close event to ensure graceful shutdown."""
@@ -442,7 +352,7 @@ class MainWindow(QMainWindow):
                 "message": "Close event received. Shutting down backend engine...",
             }
         )
-        self.orchestrator.shutdown()
+        self.view_controller.shutdown()
         event.accept()
 
 
