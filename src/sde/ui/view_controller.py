@@ -1,5 +1,6 @@
 from PyQt6.QtCore import QObject
 
+from .. import config
 from ..core.actions import ActionType
 from ..engine.orchestrator import ExperimentOrchestrator
 from ..registry import registry
@@ -128,7 +129,10 @@ class ViewController(QObject):
     def show_trial_hyperparameters(self, trial):
         """Shows the hyperparameters for a given trial."""
         if trial:
-            self.dialog_service.show_hyperparameter_viewer(trial.hyperparameters)
+            auto_close_in_ms = 2000 if config.DEMO_MODE else None
+            self.dialog_service.show_hyperparameter_viewer(
+                trial.hyperparameters, auto_close_in_ms=auto_close_in_ms
+            )
 
     def initiate_spawn_trial(self, source_trial):
         """Handles the UI flow for spawning a new trial from an existing one."""

@@ -33,7 +33,7 @@ def main():
     main_win.show()
 
     if config.DEMO_MODE:
-        demo_controller = DemoController(main_win)
+        demo_controller = DemoController(main_win, main_win.spotlight)
         demo_controller.start()
 
     sys.exit(app.exec())

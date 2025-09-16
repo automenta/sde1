@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QWidget
 
 # Import backend and UI components
 from ..engine.orchestrator import ExperimentOrchestrator
+from .components.spotlight_widget import SpotlightWidget
 from .dialog_service import DialogService
 from .results_pane import ResultsPane
 from .setup_pane import SetupPane
@@ -63,6 +64,9 @@ class MainWindow(QMainWindow):
         self.progress_dialog.setAutoReset(True)
         self.progress_dialog.setMinimum(0)
         self.progress_dialog.setMaximum(0)  # Makes it an indeterminate progress bar
+
+        # --- Demo Mode Spotlight ---
+        self.spotlight = SpotlightWidget(self)
 
     def _connect_signals(self):
         """Connects all UI signals to their corresponding slots."""
@@ -229,6 +233,12 @@ class MainWindow(QMainWindow):
     def request_state_update(self):
         """Dispatches an action to request a full state update from the orchestrator."""
         self.view_controller.request_state_update()
+
+    def resizeEvent(self, event):
+        """Ensure the spotlight overlay is resized along with the main window."""
+        if hasattr(self, "spotlight"):
+            self.spotlight.setGeometry(self.rect())
+        super().resizeEvent(event)
 
     def closeEvent(self, event):
         """Handles the window close event to ensure graceful shutdown."""

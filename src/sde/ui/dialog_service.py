@@ -1,3 +1,4 @@
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QDialog
 from PyQt6.QtWidgets import QFileDialog
 from PyQt6.QtWidgets import QInputDialog
@@ -35,14 +36,28 @@ class DialogService:
 
         return dialog.get_configuration()
 
-    def show_hyperparameter_viewer(self, hparams):
+    def show_hyperparameter_viewer(
+        self, hparams, auto_close_in_ms: int | None = None
+    ):
+        """Shows the hyperparameter viewer dialog. If auto_close_in_ms is provided,
+        the dialog is shown non-modally and closed after the delay.
+        """
         if not hparams:
             QMessageBox.information(
                 self.parent, "Info", "No hyperparameters to display."
             )
             return
+
         dialog = HyperparameterViewerDialog(hparams, self.parent)
-        dialog.exec()
+
+        if auto_close_in_ms is not None:
+            # Show non-modally and auto-close
+            dialog.setModal(False)
+            dialog.show()
+            QTimer.singleShot(auto_close_in_ms, dialog.close)
+        else:
+            # Show modally and wait for user
+            dialog.exec()
 
     def show_spawn_dialog(self, source_trial_hparams):
         dialog = SpawnDialog(source_trial_hparams, self.parent)
