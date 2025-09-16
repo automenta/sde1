@@ -11,7 +11,9 @@ from typing import Tuple
 
 from sde.core.comms import EngineCommand
 from sde.core.comms import EngineEvent
+from sde.core.domain import Challenge
 from sde.core.domain import ExecutionSettings
+from sde.core.domain import PatienceBudget
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
 from sde.core.domain import WorkUnit
@@ -75,17 +77,17 @@ class SdeRuntimeEngine:
     def _initialize_runtime(
         self,
         trials: List[Trial],
-        challenge_name: str,
+        challenge: Challenge,
         policy_name: str,
-        patience_budget: Dict[str, Any],
+        patience_budget: PatienceBudget,
         execution_settings: ExecutionSettings,
     ):
         """Sets up all the core components based on configuration data."""
         self.datastore = DataStore(trials)
         self.adaptive_scheduler = SchedulerFactory.create_scheduler(
             policy_name=policy_name,
-            challenge_name=challenge_name,
-            patience_budget=patience_budget,
+            challenge_name=challenge.name,
+            patience_budget=patience_budget.to_dict(),
         )
         self.insight_engine = InsightEngine(
             self.datastore.get_all_trials(),
@@ -94,7 +96,7 @@ class SdeRuntimeEngine:
         )
         self.compute_scheduler = ComputeScheduler(
             datastore=self.datastore,
-            dataset_name=challenge_name,
+            dataset_name=challenge.name,
             max_workers=execution_settings.num_workers,
             enable_checkpointing=execution_settings.enable_checkpointing,
             work_unit_timeout=execution_settings.work_unit_timeout_seconds,
@@ -128,13 +130,20 @@ class SdeRuntimeEngine:
             if exec_settings_dict
             else None
         )
+        challenge = Challenge.from_dict(exp_def.get("challenge"))
+        patience_budget_dict = exp_def.get("patience_budget")
+        patience_budget = (
+            PatienceBudget.from_dict(patience_budget_dict)
+            if patience_budget_dict is not None
+            else PatienceBudget()
+        )
 
         # 1. Initialize all core components from the definition
         self._initialize_runtime(
             trials=trials,
-            challenge_name=exp_def.get("challenge", {}).get("name"),
+            challenge=challenge,
             policy_name=exp_def.get("adaptive_policy"),
-            patience_budget=exp_def.get("patience_budget"),
+            patience_budget=patience_budget,
             execution_settings=execution_settings,
         )
 
@@ -330,7 +339,7 @@ class SdeRuntimeEngine:
             if insights:
                 self._emit_event(
                     EngineEvent.INSIGHTS_GENERATED,
-                    {"insights": [i.__dict__ for i in insights]},
+                    {"insights": [i.to_dict() for i in insights]},
                 )
 
             if updated_trial.status == TrialStatus.ACTIVE:

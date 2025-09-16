@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+from sde.core.definitions import DatasetType
 from sde.core.domain import ExecutionSettings
 from sde.core.domain import Experiment
 from sde.core.domain import ExperimentStatus
@@ -21,7 +22,10 @@ class TestResumeLogic(unittest.TestCase):
         # 1. Create an Experiment object that looks like it was saved mid-run
         experiment = Experiment(id="test_exp_1")
         experiment.status = ExperimentStatus.PAUSED
-        experiment.challenge = {"name": "CIFAR10", "type": "vision"}
+        experiment.challenge = {
+            "name": "CIFAR10",
+            "type": DatasetType.IMAGE_CLASSIFICATION.value,
+        }
         experiment.adaptive_policy = "SuccessiveHalving"
         experiment.execution_settings = ExecutionSettings(
             num_workers=1,

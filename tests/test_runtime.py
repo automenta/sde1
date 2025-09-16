@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 from sde.core.comms import EngineEvent
+from sde.core.definitions import DatasetType
 from sde.core.domain import ExecutionSettings
 from sde.core.domain import Experiment
 from sde.core.domain import Trial
@@ -30,7 +31,10 @@ class TestSdeRuntimeEngine(unittest.TestCase):
 
         # Define a basic experiment and trial
         self.experiment = Experiment(id="test_exp_runtime")
-        self.experiment.challenge = {"name": "MNIST", "type": "vision"}
+        self.experiment.challenge = {
+            "name": "MNIST",
+            "type": DatasetType.IMAGE_CLASSIFICATION.value,
+        }
         self.trial = Trial(
             id="trial1", algorithm_name="TestAlgo", hyperparameters={"lr": 0.1}
         )

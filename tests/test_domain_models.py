@@ -1,11 +1,14 @@
 import uuid
 
+from sde.core.definitions import DatasetType
 from sde.core.definitions import Insight
 from sde.core.definitions import InsightType
 from sde.core.domain import AlgorithmConfig
+from sde.core.domain import Challenge
 from sde.core.domain import ExecutionSettings
 from sde.core.domain import Experiment
 from sde.core.domain import ExperimentStatus
+from sde.core.domain import PatienceBudget
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
 
@@ -51,12 +54,12 @@ def test_experiment_serialization_roundtrip():
     original_experiment = Experiment(
         id=f"exp_{uuid.uuid4().hex[:8]}",
         status=ExperimentStatus.RUNNING,
-        challenge={"name": "CIFAR10", "type": "IMAGE_CLASSIFICATION"},
+        challenge=Challenge(name="CIFAR10", type=DatasetType.IMAGE_CLASSIFICATION),
         algorithms={"algo_1": original_algo},
         trials={"trial_1": original_trial},
         insights=[original_insight],
         adaptive_policy="Hyperband",
-        patience_budget={"max_epochs": 100},
+        patience_budget=PatienceBudget(wall_clock_time_seconds=3600),
         execution_settings=original_settings,
         scheduler_state={"rung": 1},
     )

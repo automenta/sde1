@@ -11,6 +11,8 @@ from typing import Tuple
 from dataclasses_json import Undefined
 from dataclasses_json import dataclass_json
 
+from ..config import Defaults
+from .definitions import DatasetType
 from .definitions import Insight
 
 # --- Core Runtime Engine & Experiment State ---
@@ -102,6 +104,26 @@ class ExecutionSettings:
 
 
 @dataclass_json(undefined=Undefined.EXCLUDE)
+@dataclass(frozen=True)
+class Challenge:
+    """The definition of the problem domain for the experiment."""
+
+    name: str
+    type: DatasetType
+
+
+@dataclass_json(undefined=Undefined.EXCLUDE)
+@dataclass(frozen=True)
+class PatienceBudget:
+    """A composite measure of the total resources a user is willing to invest."""
+
+    wall_clock_time_seconds: Optional[int] = None
+    cpu_seconds: Optional[int] = None
+    gpu_seconds: Optional[int] = None
+    worker_throttle_percent: int = 100
+
+
+@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass
 class Experiment:
     """The single, canonical data structure holding the entire application state.
@@ -112,7 +134,7 @@ class Experiment:
     status: ExperimentStatus = ExperimentStatus.DEFINING
 
     # Core Definition: What the experiment IS
-    challenge: Optional[Dict[str, Any]] = None
+    challenge: Optional[Challenge] = None
     algorithms: Dict[str, AlgorithmConfig] = field(default_factory=dict)
 
     # Runtime State: What is HAPPENING in the experiment
@@ -120,7 +142,7 @@ class Experiment:
     insights: List[Insight] = field(default_factory=list)
 
     # Strategy & Constraints: HOW the experiment is run
-    adaptive_policy: str = "SuccessiveHalving"
-    patience_budget: Optional[Dict[str, int]] = None
+    adaptive_policy: str = Defaults.DEFAULT_ADAPTIVE_POLICY
+    patience_budget: Optional[PatienceBudget] = None
     execution_settings: Optional[ExecutionSettings] = None
     scheduler_state: Dict[str, Any] = field(default_factory=dict)

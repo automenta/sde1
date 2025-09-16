@@ -225,7 +225,8 @@ class MainWindow(QMainWindow):
 
         challenge_def = AVAILABLE_DATASETS[dataset_name]
         self.orchestrator.dispatch(
-            ActionType.SET_CHALLENGE, {"name": dataset_name, "type": challenge_def.type}
+            ActionType.SET_CHALLENGE,
+            {"name": dataset_name, "type": challenge_def.type.value},
         )
 
         for algo_config in algorithms:

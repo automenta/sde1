@@ -7,9 +7,11 @@ from sde.core.actions import ActionType
 from sde.core.comms import EngineCommand
 from sde.core.comms import EngineEvent
 from sde.core.domain import AlgorithmConfig
+from sde.core.domain import Challenge
 from sde.core.domain import ExecutionSettings
 from sde.core.domain import Experiment
 from sde.core.domain import ExperimentStatus
+from sde.core.domain import PatienceBudget
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
 from sde.events import Signal
@@ -105,7 +107,10 @@ class ExperimentOrchestrator:
             trial = Trial.from_dict(trial_data)
             self.experiment.trials[trial.id] = trial
         elif event_type == EngineEvent.INSIGHTS_GENERATED:
-            self.experiment.insights.extend(payload["insights"])
+            # The payload now contains serialized Insight objects
+            self.experiment.insights.extend(
+                [Insight.from_dict(d) for d in payload["insights"]]
+            )
         elif event_type == EngineEvent.RUN_STARTED:
             self.experiment.status = ExperimentStatus.RUNNING
             # The engine might send back initial state, like trial IDs
@@ -149,12 +154,10 @@ class ExperimentOrchestrator:
 
     def handle_set_challenge(self, payload: Dict[str, Any]) -> bool:
         """Sets the challenge for the experiment."""
-        self.experiment.challenge = payload
+        challenge = Challenge.from_dict(payload)
+        self.experiment.challenge = challenge
         self.log_message.emit(
-            {
-                "level": "INFO",
-                "message": f"Challenge set to '{payload.get('name', 'Unknown')}'",
-            }
+            {"level": "INFO", "message": f"Challenge set to '{challenge.name}'"}
         )
         return True
 
@@ -258,14 +261,25 @@ class ExperimentOrchestrator:
 
     def handle_set_budget(self, payload: Dict[str, Any]) -> bool:
         """Sets the patience budget for the experiment."""
-        self.experiment.patience_budget = payload
+        # Budgets can be set incrementally (e.g., just worker_throttle_percent)
+        # So, we merge with the existing budget if there is one.
+        current_budget = (
+            self.experiment.patience_budget.to_dict()
+            if self.experiment.patience_budget
+            else {}
+        )
+        current_budget.update(payload)
+        new_budget = PatienceBudget.from_dict(current_budget)
+        self.experiment.patience_budget = new_budget
+
         self.log_message.emit(
-            {"level": "INFO", "message": f"Patience budget set to {payload}."}
+            {"level": "INFO", "message": f"Patience budget updated: {new_budget}"}
         )
         if self.experiment.status in [
             ExperimentStatus.RUNNING,
             ExperimentStatus.PAUSED,
         ]:
+            # Send the incremental payload, not the whole budget
             self.engine_proxy.post_command(EngineCommand.SET_BUDGET, payload)
             return False
         return True

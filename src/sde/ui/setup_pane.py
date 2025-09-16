@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWidgets import QWidget
 
 from ..challenges import AVAILABLE_DATASETS
+from ..config import Defaults
 from ..models import AVAILABLE_MODELS
 from .view_model import ExperimentViewModel
 
@@ -98,9 +99,9 @@ class SetupPane(QWidget):
         self.worker_count_spinbox.setMinimum(1)
         # Set max to physical CPU count, or a reasonable default if that fails
         try:
-            max_workers = os.cpu_count() or 4
+            max_workers = os.cpu_count() or Defaults.FALLBACK_MAX_WORKERS
         except NotImplementedError:
-            max_workers = 4
+            max_workers = Defaults.FALLBACK_MAX_WORKERS
         self.worker_count_spinbox.setMaximum(max_workers)
         self.worker_count_spinbox.setValue(max_workers)
         self.worker_count_spinbox.setToolTip(
@@ -112,8 +113,8 @@ class SetupPane(QWidget):
         # Timeout per Work Unit
         self.timeout_spinbox = QSpinBox()
         self.timeout_spinbox.setMinimum(1)
-        self.timeout_spinbox.setMaximum(3600)
-        self.timeout_spinbox.setValue(300)
+        self.timeout_spinbox.setMaximum(Defaults.MAX_WORK_UNIT_TIMEOUT_S)
+        self.timeout_spinbox.setValue(Defaults.DEFAULT_WORK_UNIT_TIMEOUT_S)
         self.timeout_spinbox.setToolTip(
             "Maximum time (in seconds) allowed for a single Work Unit (e.g., one training epoch).\n"
             "If a unit exceeds this, it's marked as failed.\n"
@@ -131,8 +132,8 @@ class SetupPane(QWidget):
         self.run_mode_combo.addItems(["Simple", "Tune Hyperparameters"])
         self.trials_per_algo_spinbox = QSpinBox()
         self.trials_per_algo_spinbox.setMinimum(1)
-        self.trials_per_algo_spinbox.setMaximum(1000)
-        self.trials_per_algo_spinbox.setValue(10)
+        self.trials_per_algo_spinbox.setMaximum(Defaults.MAX_TRIALS_PER_ALGO)
+        self.trials_per_algo_spinbox.setValue(Defaults.DEFAULT_TRIALS_PER_ALGO)
         self.trials_per_algo_spinbox.setToolTip(
             "For 'Simple' mode, this is the number of random hyperparameter configurations to generate for each selected algorithm.\n"
             "More trials increase the chance of finding a good configuration, but require more computation."
