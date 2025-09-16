@@ -237,11 +237,14 @@ class ExperimentOrchestrator:
             self.log_message.emit(
                 {"level": "ERROR", "message": "Cannot start run without at least one algorithm."}
             )
-            return True # No command sent, so no event expected. UI can update immediately.
+            return True  # No command sent, so no event expected. UI can update immediately.
 
-        # Temporarily store execution settings to be applied on confirmation
-        self.experiment.execution_settings = ExecutionSettings(**payload)
-        command_payload = {"experiment_definition": self.experiment.to_dict()}
+        # Decouple execution settings from the experiment definition
+        execution_settings = ExecutionSettings.from_dict(payload)
+        command_payload = {
+            "experiment_definition": self.experiment.to_dict(),
+            "execution_settings": execution_settings.to_dict(),
+        }
         self.engine_proxy.post_command("START_RUN", command_payload)
         self.log_message.emit({"level": "INFO", "message": "Dispatched START_RUN command to engine."})
 

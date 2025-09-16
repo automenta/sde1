@@ -109,10 +109,11 @@ class SdeRuntimeEngine:
             return
 
         exp_def = payload.get("experiment_definition", {})
+        exec_settings_dict = payload.get("execution_settings", {})
         start_paused = payload.get("start_paused", False)
 
         trials = [Trial.from_dict(t) for t in exp_def.get("trials", {}).values()]
-        execution_settings = ExecutionSettings.from_dict(exp_def.get("execution_settings"))
+        execution_settings = ExecutionSettings.from_dict(exec_settings_dict)
 
         # 1. Initialize all core components from the definition
         self._initialize_runtime(
@@ -127,20 +128,22 @@ class SdeRuntimeEngine:
         assert self.adaptive_scheduler is not None
         assert self.compute_scheduler is not None
 
-        # 2. Get initial work units
+        # 2. Get initial work units using the new stateless scheduler interface
         all_trials = self.datastore.get_all_trials()
-        scheduler_state = exp_def.get("scheduler_state", {})
-        is_resumed_run = any(t.status != TrialStatus.PENDING for t in all_trials.values())
+        is_resumed_run = any(
+            t.status != TrialStatus.PENDING for t in all_trials.values()
+        )
 
         if is_resumed_run:
             logger.info("Resuming experiment. Rehydrating work queue...")
-            work_units = self.adaptive_scheduler.rehydrate_work_units(all_trials, scheduler_state)
+            work_units = self.adaptive_scheduler.rehydrate_work_units(all_trials)
         else:
             logger.info("Starting fresh experiment. Generating initial work units...")
-            # Note: The scheduler does not mutate the state it's given
-            work_units, _ = self.adaptive_scheduler.get_initial_work_units(
-                all_trials, scheduler_state
-            )
+            # The scheduler may now mutate the trial objects (e.g., add tags)
+            pending_trials = [
+                t for t in all_trials.values() if t.status == TrialStatus.PENDING
+            ]
+            work_units = self.adaptive_scheduler.get_initial_work_units(pending_trials)
 
         for work_unit in work_units:
             self._put_work_in_queue(work_unit)

@@ -105,10 +105,13 @@ class Trial:
     # State for pausing/resuming and scheduling
     current_epoch: int = 0
     checkpoint_path: Optional[str] = None
-    est_time_per_epoch: Optional[float] = None # In seconds
+    est_time_per_epoch: Optional[float] = None  # In seconds
 
     # Time-series results, e.g., {'accuracy': [(1, 0.8), (2, 0.9)]}
     results: Dict[str, List[Tuple[int, float]]] = field(default_factory=dict)
+
+    # Generic key-value store for scheduler-specific metadata
+    tags: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Serializes the Trial to a dictionary, converting enums to strings."""
@@ -163,6 +166,10 @@ class ExecutionSettings:
     enable_checkpointing: bool
     work_unit_timeout_seconds: int
 
+    def to_dict(self) -> dict:
+        """Serializes the settings to a dictionary."""
+        return dataclasses.asdict(self)
+
     @classmethod
     def from_dict(cls, d: dict) -> "ExecutionSettings":
         known_fields = {f.name for f in dataclasses.fields(cls)}
@@ -190,8 +197,6 @@ class Experiment:
     # Strategy & Constraints: HOW the experiment is run
     adaptive_policy: str = "SuccessiveHalving"
     patience_budget: Optional[Dict[str, int]] = None
-    execution_settings: Optional[ExecutionSettings] = None
-    scheduler_state: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Serializes the entire experiment state to a dictionary."""
@@ -204,10 +209,6 @@ class Experiment:
             "insights": self.insights,
             "adaptive_policy": self.adaptive_policy,
             "patience_budget": self.patience_budget,
-            "execution_settings": dataclasses.asdict(self.execution_settings)
-            if self.execution_settings
-            else None,
-            "scheduler_state": self.scheduler_state,
         }
 
     @classmethod
@@ -225,10 +226,6 @@ class Experiment:
             d_copy["trials"] = {
                 k: Trial.from_dict(v) for k, v in d_copy["trials"].items()
             }
-        if "execution_settings" in d_copy and d_copy["execution_settings"] is not None:
-            d_copy["execution_settings"] = ExecutionSettings.from_dict(
-                d_copy["execution_settings"]
-            )
         known_fields = {f.name for f in dataclasses.fields(cls)}
         filtered_dict = {k: v for k, v in d_copy.items() if k in known_fields}
         return cls(**filtered_dict)

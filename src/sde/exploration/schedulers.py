@@ -30,25 +30,18 @@ class AdaptiveScheduler(ABC):
 
     @abstractmethod
     def generate_work_units_for_new_trials(
-        self,
-        new_trials: List[Trial],
-        all_trials: Dict[str, Trial],
-        scheduler_state: Dict[str, Any],
-    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
+        self, new_trials: List[Trial], all_trials: Dict[str, Trial]
+    ) -> List[WorkUnit]:
         """Creates the initial WorkUnits for a list of newly created trials."""
         ...
 
     @abstractmethod
-    def get_initial_work_units(
-        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
-    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
+    def get_initial_work_units(self, trials: List[Trial]) -> List[WorkUnit]:
         """Returns the first batch of WorkUnits to start an experiment."""
         ...
 
     @abstractmethod
-    def rehydrate_work_units(
-        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
-    ) -> List[WorkUnit]:
+    def rehydrate_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
         """Creates work units for a loaded experiment to resume from its saved state."""
         ...
 
@@ -103,11 +96,8 @@ class SuccessiveHalvingScheduler(AdaptiveScheduler):
         return trials
 
     def generate_work_units_for_new_trials(
-        self,
-        new_trials: List[Trial],
-        all_trials: Dict[str, Trial],
-        scheduler_state: Dict[str, Any],
-    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
+        self, new_trials: List[Trial], all_trials: Dict[str, Trial]
+    ) -> List[WorkUnit]:
         """Schedules the first epoch for a given list of new trials."""
         work_units = []
         for trial in new_trials:
@@ -116,20 +106,13 @@ class SuccessiveHalvingScheduler(AdaptiveScheduler):
                 work_units.append(
                     WorkUnit(trial_id=trial.id, type=WorkUnitType.TRAIN_EPOCH)
                 )
-        return work_units, scheduler_state
+        return work_units
 
-    def get_initial_work_units(
-        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
-    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
+    def get_initial_work_units(self, trials: List[Trial]) -> List[WorkUnit]:
         """Schedules the first epoch for all pending trials in the experiment."""
-        pending_trials = [t for t in trials.values() if t.status == TrialStatus.PENDING]
-        return self.generate_work_units_for_new_trials(
-            pending_trials, trials, scheduler_state
-        )
+        return self.generate_work_units_for_new_trials(trials, {t.id: t for t in trials})
 
-    def rehydrate_work_units(
-        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
-    ) -> List[WorkUnit]:
+    def rehydrate_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
         """For SHA, rehydration is simple: resume any trial that was active."""
         work_units = []
         for trial in trials.values():
@@ -239,10 +222,6 @@ class HyperbandScheduler(AdaptiveScheduler):
         self.eta = reduction_factor
         self.s_max = int(math.log(self.max_resource, self.eta))
 
-        # These are now initialized in get_initial_work_units or rehydrated
-        self.brackets: List[_Bracket] = []
-        self.trial_to_bracket: Dict[str, _Bracket] = {}
-
     def generate_initial_trials(
         self, algorithms: List[AlgorithmConfig], num_trials_per_algo: int
     ) -> List[Trial]:
@@ -268,22 +247,9 @@ class HyperbandScheduler(AdaptiveScheduler):
                 trial_counter += 1
         return trials
 
-    def generate_work_units_for_new_trials(
-        self,
-        new_trials: List[Trial],
-        all_trials: Dict[str, Trial],
-        scheduler_state: Dict[str, Any],
-    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
-        """Calculates brackets, assigns trials, and returns work and state to persist.
-        NOTE: This implementation of Hyperband expects all trials to be provided at once.
-        """
-        trial_pool = [t for t in new_trials if t.status == TrialStatus.PENDING]
-
-        # Reset state in case this is called multiple times on the same instance
-        self.brackets = []
-        self.trial_to_bracket = {}
-
-        # 1. Calculate bracket configurations
+    def _get_brackets(self) -> List[_Bracket]:
+        """Deterministically calculates the bracket configurations."""
+        brackets = []
         for s in range(self.s_max, -1, -1):
             n_s = math.ceil((self.s_max + 1) / (s + 1) * (self.eta**s))
             r_s = self.max_resource * (self.eta**-s)
@@ -291,72 +257,47 @@ class HyperbandScheduler(AdaptiveScheduler):
             for i in range(s + 1):
                 rung_resource = r_s * (self.eta**i)
                 bracket.rung_resources.append(int(rung_resource))
-            self.brackets.append(bracket)
+            brackets.append(bracket)
+        return brackets
 
-        # 2. Assign trials to brackets
-        for bracket in self.brackets:
+    def generate_work_units_for_new_trials(
+        self, new_trials: List[Trial], all_trials: Dict[str, Trial]
+    ) -> List[WorkUnit]:
+        """Calculates brackets, assigns trials by tagging them, and returns initial work.
+        NOTE: This implementation of Hyperband expects all trials to be provided at once.
+        """
+        trial_pool = [t for t in new_trials if t.status == TrialStatus.PENDING]
+        brackets = self._get_brackets()
+
+        # 1. Assign trials to brackets by tagging them
+        assigned_trial_ids = set()
+        for bracket in brackets:
             if not trial_pool:
                 break
             num_to_assign = min(len(trial_pool), bracket.num_trials)
             assigned_trials = trial_pool[:num_to_assign]
             trial_pool = trial_pool[num_to_assign:]
-            bracket.trial_ids = [t.id for t in assigned_trials]
             for trial in assigned_trials:
-                self.trial_to_bracket[trial.id] = bracket
+                trial.tags["hyperband_bracket_s"] = bracket.s
+                assigned_trial_ids.add(trial.id)
 
-        # 3. Create state to persist
-        state_to_persist = {
-            "trial_to_bracket_s": {
-                tid: b.s for tid, b in self.trial_to_bracket.items()
-            }
-        }
-
-        # 4. Create initial work units
+        # 2. Create initial work units for newly assigned trials
         work_units = []
-        for trial_id in self.trial_to_bracket.keys():
+        for trial_id in assigned_trial_ids:
             all_trials[trial_id].status = TrialStatus.ACTIVE
             work_units.append(
                 WorkUnit(trial_id=trial_id, type=WorkUnitType.TRAIN_EPOCH)
             )
-        return work_units, state_to_persist
+        return work_units
 
-    def get_initial_work_units(
-        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
-    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
+    def get_initial_work_units(self, trials: List[Trial]) -> List[WorkUnit]:
         """Schedules the first epoch for all pending trials in the experiment."""
-        pending_trials = [t for t in trials.values() if t.status == TrialStatus.PENDING]
         return self.generate_work_units_for_new_trials(
-            pending_trials, trials, scheduler_state
+            trials, {t.id: t for t in trials}
         )
 
-    def rehydrate_work_units(
-        self, trials: Dict[str, Trial], scheduler_state: Dict[str, Any]
-    ) -> List[WorkUnit]:
-        """Rebuilds internal state from the experiment and schedules work for active trials."""
-        if not scheduler_state or "trial_to_bracket_s" not in scheduler_state:
-            # Fallback for old save files or corrupted state
-            return []
-
-        # 1. Re-calculate bracket definitions (they are deterministic)
-        for s in range(self.s_max, -1, -1):
-            n_s = math.ceil((self.s_max + 1) / (s + 1) * (self.eta**s))
-            r_s = self.max_resource * (self.eta**-s)
-            bracket = _Bracket(s=s, num_trials=n_s)
-            for i in range(s + 1):
-                rung_resource = r_s * (self.eta**i)
-                bracket.rung_resources.append(int(rung_resource))
-            self.brackets.append(bracket)
-
-        # 2. Re-link trials to their brackets using the persisted state
-        bracket_map_by_s = {b.s: b for b in self.brackets}
-        trial_to_bracket_s = scheduler_state["trial_to_bracket_s"]
-        for trial_id, s_val in trial_to_bracket_s.items():
-            if s_val in bracket_map_by_s:
-                bracket = bracket_map_by_s[s_val]
-                bracket.trial_ids.append(trial_id)
-                self.trial_to_bracket[trial_id] = bracket
-
-        # 3. Schedule work for all trials that were active
+    def rehydrate_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
+        """Schedules work for all trials that were active. State is on the trials."""
         work_units = []
         for trial in trials.values():
             if trial.status == TrialStatus.ACTIVE:
@@ -368,13 +309,24 @@ class HyperbandScheduler(AdaptiveScheduler):
     def get_next_work_units(
         self, finished_trial: Trial, all_trials: Dict[str, Trial]
     ) -> List[WorkUnit]:
-        """Routes the trial to the correct bracket and applies SHA logic within it.
-        """
-        bracket = self.trial_to_bracket.get(finished_trial.id)
-        if not bracket or finished_trial.status != TrialStatus.ACTIVE:
-            return (
-                []
-            )  # This trial is not managed by this scheduler or has been pruned/completed.
+        """Routes the trial to the correct bracket and applies SHA logic within it."""
+        s_val = finished_trial.tags.get("hyperband_bracket_s")
+        if s_val is None or finished_trial.status != TrialStatus.ACTIVE:
+            return []  # This trial is not managed by this scheduler or has been pruned/completed.
+
+        # Re-create bracket definitions on the fly; they are deterministic.
+        brackets = self._get_brackets()
+        try:
+            bracket = next(b for b in brackets if b.s == s_val)
+        except StopIteration:
+            return []  # Should not happen if tags are set correctly
+
+        # Populate the bracket's trial_ids for this specific run
+        bracket.trial_ids = [
+            tid
+            for tid, t in all_trials.items()
+            if t.tags.get("hyperband_bracket_s") == s_val
+        ]
 
         # If bracket is done, no more work
         if bracket.rung >= len(bracket.rung_resources):
