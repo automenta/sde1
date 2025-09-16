@@ -1,3 +1,4 @@
+"""Module for the ExperimentOrchestrator, the central state manager."""
 import logging
 import traceback
 from typing import Any
@@ -17,19 +18,14 @@ from sde.core.domain import TrialStatus
 from sde.events import Signal
 
 from .action_validator import ActionValidator
+from .insight import Insight
 from .proxy import EngineProxy
 
 logger = logging.getLogger(__name__)
 
 
 class ExperimentOrchestrator:
-    """The central nervous system of the SDE.
-
-    This class manages the canonical `Experiment` state object, validates all
-    incoming `Actions` from the UI, and translates them into commands for the
-    SdeRuntimeEngine. It is the single source of truth for the *definition*
-    of the experiment, while the runtime engine manages the live state.
-    """
+    """Manage the canonical Experiment state and interface with the SDE Runtime."""
 
     # Signals to update the UI
     state_changed = Signal(dict)
@@ -38,6 +34,7 @@ class ExperimentOrchestrator:
     operation_finished = Signal(str)
 
     def __init__(self):
+        """Initialize the ExperimentOrchestrator."""
         self.experiment = Experiment()
         self.engine_proxy = EngineProxy(self.on_engine_event)
         self._action_handlers = {
@@ -61,7 +58,7 @@ class ExperimentOrchestrator:
         self.log_message.emit({"level": "INFO", "message": "Orchestrator initialized."})
 
     def dispatch(self, action_type: ActionType, payload: Dict[str, Any]) -> None:
-        """Receives an action, validates it, mutates the state, and triggers side effects."""
+        """Receive an action, validate it, and trigger side effects."""
         handler = self._action_handlers.get(action_type)
         if not handler:
             self.log_message.emit(
@@ -76,12 +73,8 @@ class ExperimentOrchestrator:
         if not ActionValidator.is_action_valid(
             action_type.value, payload, valid_actions
         ):
-            self.log_message.emit(
-                {
-                    "level": "WARN",
-                    "message": f"Action '{action_type.value}' is not valid for the current state or payload.",
-                }
-            )
+            msg = f"Action '{action_type.value}' is not valid for the current state."
+            self.log_message.emit({"level": "WARN", "message": msg})
             return
 
         try:
@@ -100,7 +93,7 @@ class ExperimentOrchestrator:
             logger.error(traceback.format_exc())
 
     def on_engine_event(self, event_type: EngineEvent, payload: Dict[str, Any]):
-        """Callback for all events coming from the SdeRuntimeEngine."""
+        """Handle all events coming from the SdeRuntimeEngine."""
         logger.info(f"Orchestrator received event: {event_type.name}")
         if event_type == EngineEvent.TRIAL_UPDATED:
             trial_data = payload["trial"]
@@ -145,7 +138,7 @@ class ExperimentOrchestrator:
         self.emit_state_change()
 
     def emit_state_change(self) -> None:
-        """Serializes the current experiment state and emits it via the state_changed signal."""
+        """Serialize the current experiment state and emit it."""
         state_dict = self.experiment.to_dict()
         state_dict["valid_actions"] = ActionValidator.get_valid_actions(self.experiment)
         self.state_changed.emit(state_dict)
@@ -153,7 +146,7 @@ class ExperimentOrchestrator:
     # --- Action Handlers (Now simplified to modify state and dispatch commands) ---
 
     def handle_set_challenge(self, payload: Dict[str, Any]) -> bool:
-        """Sets the challenge for the experiment."""
+        """Set the challenge for the experiment."""
         challenge = Challenge.from_dict(payload)
         self.experiment.challenge = challenge
         self.log_message.emit(
@@ -162,7 +155,7 @@ class ExperimentOrchestrator:
         return True
 
     def handle_add_algorithm(self, payload: Dict[str, Any]) -> bool:
-        """Adds a new algorithm to the experiment."""
+        """Add a new algorithm to the experiment."""
         algo_id = f"algo_{len(self.experiment.algorithms)}"
         new_algo = AlgorithmConfig(
             id=algo_id, name=payload["name"], parameter_space=payload["parameter_space"]
@@ -188,7 +181,7 @@ class ExperimentOrchestrator:
         return True
 
     def handle_remove_algorithm(self, payload: Dict[str, Any]) -> bool:
-        """Removes an algorithm and instructs the engine to prune its trials."""
+        """Remove an algorithm and instruct the engine to prune its trials."""
         algo_id = payload["algorithm_id"]
         if algo_id in self.experiment.algorithms:
             algo_name = self.experiment.algorithms[algo_id].name
@@ -212,7 +205,7 @@ class ExperimentOrchestrator:
         return True  # Optimistic update
 
     def handle_update_param_space(self, payload: Dict[str, Any]) -> bool:
-        """Updates the hyperparameter space for an algorithm."""
+        """Update the hyperparameter space for an algorithm."""
         algo_id = payload["algorithm_id"]
         new_space = payload["new_space"]
         if algo_id not in self.experiment.algorithms:
@@ -243,7 +236,7 @@ class ExperimentOrchestrator:
         return True
 
     def handle_set_adaptive_policy(self, payload: Dict[str, Any]) -> bool:
-        """Sets the adaptive scheduling policy for the experiment."""
+        """Set the adaptive scheduling policy for the experiment."""
         policy_name = payload["policy_name"]
         self.experiment.adaptive_policy = policy_name
         self.log_message.emit(
@@ -260,9 +253,8 @@ class ExperimentOrchestrator:
         return True
 
     def handle_set_budget(self, payload: Dict[str, Any]) -> bool:
-        """Sets the patience budget for the experiment."""
-        # Budgets can be set incrementally (e.g., just worker_throttle_percent)
-        # So, we merge with the existing budget if there is one.
+        """Set the patience budget for the experiment."""
+        # Budgets can be set incrementally, so we merge with the existing budget.
         current_budget = (
             self.experiment.patience_budget.to_dict()
             if self.experiment.patience_budget
@@ -285,7 +277,7 @@ class ExperimentOrchestrator:
         return True
 
     def handle_manual_prune_trial(self, payload: Dict[str, Any]) -> bool:
-        """Dispatches a command to manually prune a single trial."""
+        """Dispatch a command to manually prune a single trial."""
         trial_id = payload["trial_id"]
         if trial_id in self.experiment.trials:
             self.experiment.trials[trial_id].status = TrialStatus.PRUNED
@@ -301,7 +293,7 @@ class ExperimentOrchestrator:
         return True  # Optimistic update
 
     def handle_manual_prioritize_trial(self, payload: Dict[str, Any]) -> bool:
-        """Dispatches a command to manually increase a trial's priority."""
+        """Dispatch a command to manually increase a trial's priority."""
         trial_id = payload["trial_id"]
         self.engine_proxy.post_command(
             EngineCommand.PRIORITIZE_TRIAL, {"trial_id": trial_id}
@@ -315,25 +307,21 @@ class ExperimentOrchestrator:
         return False  # Wait for confirmation
 
     def handle_spawn_similar_trial(self, payload: Dict[str, Any]) -> bool:
-        """Dispatches a command to create a new trial based on an existing one."""
+        """Dispatch a command to create a new trial based on an existing one."""
         self.engine_proxy.post_command(EngineCommand.SPAWN_TRIAL, payload)
-        self.log_message.emit(
-            {
-                "level": "INFO",
-                "message": f"Dispatched command to spawn trial from {payload['source_trial_id']}.",
-            }
-        )
+        msg = f"Dispatched command to spawn trial from {payload['source_trial_id']}."
+        self.log_message.emit({"level": "INFO", "message": msg})
         return False  # Wait for new trial to be created
 
     def handle_request_state_update(self, payload: Dict[str, Any]) -> bool:
-        """Handles a manual request from the UI to re-emit the full state."""
+        """Handle a manual request from the UI to re-emit the full state."""
         self.log_message.emit(
             {"level": "INFO", "message": "Full state update requested by UI."}
         )
         return True
 
     def handle_start_run(self, payload: Dict[str, Any]) -> bool:
-        """Validates and dispatches the command to start the experiment run.
+        """Validate and dispatch the command to start the experiment run.
 
         State mutation is deferred until the `RUN_STARTED` event is received.
         """
@@ -344,7 +332,7 @@ class ExperimentOrchestrator:
                     "message": "Cannot start run without at least one algorithm.",
                 }
             )
-            return True  # No command sent, so no event expected. UI can update immediately.
+            return True  # No command sent, so no event expected.
 
         # Decouple execution settings from the experiment definition
         execution_settings = ExecutionSettings.from_dict(payload)
@@ -362,7 +350,7 @@ class ExperimentOrchestrator:
         return False
 
     def handle_pause_run(self, payload: Dict[str, Any]) -> bool:
-        """Dispatches the command to pause the current experiment run."""
+        """Dispatch the command to pause the current experiment run."""
         self.engine_proxy.post_command(EngineCommand.PAUSE_RUN)
         self.log_message.emit(
             {"level": "INFO", "message": "Dispatched PAUSE_RUN command."}
@@ -370,7 +358,7 @@ class ExperimentOrchestrator:
         return False  # Wait for confirmation
 
     def handle_resume_run(self, payload: Dict[str, Any]) -> bool:
-        """Dispatches the command to resume a paused experiment run."""
+        """Dispatch the command to resume a paused experiment run."""
         self.engine_proxy.post_command(EngineCommand.RESUME_RUN)
         self.log_message.emit(
             {"level": "INFO", "message": "Dispatched RESUME_RUN command."}
@@ -378,7 +366,7 @@ class ExperimentOrchestrator:
         return False  # Wait for confirmation
 
     def handle_stop_run(self, payload: Dict[str, Any]) -> bool:
-        """Dispatches the command to stop the current experiment run."""
+        """Dispatch the command to stop the current experiment run."""
         self.engine_proxy.post_command(EngineCommand.STOP_RUN)
         self.log_message.emit(
             {"level": "INFO", "message": "Dispatched STOP_RUN command."}
@@ -386,7 +374,7 @@ class ExperimentOrchestrator:
         return False  # Wait for confirmation
 
     def handle_save_experiment(self, payload: Dict[str, Any]) -> bool:
-        """Dispatches the command to save the experiment state."""
+        """Dispatch the command to save the experiment state."""
         filepath = payload.get("filepath")
         if not filepath:
             self.log_message.emit(
@@ -400,7 +388,7 @@ class ExperimentOrchestrator:
         return False
 
     def handle_load_experiment(self, payload: Dict[str, Any]) -> bool:
-        """Dispatches the command to load an experiment state."""
+        """Dispatch the command to load an experiment state."""
         filepath = payload.get("filepath")
         if not filepath:
             self.log_message.emit(
@@ -414,6 +402,6 @@ class ExperimentOrchestrator:
         return False
 
     def shutdown(self) -> None:
-        """Gracefully shuts down the connection to the runtime engine."""
+        """Gracefully shut down the connection to the runtime engine."""
         self.engine_proxy.shutdown()
         self.log_message.emit({"level": "INFO", "message": "Orchestrator shut down."})
