@@ -122,7 +122,9 @@ class ExperimentViewModel(QObject):
                 prioritized=trial_data.get("prioritized", False),
             )
 
-    def _find_best_trial(self, trials_data: Dict[str, Any]) -> (Optional[str], Optional[float]):
+    def _find_best_trial(
+        self, trials_data: Dict[str, Any]
+    ) -> (Optional[str], Optional[float]):
         """Determines the best trial based on the challenge's performance metric."""
         if not self.challenge_name or self.challenge_name not in AVAILABLE_DATASETS:
             return None, None
@@ -139,8 +141,9 @@ class ExperimentViewModel(QObject):
             results = trial_data.get("results", {})
             if metric_name in results and results[metric_name]:
                 latest_perf = results[metric_name][-1][1]
-                if (higher_is_better and latest_perf > best_perf) or \
-                   (not higher_is_better and latest_perf < best_perf):
+                if (higher_is_better and latest_perf > best_perf) or (
+                    not higher_is_better and latest_perf < best_perf
+                ):
                     best_perf = latest_perf
                     best_trial_id = trial_id
 

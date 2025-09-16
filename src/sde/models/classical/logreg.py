@@ -2,7 +2,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from sde.core.definitions import DatasetType, ModelDefinition, SdeModel
+from sde.core.definitions import DatasetType
+from sde.core.definitions import ModelDefinition
+from sde.core.definitions import SdeModel
 
 
 class LogisticRegression(SdeModel):

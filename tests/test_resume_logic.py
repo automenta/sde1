@@ -1,14 +1,22 @@
 import unittest
-from unittest.mock import patch, MagicMock
-from sde.core.domain import Experiment, Trial, TrialStatus, WorkUnit, WorkUnitType, ExecutionSettings, ExperimentStatus
-from sde.exploration.schedulers import SuccessiveHalvingScheduler
+from unittest.mock import MagicMock
+from unittest.mock import patch
+
+from sde.core.domain import ExecutionSettings
+from sde.core.domain import Experiment
+from sde.core.domain import ExperimentStatus
+from sde.core.domain import Trial
+from sde.core.domain import TrialStatus
+from sde.core.domain import WorkUnit
+from sde.core.domain import WorkUnitType
 from sde.engine.runtime import SdeRuntimeEngine
+from sde.exploration.schedulers import SuccessiveHalvingScheduler
 
 
 class TestResumeLogic(unittest.TestCase):
 
-    @patch('sde.engine.runtime.ComputeScheduler')
-    @patch('sde.engine.runtime.SchedulerFactory')
+    @patch("sde.engine.runtime.ComputeScheduler")
+    @patch("sde.engine.runtime.SchedulerFactory")
     def test_resume_from_saved_state(self, MockSchedulerFactory, MockComputeScheduler):
         # 1. Create an Experiment object that looks like it was saved mid-run
         experiment = Experiment(id="test_exp_1")
@@ -24,11 +32,42 @@ class TestResumeLogic(unittest.TestCase):
 
         # 2. Create some trials in various states
         trials = {
-            "trial_1": Trial(id="trial_1", algorithm_name="ResNet", hyperparameters={}, status=TrialStatus.COMPLETED, current_epoch=10),
-            "trial_2": Trial(id="trial_2", algorithm_name="ResNet", hyperparameters={}, status=TrialStatus.ACTIVE, current_epoch=5, results={"accuracy": [(1, 0.5), (5, 0.8)]}),
-            "trial_3": Trial(id="trial_3", algorithm_name="ResNet", hyperparameters={}, status=TrialStatus.PRUNED, current_epoch=2),
-            "trial_4": Trial(id="trial_4", algorithm_name="ResNet", hyperparameters={}, status=TrialStatus.ACTIVE, current_epoch=5, results={"accuracy": [(1, 0.6), (5, 0.85)]}),
-            "trial_5": Trial(id="trial_5", algorithm_name="ResNet", hyperparameters={}, status=TrialStatus.PENDING),
+            "trial_1": Trial(
+                id="trial_1",
+                algorithm_name="ResNet",
+                hyperparameters={},
+                status=TrialStatus.COMPLETED,
+                current_epoch=10,
+            ),
+            "trial_2": Trial(
+                id="trial_2",
+                algorithm_name="ResNet",
+                hyperparameters={},
+                status=TrialStatus.ACTIVE,
+                current_epoch=5,
+                results={"accuracy": [(1, 0.5), (5, 0.8)]},
+            ),
+            "trial_3": Trial(
+                id="trial_3",
+                algorithm_name="ResNet",
+                hyperparameters={},
+                status=TrialStatus.PRUNED,
+                current_epoch=2,
+            ),
+            "trial_4": Trial(
+                id="trial_4",
+                algorithm_name="ResNet",
+                hyperparameters={},
+                status=TrialStatus.ACTIVE,
+                current_epoch=5,
+                results={"accuracy": [(1, 0.6), (5, 0.85)]},
+            ),
+            "trial_5": Trial(
+                id="trial_5",
+                algorithm_name="ResNet",
+                hyperparameters={},
+                status=TrialStatus.PENDING,
+            ),
         }
         experiment.trials = trials
 
@@ -38,7 +77,7 @@ class TestResumeLogic(unittest.TestCase):
         mock_adaptive_scheduler.increasing = True
         mock_adaptive_scheduler.rehydrate_work_units.return_value = [
             WorkUnit(trial_id="trial_2", type=WorkUnitType.TRAIN_EPOCH, payload={}),
-            WorkUnit(trial_id="trial_4", type=WorkUnitType.TRAIN_EPOCH, payload={})
+            WorkUnit(trial_id="trial_4", type=WorkUnitType.TRAIN_EPOCH, payload={}),
         ]
         MockSchedulerFactory.create_scheduler.return_value = mock_adaptive_scheduler
 
@@ -46,10 +85,9 @@ class TestResumeLogic(unittest.TestCase):
         runtime_engine = SdeRuntimeEngine(event_callback=lambda x, y: None)
 
         # 5. Initialize the engine by sending the START_RUN command
-        runtime_engine._handle_start_run({
-            "experiment_definition": experiment.to_dict(),
-            "start_paused": True
-        })
+        runtime_engine._handle_start_run(
+            {"experiment_definition": experiment.to_dict(), "start_paused": True}
+        )
 
         # 6. Check that the rehydration method was called on the scheduler
         mock_adaptive_scheduler.rehydrate_work_units.assert_called_once()

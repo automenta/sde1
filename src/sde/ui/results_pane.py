@@ -1,22 +1,21 @@
-from datetime import datetime
 from typing import Dict
 from typing import Optional
-from typing import Set
 
-import pyqtgraph as pg
-from typing import Dict, Optional, Set
-
+from PyQt6.QtCore import Qt
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtWidgets import QSplitter, QVBoxLayout, QWidget, QTabWidget
+from PyQt6.QtWidgets import QSplitter
+from PyQt6.QtWidgets import QTabWidget
+from PyQt6.QtWidgets import QVBoxLayout
+from PyQt6.QtWidgets import QWidget
 
 from .components.insights_widget import InsightsWidget
 from .components.log_widget import LogWidget
 from .components.trials_table_widget import TrialsTableWidget
 from .models import UITrial
 from .view_model import ExperimentViewModel
-from .visualizations.performance_plot import PerformancePlotPlugin
 from .visualizations.hyperparameter_pca import HyperparameterPCAPlugin
+from .visualizations.performance_plot import PerformancePlotPlugin
 
 
 class ResultsPane(QWidget):
@@ -84,11 +83,15 @@ class ResultsPane(QWidget):
         self.log_widget.refresh_requested.connect(self.refresh_requested)
         self.trials_table_widget.trial_selected.connect(self.trial_selected)
         self.trials_table_widget.trial_double_clicked.connect(self.trial_double_clicked)
-        self.trials_table_widget.prune_trial_requested.connect(self.prune_trial_requested)
+        self.trials_table_widget.prune_trial_requested.connect(
+            self.prune_trial_requested
+        )
         self.trials_table_widget.prioritize_trial_requested.connect(
             self.prioritize_trial_requested
         )
-        self.trials_table_widget.spawn_trial_requested.connect(self.spawn_trial_requested)
+        self.trials_table_widget.spawn_trial_requested.connect(
+            self.spawn_trial_requested
+        )
 
     def update_view(self, view_model: ExperimentViewModel):
         """The main entry point for refreshing the entire results view."""
@@ -147,4 +150,3 @@ class ResultsPane(QWidget):
         # In the future, we could discover them dynamically.
         self.visualization_plugins.append(PerformancePlotPlugin())
         self.visualization_plugins.append(HyperparameterPCAPlugin())
-

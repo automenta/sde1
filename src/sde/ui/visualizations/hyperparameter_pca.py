@@ -2,7 +2,8 @@ from typing import Optional
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QVBoxLayout
+from PyQt6.QtWidgets import QWidget
 from sklearn.decomposition import PCA
 
 from ..view_model import ExperimentViewModel

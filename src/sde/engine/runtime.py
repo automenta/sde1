@@ -1,14 +1,16 @@
 import logging
 import queue
 import threading
+from enum import Enum
 from typing import Any
 from typing import Callable
 from typing import Dict
-from typing import Iterator
 from typing import List
 from typing import Optional
 from typing import Tuple
 
+from sde.core.comms import EngineCommand
+from sde.core.comms import EngineEvent
 from sde.core.domain import ExecutionSettings
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
@@ -23,6 +25,16 @@ from .insight import InsightEngine
 logger = logging.getLogger(__name__)
 
 
+class RuntimeStatus(Enum):
+    """The lifecycle status of the runtime engine."""
+
+    IDLE = "IDLE"  # Not running, waiting for a START command.
+    RUNNING = "RUNNING"  # Actively processing work.
+    PAUSED = "PAUSED"  # The main loop is paused, no new work is dispatched.
+    STOPPING = "STOPPING"  # A stop has been requested, finishing in-flight work.
+    STOPPED = "STOPPED"  # The engine thread has been shut down.
+
+
 class SdeRuntimeEngine:
     """The self-contained, command-driven engine for running SDE experiments.
     It owns all the core computational components and runs the main experiment
@@ -30,14 +42,8 @@ class SdeRuntimeEngine:
     and emits events via a callback.
     """
 
-    def __init__(self, event_callback: Callable[[str, Dict[str, Any]], None]):
-        """Initializes the SdeRuntimeEngine.
-
-        Args:
-            event_callback: A function to call to emit events to the outside world.
-                The function should accept an event type (str) and a payload (dict).
-
-        """
+    def __init__(self, event_callback: Callable[[EngineEvent, Dict[str, Any]], None]):
+        """Initializes the SdeRuntimeEngine."""
         # Core components are initialized on START_RUN
         self.datastore: Optional[DataStore] = None
         self.adaptive_scheduler: Optional[AdaptiveScheduler] = None
@@ -45,22 +51,24 @@ class SdeRuntimeEngine:
         self.compute_scheduler: Optional[ComputeScheduler] = None
 
         # --- Threading and State Control ---
-        self.command_queue: queue.Queue[Tuple[str, Dict[str, Any]]] = queue.Queue()
-        self.work_queue: queue.PriorityQueue[
-            Tuple[int, int, WorkUnit]
-        ] = queue.PriorityQueue()
+        self.command_queue: queue.Queue[Tuple[EngineCommand, Dict[str, Any]]] = (
+            queue.Queue()
+        )
+        self.work_queue: queue.PriorityQueue[Tuple[int, int, WorkUnit]] = (
+            queue.PriorityQueue()
+        )
         self._work_counter = 0  # Tie-breaker for priority queue
         self._pause_event = threading.Event()
         self._cancelled_trials: set[str] = set()
         self._thread: Optional[threading.Thread] = None
-        self._is_running = False
+        self._status = RuntimeStatus.IDLE
         self.event_callback = event_callback
 
-    def _emit_event(self, event_type: str, payload: Dict[str, Any]):
+    def _emit_event(self, event_type: EngineEvent, payload: Dict[str, Any]):
         """Emits an event to the orchestrator layer."""
         self.event_callback(event_type, payload)
 
-    def post_command(self, command: str, payload: Dict[str, Any]) -> None:
+    def post_command(self, command: EngineCommand, payload: Dict[str, Any]) -> None:
         """Adds a command to the command queue for the engine to process."""
         self.command_queue.put((command, payload))
 
@@ -104,8 +112,10 @@ class SdeRuntimeEngine:
 
     def _handle_start_run(self, payload: Dict[str, Any]):
         """Handles the START_RUN command."""
-        if self._thread is not None:
-            logger.warning("START_RUN received, but engine is already running.")
+        if self._status != RuntimeStatus.IDLE:
+            logger.warning(
+                f"START_RUN received, but engine is already in state {self._status.name}."
+            )
             return
 
         exp_def = payload.get("experiment_definition", {})
@@ -147,8 +157,10 @@ class SdeRuntimeEngine:
             pending_trials = [
                 t for t in all_trials.values() if t.status == TrialStatus.PENDING
             ]
-            work_units, scheduler_state = self.adaptive_scheduler.get_initial_work_units(
-                pending_trials, exp_def.get("scheduler_state", {})
+            work_units, scheduler_state = (
+                self.adaptive_scheduler.get_initial_work_units(
+                    pending_trials, exp_def.get("scheduler_state", {})
+                )
             )
             exp_def["scheduler_state"] = scheduler_state
 
@@ -157,7 +169,7 @@ class SdeRuntimeEngine:
 
         # 3. Start the compute scheduler and the main execution loop
         self.compute_scheduler.start()
-        self._is_running = True
+        self._status = RuntimeStatus.PAUSED if start_paused else RuntimeStatus.RUNNING
         if not start_paused:
             self._pause_event.set()
 
@@ -166,15 +178,17 @@ class SdeRuntimeEngine:
         logger.info("SdeRuntimeEngine started successfully.")
         # The payload now only contains the data the orchestrator doesn't know:
         # the initial state of the trials created by the adaptive scheduler.
-        initial_trials_dict = [t.to_dict() for t in self.datastore.get_all_trials().values()]
-        self._emit_event("RUN_STARTED", {"trials": initial_trials_dict})
+        initial_trials_dict = [
+            t.to_dict() for t in self.datastore.get_all_trials().values()
+        ]
+        self._emit_event(EngineEvent.RUN_STARTED, {"trials": initial_trials_dict})
 
     def _handle_stop_run(self, payload: Dict[str, Any]):
         """Handles the STOP_RUN command."""
-        if not self._is_running:
+        if self._status in [RuntimeStatus.STOPPING, RuntimeStatus.STOPPED]:
             return
 
-        self._is_running = False
+        self._status = RuntimeStatus.STOPPING
         self._pause_event.set()  # Ensure loop isn't blocked on pause
         if self.compute_scheduler:
             self.compute_scheduler.stop()
@@ -182,22 +196,25 @@ class SdeRuntimeEngine:
         if self._thread and self._thread.is_alive():
             self._thread.join()
         self._thread = None
+        self._status = RuntimeStatus.STOPPED
         logger.info("SdeRuntimeEngine has been cleanly shut down.")
-        self._emit_event("RUN_STOPPED", {})
+        self._emit_event(EngineEvent.RUN_STOPPED, {})
 
     def _handle_pause_run(self, payload: Dict[str, Any]):
         """Handles the PAUSE_RUN command."""
-        if self._is_running:
+        if self._status == RuntimeStatus.RUNNING:
+            self._status = RuntimeStatus.PAUSED
             self._pause_event.clear()
             logger.info("Runtime engine execution paused.")
-            self._emit_event("RUN_PAUSED", {})
+            self._emit_event(EngineEvent.RUN_PAUSED, {})
 
     def _handle_resume_run(self, payload: Dict[str, Any]):
         """Handles the RESUME_RUN command."""
-        if self._is_running:
+        if self._status == RuntimeStatus.PAUSED:
+            self._status = RuntimeStatus.RUNNING
             self._pause_event.set()
             logger.info("Runtime engine execution resumed.")
-            self._emit_event("RUN_RESUMED", {})
+            self._emit_event(EngineEvent.RUN_RESUMED, {})
 
     def cancel_work_for_trial(self, trial_id: str) -> None:
         """Marks a trial as cancelled and stops its work in the compute scheduler."""
@@ -211,31 +228,36 @@ class SdeRuntimeEngine:
         try:
             while not self.command_queue.empty():
                 command, payload = self.command_queue.get_nowait()
-                handler_name = f"_handle_{command.lower()}"
+                handler_name = f"_handle_{command.value.lower()}"
                 handler = getattr(self, handler_name, None)
                 if handler:
                     handler(payload)
                 else:
-                    logger.warning(f"Unknown command received: {command}")
+                    logger.warning(f"Unknown command received: {command.name}")
         except queue.Empty:
             return  # Should not happen, but for safety
 
     def _execution_loop(self):
         """The main loop that drives the experiment."""
         logger.info("Runtime engine execution loop started.")
-        while self._is_running:
+        while self._status not in [RuntimeStatus.STOPPING, RuntimeStatus.STOPPED]:
             self._pause_event.wait()
-            if not self._is_running:
+            if self._status in [RuntimeStatus.STOPPING, RuntimeStatus.STOPPED]:
                 break
 
             self._process_command_queue()
 
             current_batch = []
-            while not self.work_queue.empty() and len(current_batch) < self.compute_scheduler.max_workers:
+            while (
+                not self.work_queue.empty()
+                and len(current_batch) < self.compute_scheduler.max_workers
+            ):
                 try:
                     _, _, work_unit = self.work_queue.get_nowait()
                     if work_unit.trial_id in self._cancelled_trials:
-                        logger.info(f"Discarding cancelled work unit for trial {work_unit.trial_id}")
+                        logger.info(
+                            f"Discarding cancelled work unit for trial {work_unit.trial_id}"
+                        )
                         continue
                     current_batch.append(work_unit)
                 except queue.Empty:
@@ -255,11 +277,11 @@ class SdeRuntimeEngine:
             results_iterator = self.compute_scheduler.run(current_batch)
             for work_unit, result in results_iterator:
                 self._pause_event.wait()
-                if not self._is_running:
+                if self._status in [RuntimeStatus.STOPPING, RuntimeStatus.STOPPED]:
                     break
                 self._process_completed_work_unit(work_unit, result)
 
-        self._is_running = False
+        self._status = RuntimeStatus.STOPPED
         logger.info("Runtime engine execution loop finished.")
 
     def _process_completed_work_unit(self, work_unit: WorkUnit, result: dict):
@@ -307,7 +329,8 @@ class SdeRuntimeEngine:
 
             if insights:
                 self._emit_event(
-                    "INSIGHTS_GENERATED", {"insights": [i.__dict__ for i in insights]}
+                    EngineEvent.INSIGHTS_GENERATED,
+                    {"insights": [i.__dict__ for i in insights]},
                 )
 
             if updated_trial.status == TrialStatus.ACTIVE:
@@ -317,12 +340,4 @@ class SdeRuntimeEngine:
                 for next_wu in next_work_units:
                     self._put_work_in_queue(next_wu)
 
-        self._emit_event("TRIAL_UPDATED", {"trial": updated_trial.to_dict()})
-
-    def submit_work(
-        self, work_units: List[WorkUnit]
-    ) -> Iterator[Tuple[WorkUnit, Dict[str, Any]]]:
-        """Submits a list of work units to the scheduler and yields results."""
-        if not self._is_running or not self.compute_scheduler:
-            raise RuntimeError("Runtime Engine is not running.")
-        return self.compute_scheduler.run(work_units)  # type: ignore
+        self._emit_event(EngineEvent.TRIAL_UPDATED, {"trial": updated_trial.to_dict()})

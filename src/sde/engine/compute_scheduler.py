@@ -106,7 +106,8 @@ class ComputeScheduler:
                     if future in self.active_futures:
                         del self.active_futures[future]
                 logger.info(
-                    f"Cancelled {cancelled_count}/{len(futures_to_cancel)} futures for trial {trial_id}."
+                    f"Cancelled {cancelled_count}/{len(futures_to_cancel)} futures for "
+                    f"trial {trial_id}."
                 )
 
     def run(
@@ -146,7 +147,8 @@ class ComputeScheduler:
             if not work_unit:
                 # This can happen if the future was cancelled and removed
                 logger.warning(
-                    f"Future {future} completed but was not in the active map, likely cancelled."
+                    f"Future {future} completed but was not in the active map, "
+                    f"likely cancelled."
                 )
                 continue
 
@@ -156,7 +158,8 @@ class ComputeScheduler:
                 yield work_unit, result
             except concurrent.futures.TimeoutError:
                 logger.warning(
-                    f"Work unit for trial {work_unit.trial_id} timed out after {self.work_unit_timeout} seconds."
+                    f"Work unit for trial {work_unit.trial_id} timed out after "
+                    f"{self.work_unit_timeout} seconds."
                 )
                 yield work_unit, {
                     "error": f"Work unit timed out after {self.work_unit_timeout} seconds."

@@ -11,6 +11,7 @@ _dirs = PlatformDirs(appname=APP_NAME, appauthor=False)
 
 # --- Public API ---
 
+
 def get_user_data_dir() -> Path:
     """Returns the platform-specific user data directory for the application.
     This is where persistent data like experiments and checkpoints should be stored.
@@ -20,6 +21,7 @@ def get_user_data_dir() -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
+
 def get_user_cache_dir() -> Path:
     """Returns the platform-specific user cache directory for the application.
     This is where non-essential, downloadable data like datasets should be stored.
@@ -28,6 +30,7 @@ def get_user_cache_dir() -> Path:
     path = _dirs.user_cache_path
     path.mkdir(parents=True, exist_ok=True)
     return path
+
 
 def get_checkpoints_dir() -> Path:
     """Returns the specific directory for storing model checkpoints.

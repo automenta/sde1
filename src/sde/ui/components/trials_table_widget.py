@@ -1,20 +1,21 @@
-from typing import Dict, Optional
+from typing import Dict
+from typing import Optional
 
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtWidgets import (
-    QAbstractItemView,
-    QComboBox,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
-    QMenu,
-    QTableWidget,
-    QTableWidgetItem,
-    QVBoxLayout,
-    QWidget,
-    QStyle
-)
+from PyQt6.QtCore import Qt
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QAbstractItemView
+from PyQt6.QtWidgets import QComboBox
+from PyQt6.QtWidgets import QHBoxLayout
+from PyQt6.QtWidgets import QHeaderView
+from PyQt6.QtWidgets import QLabel
+from PyQt6.QtWidgets import QLineEdit
+from PyQt6.QtWidgets import QMenu
+from PyQt6.QtWidgets import QStyle
+from PyQt6.QtWidgets import QTableWidget
+from PyQt6.QtWidgets import QTableWidgetItem
+from PyQt6.QtWidgets import QVBoxLayout
+from PyQt6.QtWidgets import QWidget
 
 from ..models import UITrial
 from ..view_model import ExperimentViewModel
@@ -85,7 +86,9 @@ class TrialsTableWidget(QWidget):
     def _connect_signals(self):
         self.trials_table.itemSelectionChanged.connect(self._on_trial_selection_changed)
         self.trials_table.itemDoubleClicked.connect(self._on_trial_double_clicked)
-        self.trials_table.customContextMenuRequested.connect(self._show_trial_context_menu)
+        self.trials_table.customContextMenuRequested.connect(
+            self._show_trial_context_menu
+        )
         self.filter_status_combo.currentIndexChanged.connect(self._update_trial_filter)
         self.filter_text_input.textChanged.connect(self._update_trial_filter)
 
@@ -96,8 +99,13 @@ class TrialsTableWidget(QWidget):
         self.trials_table.setColumnCount(7)
         self.trials_table.setHorizontalHeaderLabels(
             [
-                "Trial ID", "Algorithm", "Status", "Epoch",
-                "Accuracy", "Loss", "Est. Time/Epoch",
+                "Trial ID",
+                "Algorithm",
+                "Status",
+                "Epoch",
+                "Accuracy",
+                "Loss",
+                "Est. Time/Epoch",
             ]
         )
         self.trials_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -117,10 +125,19 @@ class TrialsTableWidget(QWidget):
         self.trials_table.setColumnWidth(4, 100)
         self.trials_table.setColumnWidth(5, 100)
         self.trials_table.setColumnWidth(6, 120)
-        self.trials_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.trials_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.trials_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.trials_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
 
-    def update_table(self, trials: Dict[str, UITrial], metric_name: str, trial_view_cache: Dict[str, UITrial]):
+    def update_table(
+        self,
+        trials: Dict[str, UITrial],
+        metric_name: str,
+        trial_view_cache: Dict[str, UITrial],
+    ):
         current_trial_ids = set(trials.keys())
         cached_trial_ids = set(trial_view_cache.keys())
 

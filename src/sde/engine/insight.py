@@ -27,7 +27,9 @@ class Insight:
 class InsightEngine:
     """Analyzes the state of an experiment to find and report insights."""
 
-    def __init__(self, trials: Dict[str, Trial], primary_metric: str, higher_is_better: bool):
+    def __init__(
+        self, trials: Dict[str, Trial], primary_metric: str, higher_is_better: bool
+    ):
         self.trials = trials
         self.primary_metric = primary_metric
         self.higher_is_better = higher_is_better
@@ -73,8 +75,9 @@ class InsightEngine:
                 current_best_perf = best_trial.results[self.primary_metric][-1][1]
             except (KeyError, IndexError):
                 pass
-        is_new_best = (self.higher_is_better and finished_trial_perf > current_best_perf) or \
-                      (not self.higher_is_better and finished_trial_perf < current_best_perf)
+        is_new_best = (
+            self.higher_is_better and finished_trial_perf > current_best_perf
+        ) or (not self.higher_is_better and finished_trial_perf < current_best_perf)
         if is_new_best and trial.id != self.current_best_trial_id:
             self.current_best_trial_id = trial.id
             return Insight(
@@ -88,7 +91,14 @@ class InsightEngine:
         if trial_id not in self.trials:
             return None
         try:
-            return cast(float, next(p for e, p in self.trials[trial_id].results[self.primary_metric] if e == epoch))
+            return cast(
+                float,
+                next(
+                    p
+                    for e, p in self.trials[trial_id].results[self.primary_metric]
+                    if e == epoch
+                ),
+            )
         except (KeyError, StopIteration):
             return None
 
@@ -99,35 +109,50 @@ class InsightEngine:
             if current_epoch < 1:
                 return []
             active_perf_now = self._get_perf_at_epoch(active_trial.id, current_epoch)
-            active_perf_prev = self._get_perf_at_epoch(active_trial.id, current_epoch - 1)
+            active_perf_prev = self._get_perf_at_epoch(
+                active_trial.id, current_epoch - 1
+            )
             if active_perf_now is None or active_perf_prev is None:
                 return []
             for other_trial in self.trials.values():
                 if other_trial.id == active_trial.id:
                     continue
                 other_perf_now = self._get_perf_at_epoch(other_trial.id, current_epoch)
-                other_perf_prev = self._get_perf_at_epoch(other_trial.id, current_epoch - 1)
+                other_perf_prev = self._get_perf_at_epoch(
+                    other_trial.id, current_epoch - 1
+                )
                 if other_perf_now is None or other_perf_prev is None:
                     continue
                 prev_delta = active_perf_prev - other_perf_prev
                 now_delta = active_perf_now - other_perf_now
                 if prev_delta * now_delta < 0:
-                    winner_id, loser_id = (active_trial.id, other_trial.id) if now_delta > 0 else (other_trial.id, active_trial.id)
+                    winner_id, loser_id = (
+                        (active_trial.id, other_trial.id)
+                        if now_delta > 0
+                        else (other_trial.id, active_trial.id)
+                    )
                     if not self.higher_is_better:
                         winner_id, loser_id = loser_id, winner_id
-                    crossover_key = (frozenset([active_trial.id, other_trial.id]), winner_id)
+                    crossover_key = (
+                        frozenset([active_trial.id, other_trial.id]),
+                        winner_id,
+                    )
                     if crossover_key not in self._fired_crossover_insights:
                         self._fired_crossover_insights.add(crossover_key)
-                        insights.append(Insight(
-                            message=f"Performance Crossover: Trial {winner_id[:6]} has overtaken {loser_id[:6]} at epoch {current_epoch}.",
-                            type="PERFORMANCE_CROSSOVER",
-                            trial_ids=[active_trial.id, other_trial.id],
-                        ))
+                        insights.append(
+                            Insight(
+                                message=f"Performance Crossover: Trial {winner_id[:6]} has overtaken {loser_id[:6]} at epoch {current_epoch}.",
+                                type="PERFORMANCE_CROSSOVER",
+                                trial_ids=[active_trial.id, other_trial.id],
+                            )
+                        )
         except (KeyError, IndexError):
             return []
         return insights
 
-    def _detect_performance_plateau(self, trial: Trial, lookback: int = 4, relative_tolerance: float = 0.005) -> Optional[Insight]:
+    def _detect_performance_plateau(
+        self, trial: Trial, lookback: int = 4, relative_tolerance: float = 0.005
+    ) -> Optional[Insight]:
         try:
             history = [val for _, val in trial.results[self.primary_metric]]
             if len(history) < lookback:
@@ -155,33 +180,48 @@ class InsightEngine:
 
     def _get_completed_trials_with_results(self, min_trials: int) -> List[Trial]:
         completed = [
-            t for t in self.trials.values()
-            if t.status in {TrialStatus.COMPLETED, TrialStatus.PRUNED} and self.primary_metric in t.results
+            t
+            for t in self.trials.values()
+            if t.status in {TrialStatus.COMPLETED, TrialStatus.PRUNED}
+            and self.primary_metric in t.results
         ]
         return completed if len(completed) >= min_trials else []
 
-    def _flatten_hyperparameters(self, trials: List[Trial]) -> Dict[str, Dict[str, Any]]:
+    def _flatten_hyperparameters(
+        self, trials: List[Trial]
+    ) -> Dict[str, Dict[str, Any]]:
         flat_hparams: Dict[str, Dict[str, Any]] = {}
         for trial in trials:
             flat_hparams[trial.id] = {}
             for p_type, params in trial.hyperparameters.items():
                 for p_name, p_value in params.items():
-                    p_value_key = tuple(p_value) if isinstance(p_value, list) else p_value
+                    p_value_key = (
+                        tuple(p_value) if isinstance(p_value, list) else p_value
+                    )
                     flat_hparams[trial.id][f"{p_type}.{p_name}"] = p_value_key
         return flat_hparams
 
-    def _get_varied_hyperparameters(self, flat_hparams: Dict[str, Dict[str, Any]]) -> set[str]:
+    def _get_varied_hyperparameters(
+        self, flat_hparams: Dict[str, Dict[str, Any]]
+    ) -> set[str]:
         if not flat_hparams:
             return set()
         varied_hparams = set()
         first_trial_params = list(flat_hparams.values())[0]
         for param_name in first_trial_params:
-            unique_values = {trial_params.get(param_name) for trial_params in flat_hparams.values()}
+            unique_values = {
+                trial_params.get(param_name) for trial_params in flat_hparams.values()
+            }
             if len(unique_values) > 1:
                 varied_hparams.add(param_name)
         return varied_hparams
 
-    def _group_trials_by_hparam(self, hparam_name: str, flat_hparams: Dict[str, Dict[str, Any]], min_group_size: int) -> Dict[Any, List[str]]:
+    def _group_trials_by_hparam(
+        self,
+        hparam_name: str,
+        flat_hparams: Dict[str, Dict[str, Any]],
+        min_group_size: int,
+    ) -> Dict[Any, List[str]]:
         groups: Dict[Any, List[str]] = {}
         first_value = list(flat_hparams.values())[0][hparam_name]
         is_numeric = isinstance(first_value, (int, float))
@@ -195,7 +235,7 @@ class InsightEngine:
                     val = params.get(hparam_name)
                     if val is None:
                         continue
-                    group_name = "low" if val <= bins[0] else "high" if val > bins[1] else "medium" # type: ignore
+                    group_name = "low" if val <= bins[0] else "high" if val > bins[1] else "medium"  # type: ignore
                     groups.setdefault(group_name, []).append(trial_id)
             except IndexError:
                 return {}
@@ -206,10 +246,15 @@ class InsightEngine:
         return groups
 
     def _detect_hyperparameter_correlation(
-        self, finished_trial: Trial, min_trials_for_correlation: int = 5,
-        min_group_size: int = 3, significance_threshold: float = 0.1
+        self,
+        finished_trial: Trial,
+        min_trials_for_correlation: int = 5,
+        min_group_size: int = 3,
+        significance_threshold: float = 0.1,
     ) -> List[Insight]:
-        completed_trials = self._get_completed_trials_with_results(min_trials_for_correlation)
+        completed_trials = self._get_completed_trials_with_results(
+            min_trials_for_correlation
+        )
         if not completed_trials:
             return []
         flat_hparams = self._flatten_hyperparameters(completed_trials)
@@ -218,29 +263,44 @@ class InsightEngine:
         for hparam_name in varied_hparams:
             if hparam_name in self._fired_correlation_insights:
                 continue
-            groups = self._group_trials_by_hparam(hparam_name, flat_hparams, min_group_size)
+            groups = self._group_trials_by_hparam(
+                hparam_name, flat_hparams, min_group_size
+            )
             group_perfs = {}
             for name, trial_ids in groups.items():
                 if len(trial_ids) >= min_group_size:
-                    perf = [self.trials[tid].results[self.primary_metric][-1][1] for tid in trial_ids]
+                    perf = [
+                        self.trials[tid].results[self.primary_metric][-1][1]
+                        for tid in trial_ids
+                    ]
                     group_perfs[name] = sum(perf) / len(perf)
             if len(group_perfs) < 2:
                 continue
-            sorted_groups = sorted(group_perfs.items(), key=lambda item: item[1], reverse=self.higher_is_better)
+            sorted_groups = sorted(
+                group_perfs.items(),
+                key=lambda item: item[1],
+                reverse=self.higher_is_better,
+            )
             best_group_name, best_group_perf = sorted_groups[0]
             worst_group_name, worst_group_perf = sorted_groups[-1]
-            relative_diff = abs(best_group_perf - worst_group_perf) / (abs(worst_group_perf) + 1e-9)
+            relative_diff = abs(best_group_perf - worst_group_perf) / (
+                abs(worst_group_perf) + 1e-9
+            )
             if relative_diff > significance_threshold:
                 all_involved_ids = [tid for g in groups.values() for tid in g]
-                insights.append(Insight(
-                    message=f"Correlation found for '{hparam_name}': group '{best_group_name}' (avg perf: {best_group_perf:.3f}) outperforms group '{worst_group_name}' (avg perf: {worst_group_perf:.3f}).",
-                    type="HYPERPARAM_CORRELATION",
-                    trial_ids=all_involved_ids,
-                ))
+                insights.append(
+                    Insight(
+                        message=f"Correlation found for '{hparam_name}': group '{best_group_name}' (avg perf: {best_group_perf:.3f}) outperforms group '{worst_group_name}' (avg perf: {worst_group_perf:.3f}).",
+                        type="HYPERPARAM_CORRELATION",
+                        trial_ids=all_involved_ids,
+                    )
+                )
                 self._fired_correlation_insights.add(hparam_name)
         return insights
 
-    def _detect_poor_initial_performance(self, trial: Trial, z_score_threshold: float = 2.0) -> Optional[Insight]:
+    def _detect_poor_initial_performance(
+        self, trial: Trial, z_score_threshold: float = 2.0
+    ) -> Optional[Insight]:
         try:
             if trial.current_epoch != 1:
                 return None
@@ -252,19 +312,25 @@ class InsightEngine:
                 if other_trial.id == trial.id or other_trial.current_epoch < 1:
                     continue
                 try:
-                    peer_perf = next(p for e, p in other_trial.results[self.primary_metric] if e == 1)
+                    peer_perf = next(
+                        p for e, p in other_trial.results[self.primary_metric] if e == 1
+                    )
                     peer_performances.append(peer_perf)
                 except (KeyError, StopIteration):
                     continue
             if len(peer_performances) < 2:
                 return None
             mean_perf = sum(peer_performances) / len(peer_performances)
-            std_dev = (sum([(p - mean_perf) ** 2 for p in peer_performances]) / len(peer_performances)) ** 0.5
+            std_dev = (
+                sum([(p - mean_perf) ** 2 for p in peer_performances])
+                / len(peer_performances)
+            ) ** 0.5
             if std_dev < 1e-9:
                 return None
             z_score = (own_perf - mean_perf) / std_dev
-            is_poor_outlier = (self.higher_is_better and z_score < -z_score_threshold) or \
-                              (not self.higher_is_better and z_score > z_score_threshold)
+            is_poor_outlier = (
+                self.higher_is_better and z_score < -z_score_threshold
+            ) or (not self.higher_is_better and z_score > z_score_threshold)
             if is_poor_outlier:
                 self._fired_poor_start_insights.add(trial.id)
                 return Insight(

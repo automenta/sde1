@@ -1,8 +1,15 @@
-from typing import Dict, Optional, Set
+from typing import Dict
+from typing import Optional
+from typing import Set
 
 import pyqtgraph as pg
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QWidget, QVBoxLayout
+from PyQt6.QtCore import Qt
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import QComboBox
+from PyQt6.QtWidgets import QHBoxLayout
+from PyQt6.QtWidgets import QLabel
+from PyQt6.QtWidgets import QVBoxLayout
+from PyQt6.QtWidgets import QWidget
 
 from ..models import UITrial
 from ..view_model import ExperimentViewModel
@@ -11,6 +18,7 @@ from .base import VisualizationPlugin
 
 class ClickableLabelItem(pg.LabelItem):
     """A LabelItem that emits a signal when clicked."""
+
     clicked = pyqtSignal(object, object)
 
     def __init__(self, *args, **kwargs):
@@ -24,6 +32,7 @@ class ClickableLabelItem(pg.LabelItem):
 
 class CustomLegendItem(pg.LegendItem):
     """A LegendItem that uses ClickableLabelItems and emits a signal when an item is clicked."""
+
     itemClicked = pyqtSignal(object, object)
 
     def __init__(self, *args, **kwargs):
@@ -31,7 +40,11 @@ class CustomLegendItem(pg.LegendItem):
 
     def addItem(self, item, name):
         """Overrides the default addItem to use a ClickableLabelItem."""
-        label = ClickableLabelItem(text=name, color=self.opts['labelTextColor'], size=self.opts['labelTextSize'])
+        label = ClickableLabelItem(
+            text=name,
+            color=self.opts["labelTextColor"],
+            size=self.opts["labelTextSize"],
+        )
         label.curve = item
         label.label = label
         label.clicked.connect(self.itemClicked.emit)
@@ -94,7 +107,9 @@ class PerformancePlotWidget(QWidget):
     def setup_plot(self):
         self.plot_widget.setBackground("w")
         self.plot_widget.setTitle("Real-Time Trial Performance", color="k", size="16pt")
-        self.plot_widget.setLabel("left", "Accuracy", color="k", **{"font-size": "12pt"})
+        self.plot_widget.setLabel(
+            "left", "Accuracy", color="k", **{"font-size": "12pt"}
+        )
         self.plot_widget.setLabel("bottom", "Epoch", color="k", **{"font-size": "12pt"})
         self.plot_widget.showGrid(x=True, y=True)
         self.legend = CustomLegendItem()
@@ -106,7 +121,9 @@ class PerformancePlotWidget(QWidget):
         if not self.view_model:
             return
 
-        metric_name = self.metric_combo.currentText() or self.view_model.performance_metric_name
+        metric_name = (
+            self.metric_combo.currentText() or self.view_model.performance_metric_name
+        )
         self._update_available_metrics(trials)
 
         current_trial_ids = set(trials.keys())
@@ -120,7 +137,13 @@ class PerformancePlotWidget(QWidget):
                 name = f"{ui_trial.algorithm_name} ({trial_id[:6]})"
                 pen = ui_trial.pen
                 self.plot_curve_map[trial_id] = self.plot_widget.plot(
-                    [], [], name=name, pen=pen, symbol="o", symbolSize=6, symbolBrush=pen.color()
+                    [],
+                    [],
+                    name=name,
+                    pen=pen,
+                    symbol="o",
+                    symbolSize=6,
+                    symbolBrush=pen.color(),
                 )
 
             metric_list = ui_trial.results.get(metric_name, [])
@@ -180,8 +203,13 @@ class PerformancePlotWidget(QWidget):
                 self.metric_combo.addItems(sorted_metrics)
                 if current_selection in sorted_metrics:
                     self.metric_combo.setCurrentText(current_selection)
-                elif self.view_model and self.view_model.performance_metric_name in sorted_metrics:
-                    self.metric_combo.setCurrentText(self.view_model.performance_metric_name)
+                elif (
+                    self.view_model
+                    and self.view_model.performance_metric_name in sorted_metrics
+                ):
+                    self.metric_combo.setCurrentText(
+                        self.view_model.performance_metric_name
+                    )
             self.metric_combo.blockSignals(False)
 
     def _on_legend_item_clicked(self, curve_item, label_item):
@@ -192,8 +220,8 @@ class PerformancePlotWidget(QWidget):
                 break
 
         if clicked_trial_id:
-            self.plot_curve_visibility[clicked_trial_id] = not self.plot_curve_visibility.get(
-                clicked_trial_id, True
+            self.plot_curve_visibility[clicked_trial_id] = (
+                not self.plot_curve_visibility.get(clicked_trial_id, True)
             )
             self._apply_plot_curve_styles()
 

@@ -55,10 +55,10 @@ class LogWidget(QWidget):
         message = log_data.get("message", "")
 
         color_map = {
-            "INFO": "#000000",      # Black
-            "WARN": "#FFA500",      # Orange
-            "ERROR": "#DC143C",     # Crimson
-            "INSIGHT": "#8A2BE2",   # BlueViolet
+            "INFO": "#000000",  # Black
+            "WARN": "#FFA500",  # Orange
+            "ERROR": "#DC143C",  # Crimson
+            "INSIGHT": "#8A2BE2",  # BlueViolet
         }
         color = color_map.get(level, "black")
 

@@ -82,11 +82,12 @@ class SetupPane(QWidget):
         model_details_layout = QVBoxLayout(self.model_details_group)
         self.model_details_text = QTextEdit()
         self.model_details_text.setReadOnly(True)
-        self.model_details_text.setPlaceholderText("Click on a model to see its details.")
+        self.model_details_text.setPlaceholderText(
+            "Click on a model to see its details."
+        )
         model_details_layout.addWidget(self.model_details_text)
         self.model_details_group.setVisible(False)  # Initially hidden
         setup_layout.addWidget(self.model_details_group)
-
 
         # --- Compute Settings Group ---
         self.settings_group = QGroupBox("2. Compute Settings")
@@ -137,9 +138,9 @@ class SetupPane(QWidget):
             "More trials increase the chance of finding a good configuration, but require more computation."
         )
         run_config_form_layout.addRow("Run Mode:", self.run_mode_combo)
-        run_config_form_layout.addRow("Trials per Algorithm:", self.trials_per_algo_spinbox)
-
-
+        run_config_form_layout.addRow(
+            "Trials per Algorithm:", self.trials_per_algo_spinbox
+        )
 
         # --- Experiment Controls ---
         controls_group = QGroupBox("4. Experiment Controls")
@@ -187,7 +188,6 @@ class SetupPane(QWidget):
         throttle_form_layout.addRow("Worker Throttle:", throttle_widget)
         controls_layout.addLayout(throttle_form_layout)
 
-
         # --- Algorithm Management Group ---
         self.algorithms_group = QGroupBox("5. Active Algorithms")
         algorithms_layout = QVBoxLayout(self.algorithms_group)
@@ -221,7 +221,6 @@ class SetupPane(QWidget):
         status_layout.addRow("Best Performance:", self.best_perf_label)
         self.status_group.setVisible(False)
 
-
         # --- Assemble Pane ---
         main_layout.addWidget(self.setup_group)
         main_layout.addWidget(self.settings_group)
@@ -245,7 +244,9 @@ class SetupPane(QWidget):
         self.save_button.clicked.connect(self.save_run_requested)
         self.load_button.clicked.connect(self.load_run_requested)
         self.throttle_slider.valueChanged.connect(self.throttle_changed)
-        self.throttle_slider.valueChanged.connect(lambda v: self.throttle_label.setText(f"{v}%"))
+        self.throttle_slider.valueChanged.connect(
+            lambda v: self.throttle_label.setText(f"{v}%")
+        )
 
     def _on_dataset_changed(self, index: int):
         """Handles the combo box's index change and emits the dataset name."""
@@ -255,7 +256,7 @@ class SetupPane(QWidget):
         self.update_model_list(dataset_name)
         # Clear the filter when the dataset changes
         self.model_search_input.clear()
-        self._on_model_selection_changed() # Clear details pane
+        self._on_model_selection_changed()  # Clear details pane
 
     def _on_model_selection_changed(self):
         """Updates the model details view when a model is selected."""
@@ -270,7 +271,9 @@ class SetupPane(QWidget):
         model_def = AVAILABLE_MODELS.get(model_name)
 
         if not model_def:
-            self.model_details_text.setText(f"Could not find details for '{model_name}'.")
+            self.model_details_text.setText(
+                f"Could not find details for '{model_name}'."
+            )
             self.model_details_group.setVisible(True)
             return
 
@@ -286,7 +289,7 @@ class SetupPane(QWidget):
                 for param_name, properties in params.items():
                     details_html += f"<li><b>{param_name}</b>: "
                     # Using .get() here is fine as `properties` is a dict
-                    if 'options' in properties:
+                    if "options" in properties:
                         details_html += f"Categorical {properties.get('options')}"
                     else:
                         scale = f" ({properties.get('scale', 'linear')} scale)"
@@ -297,7 +300,6 @@ class SetupPane(QWidget):
 
         self.model_details_text.setHtml(details_html)
         self.model_details_group.setVisible(True)
-
 
     def _update_model_filter(self):
         """Filters the model list based on the search input text."""
@@ -368,10 +370,15 @@ class SetupPane(QWidget):
         # Persistence buttons
         can_save = status in ["RUNNING", "PAUSED", "COMPLETED"]
         self.save_button.setEnabled(can_save)
-        self.load_button.setEnabled(status == "DEFINING") # Can only load when not running
+        self.load_button.setEnabled(
+            status == "DEFINING"
+        )  # Can only load when not running
 
         # Mid-run actions
-        can_add_models = "ADD_ALGORITHM" in global_actions and status in ["RUNNING", "PAUSED"]
+        can_add_models = "ADD_ALGORITHM" in global_actions and status in [
+            "RUNNING",
+            "PAUSED",
+        ]
         self.add_models_button.setEnabled(can_add_models)
 
         self.dataset_combo.setEnabled(not has_challenge)
@@ -386,13 +393,17 @@ class SetupPane(QWidget):
         for algo_id, algo_data in algorithms.items():
             row_position = self.algorithms_table.rowCount()
             self.algorithms_table.insertRow(row_position)
-            self.algorithms_table.setItem(row_position, 0, QTableWidgetItem(algo_data.name))
+            self.algorithms_table.setItem(
+                row_position, 0, QTableWidgetItem(algo_data.name)
+            )
 
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
             actions_layout.setContentsMargins(0, 0, 0, 0)
             remove_button = QPushButton("Remove")
-            remove_button.setEnabled("REMOVE_ALGORITHM" in algo_actions.get(algo_id, []))
+            remove_button.setEnabled(
+                "REMOVE_ALGORITHM" in algo_actions.get(algo_id, [])
+            )
             remove_button.clicked.connect(
                 lambda _, a_id=algo_id: self.remove_algorithm_requested.emit(a_id)
             )

@@ -1,18 +1,17 @@
 import uuid
-from sde.core.definitions import DatasetType, Insight, InsightType
-from sde.core.domain import (
-    AlgorithmConfig,
-    ExecutionSettings,
-    Experiment,
-    ExperimentStatus,
-    Trial,
-    TrialStatus,
-)
+
+from sde.core.definitions import Insight
+from sde.core.definitions import InsightType
+from sde.core.domain import AlgorithmConfig
+from sde.core.domain import ExecutionSettings
+from sde.core.domain import Experiment
+from sde.core.domain import ExperimentStatus
+from sde.core.domain import Trial
+from sde.core.domain import TrialStatus
 
 
 def test_experiment_serialization_roundtrip():
-    """
-    Tests that an Experiment object can be serialized to a dictionary
+    """Tests that an Experiment object can be serialized to a dictionary
     and then deserialized back into an identical object.
     This verifies the to_dict and from_dict methods.
     """
@@ -27,7 +26,7 @@ def test_experiment_serialization_roundtrip():
     original_algo = AlgorithmConfig(
         id="algo_1",
         name="TestAlgo",
-        parameter_space={"lr": (0.001, 0.1)},
+        parameter_space={"lr": [0.001, 0.1]},
         is_active=True,
     )
 
@@ -74,8 +73,7 @@ def test_experiment_serialization_roundtrip():
 
 
 def test_from_dict_robustness():
-    """
-    Tests that the from_dict methods can handle extra, unknown keys
+    """Tests that the from_dict methods can handle extra, unknown keys
     in the input dictionary, which provides forward compatibility.
     """
     trial_dict_with_extra_keys = {

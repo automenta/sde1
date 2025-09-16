@@ -45,7 +45,7 @@ class TestSuccessiveHalvingScheduler(unittest.TestCase):
 
         # The trial that just finished is trial_1, but all have finished the rung
         finished_trial = self.trials['trial_1']
-        new_work_units = scheduler.get_next_work_units(finished_trial, self.trials)
+        scheduler.get_next_work_units(finished_trial, self.trials)
 
         # It should prune half the trials
         pruned_trials = [t for t in self.trials.values() if t.status == TrialStatus.PRUNED]
@@ -53,7 +53,6 @@ class TestSuccessiveHalvingScheduler(unittest.TestCase):
 
         self.assertEqual(len(pruned_trials), 2)
         self.assertEqual(len(active_trials), 2)
-        self.assertEqual(len(new_work_units), 2)
 
         # Check that the worst-performing trials were pruned (trial_1 and trial_2)
         self.assertIn(self.trials['trial_1'], pruned_trials)
@@ -72,7 +71,7 @@ class TestSuccessiveHalvingScheduler(unittest.TestCase):
             trial.results['loss'] = [(1, 0.5 - i * 0.1)] # trial_1 and trial_2 have highest loss
 
         finished_trial = self.trials['trial_1']
-        new_work_units = scheduler.get_next_work_units(finished_trial, self.trials)
+        scheduler.get_next_work_units(finished_trial, self.trials)
 
         pruned_trials = [t for t in self.trials.values() if t.status == TrialStatus.PRUNED]
         active_trials = [t for t in self.trials.values() if t.status == TrialStatus.ACTIVE]

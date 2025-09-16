@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
+
 from sde.challenges import AVAILABLE_DATASETS
 from sde.core.domain import Trial
 from sde.core.domain import WorkUnit
@@ -29,8 +30,7 @@ class TestCheckpointingAndResume(unittest.TestCase):
     def test_training_progresses_across_epochs_with_checkpointing(
         self, mock_get_checkpoints_dir
     ):
-        """
-        Tests the core functionality of checkpointing and resuming.
+        """Tests the core functionality of checkpointing and resuming.
         It runs two consecutive epochs and asserts that the model's performance
         improves, which proves that the state was correctly saved and reloaded.
         """

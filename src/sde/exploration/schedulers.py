@@ -326,7 +326,9 @@ class HyperbandScheduler(AdaptiveScheduler):
 
         s_val = finished_trial.tags.get("hyperband_bracket_s")
         if s_val is None or finished_trial.status != TrialStatus.ACTIVE:
-            return []  # This trial is not managed by this scheduler or has been pruned/completed.
+            return (
+                []
+            )  # This trial is not managed by this scheduler or has been pruned/completed.
 
         # Re-create bracket definitions on the fly; they are deterministic.
         brackets = self._get_brackets()

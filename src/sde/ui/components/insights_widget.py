@@ -1,9 +1,15 @@
 from typing import Optional
-from typing import List
 
-from PyQt6.QtCore import pyqtProperty, QPropertyAnimation, pyqtSignal, QEasingCurve
+from PyQt6.QtCore import QEasingCurve
+from PyQt6.QtCore import QPropertyAnimation
+from PyQt6.QtCore import pyqtProperty
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QGroupBox, QVBoxLayout, QListWidget, QListWidgetItem, QWidget
+from PyQt6.QtWidgets import QGroupBox
+from PyQt6.QtWidgets import QListWidget
+from PyQt6.QtWidgets import QListWidgetItem
+from PyQt6.QtWidgets import QVBoxLayout
+from PyQt6.QtWidgets import QWidget
 
 from ..models import UIInsight
 from ..view_model import ExperimentViewModel
@@ -12,9 +18,7 @@ from ..view_model import ExperimentViewModel
 class InsightListItem(QListWidgetItem):
     """A custom QListWidgetItem that stores the full UIInsight object."""
 
-    def __init__(
-        self, ui_insight: UIInsight, parent: Optional[QListWidget] = None
-    ):
+    def __init__(self, ui_insight: UIInsight, parent: Optional[QListWidget] = None):
         super().__init__(parent)
         self.insight = ui_insight
         self.setIcon(ui_insight.icon)
@@ -75,7 +79,10 @@ class InsightsWidget(QWidget):
 
     def _trigger_insight_animation(self):
         """Animates the border and title of the 'Insights' group box to signal a new insight."""
-        if self.insight_animation and self.insight_animation.state() == QPropertyAnimation.State.Running:
+        if (
+            self.insight_animation
+            and self.insight_animation.state() == QPropertyAnimation.State.Running
+        ):
             self.insight_animation.stop()
 
         self.insight_animation = QPropertyAnimation(self, b"insightBorderColor")
@@ -93,7 +100,8 @@ class InsightsWidget(QWidget):
     def _set_insight_border_color(self, color: QColor):
         """Sets a prominent border and title background color for the insights group box."""
         text_color = "black" if color.lightnessF() > 0.5 else "white"
-        self.insights_group.setStyleSheet(f"""
+        self.insights_group.setStyleSheet(
+            f"""
             QGroupBox {{
                 border: 2px solid {color.name(QColor.NameFormat.HexArgb)};
                 margin-top: 1em;
@@ -107,7 +115,8 @@ class InsightsWidget(QWidget):
                 color: {text_color};
                 border-radius: 4px;
             }}
-        """)
+        """
+        )
 
     insightBorderColor = pyqtProperty(QColor, fset=_set_insight_border_color)
 

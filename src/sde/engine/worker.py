@@ -10,7 +10,8 @@ import torch
 import torch.optim as optim
 
 from sde.config import get_checkpoints_dir
-from sde.core.definitions import DatasetDefinition, ModelDefinition
+from sde.core.definitions import DatasetDefinition
+from sde.core.definitions import ModelDefinition
 from sde.core.domain import Trial
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
@@ -121,7 +122,9 @@ class Worker:
                 checkpoint = torch.load(trial.checkpoint_path, map_location=DEVICE)
                 model.load_state_dict(checkpoint["model_state_dict"])
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-                logger.info(f"Loaded checkpoint for trial {trial.id} from {trial.checkpoint_path}")
+                logger.info(
+                    f"Loaded checkpoint for trial {trial.id} from {trial.checkpoint_path}"
+                )
             except FileNotFoundError:
                 logger.warning(
                     f"Checkpoint file not found at {trial.checkpoint_path}. Starting from scratch."
@@ -133,8 +136,7 @@ class Worker:
         return model, optimizer
 
     def _profile_speed(self, work_unit: WorkUnit, trial: Trial) -> dict:
-        """Runs a few training batches to estimate the time per epoch.
-        """
+        """Runs a few training batches to estimate the time per epoch."""
         # 1. Setup model, optimizer, and loss function
         model, optimizer = self._load_or_create_model_and_optimizer(trial)
         criterion = self.dataset_def.loss_function_factory()
@@ -220,7 +222,9 @@ class Worker:
             # Use a canonical checkpoint path for each trial
             if not new_checkpoint_path:
                 checkpoint_filename = f"{trial.id}.pt"
-                new_checkpoint_path = os.path.join(self.checkpoints_dir, checkpoint_filename)
+                new_checkpoint_path = os.path.join(
+                    self.checkpoints_dir, checkpoint_filename
+                )
 
             # Atomic save: write to a temporary file then rename
             temp_checkpoint_path = f"{new_checkpoint_path}.tmp"

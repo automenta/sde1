@@ -1,8 +1,15 @@
-import dataclasses
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
+
+from dataclasses_json import Undefined
+from dataclasses_json import dataclass_json
 
 from .definitions import Insight
 
@@ -17,6 +24,7 @@ class WorkUnitType(Enum):
     EVALUATE = "EVALUATE"
 
 
+@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass(frozen=True)
 class WorkUnit:
     """The smallest schedulable quantum of work. This is a stateless, immutable task."""
@@ -37,6 +45,7 @@ class TrialStatus(Enum):
     FAILED = "FAILED"  # The trial terminated due to an unrecoverable error.
 
 
+@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass
 class Trial:
     """A container for the dynamic state and results of a single algorithm instance."""
@@ -58,21 +67,6 @@ class Trial:
     # Generic key-value store for scheduler-specific metadata
     tags: Dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict:
-        """Serializes the Trial to a dictionary, converting enums to strings."""
-        d = dataclasses.asdict(self)
-        d["status"] = self.status.value
-        return d
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "Trial":
-        """Creates a Trial from a dictionary, robustly handling missing/extra keys."""
-        if "status" in d and isinstance(d["status"], str):
-            d["status"] = TrialStatus(d["status"])
-        known_fields = {f.name for f in dataclasses.fields(cls)}
-        filtered_dict = {k: v for k, v in d.items() if k in known_fields}
-        return cls(**filtered_dict)
-
 
 class ExperimentStatus(Enum):
     """The overall status of an experiment run."""
@@ -85,6 +79,7 @@ class ExperimentStatus(Enum):
     FAILED = "FAILED"  # The experiment terminated due to a critical error.
 
 
+@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass
 class AlgorithmConfig:
     """Configuration for an algorithm to be included in the experiment."""
@@ -94,14 +89,8 @@ class AlgorithmConfig:
     parameter_space: Dict[str, Any]  # Defines the search space for HPO
     is_active: bool = True
 
-    def to_dict(self) -> dict:
-        return dataclasses.asdict(self)
 
-    @classmethod
-    def from_dict(cls, d: dict) -> "AlgorithmConfig":
-        return cls(**d)
-
-
+@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass
 class ExecutionSettings:
     """Settings that control the execution environment of the experiment."""
@@ -111,17 +100,8 @@ class ExecutionSettings:
     enable_checkpointing: bool
     work_unit_timeout_seconds: int
 
-    def to_dict(self) -> dict:
-        """Serializes the settings to a dictionary."""
-        return dataclasses.asdict(self)
 
-    @classmethod
-    def from_dict(cls, d: dict) -> "ExecutionSettings":
-        known_fields = {f.name for f in dataclasses.fields(cls)}
-        filtered_dict = {k: v for k, v in d.items() if k in known_fields}
-        return cls(**filtered_dict)
-
-
+@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass
 class Experiment:
     """The single, canonical data structure holding the entire application state.
@@ -144,48 +124,3 @@ class Experiment:
     patience_budget: Optional[Dict[str, int]] = None
     execution_settings: Optional[ExecutionSettings] = None
     scheduler_state: Dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict:
-        """Serializes the entire experiment state to a dictionary."""
-        return {
-            "id": self.id,
-            "status": self.status.value,
-            "challenge": self.challenge,
-            "algorithms": {k: v.to_dict() for k, v in self.algorithms.items()},
-            "trials": {k: v.to_dict() for k, v in self.trials.items()},
-            "insights": [insight.to_dict() for insight in self.insights],
-            "adaptive_policy": self.adaptive_policy,
-            "patience_budget": self.patience_budget,
-            "execution_settings": self.execution_settings.to_dict()
-            if self.execution_settings
-            else None,
-            "scheduler_state": self.scheduler_state,
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "Experiment":
-        """Creates an Experiment instance from a dictionary."""
-        d_copy = d.copy()
-        if "status" in d_copy and isinstance(d_copy["status"], str):
-            d_copy["status"] = ExperimentStatus(d_copy["status"])
-        if "algorithms" in d_copy and d_copy["algorithms"] is not None:
-            d_copy["algorithms"] = {
-                k: AlgorithmConfig.from_dict(v)
-                for k, v in d_copy["algorithms"].items()
-            }
-        if "trials" in d_copy and d_copy["trials"] is not None:
-            d_copy["trials"] = {
-                k: Trial.from_dict(v) for k, v in d_copy["trials"].items()
-            }
-        if "insights" in d_copy and d_copy["insights"] is not None:
-            d_copy["insights"] = [
-                Insight.from_dict(v) for v in d_copy["insights"]
-            ]
-        if "execution_settings" in d_copy and d_copy["execution_settings"] is not None:
-            d_copy["execution_settings"] = ExecutionSettings.from_dict(
-                d_copy["execution_settings"]
-            )
-
-        known_fields = {f.name for f in dataclasses.fields(cls)}
-        filtered_dict = {k: v for k, v in d_copy.items() if k in known_fields}
-        return cls(**filtered_dict)

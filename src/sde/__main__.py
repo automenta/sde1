@@ -27,7 +27,10 @@ def main():
             "parameter_space": {
                 "dropout_rate": {"type": "float", "min": 0.1, "max": 0.5},
                 "learning_rate": {
-                    "type": "float", "min": 1e-4, "max": 1e-2, "log": True
+                    "type": "float",
+                    "min": 1e-4,
+                    "max": 1e-2,
+                    "log": True,
                 },
             },
         },
@@ -35,7 +38,10 @@ def main():
             "name": "LogisticRegression",
             "parameter_space": {
                 "learning_rate": {
-                    "type": "float", "min": 1e-3, "max": 1e-1, "log": True
+                    "type": "float",
+                    "min": 1e-3,
+                    "max": 1e-1,
+                    "log": True,
                 },
             },
         },
@@ -66,10 +72,9 @@ def main():
         level = msg.get("level", "INFO").upper()
         message = msg.get("message", "")
         if level == "INSIGHT":
-             logger.info(f"INSIGHT: {message}")
+            logger.info(f"INSIGHT: {message}")
         else:
-             logger.info(f"ENGINE: {message}")
-
+            logger.info(f"ENGINE: {message}")
 
     # --- Connect signals ---
     orchestrator.state_changed.connect(on_state_changed)
@@ -92,13 +97,9 @@ def main():
 
     # --- Print final results ---
     final_experiment_state = orchestrator.experiment
-    logger.info(
-        f"\n--- Experiment Finished in {end_time - start_time:.2f} seconds ---"
-    )
+    logger.info(f"\n--- Experiment Finished in {end_time - start_time:.2f} seconds ---")
     for trial in final_experiment_state.trials.values():
-        results_str = "".join(
-            [f"\n    {m}: {v}" for m, v in trial.results.items()]
-        )
+        results_str = "".join([f"\n    {m}: {v}" for m, v in trial.results.items()])
         logger.info(
             f"\nTrial ID: {trial.id}"
             f"\n  Algorithm: {trial.algorithm_name}"

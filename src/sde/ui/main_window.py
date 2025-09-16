@@ -44,10 +44,12 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._connect_signals()
 
-        self.append_log_message({
-            "level": "INFO",
-            "message": "UI Initialized. Configure your experiment and click 'Start'."
-        })
+        self.append_log_message(
+            {
+                "level": "INFO",
+                "message": "UI Initialized. Configure your experiment and click 'Start'.",
+            }
+        )
 
     def _init_ui(self):
         """Initializes the main UI layout and sub-components."""
@@ -67,7 +69,7 @@ class MainWindow(QMainWindow):
         self.progress_dialog.setAutoClose(True)
         self.progress_dialog.setAutoReset(True)
         self.progress_dialog.setMinimum(0)
-        self.progress_dialog.setMaximum(0) # Makes it an indeterminate progress bar
+        self.progress_dialog.setMaximum(0)  # Makes it an indeterminate progress bar
 
     def _connect_signals(self):
         """Connects all UI signals to their corresponding slots."""
@@ -97,7 +99,6 @@ class MainWindow(QMainWindow):
         self.results_pane.spawn_trial_requested.connect(self.spawn_trial)
         self.results_pane.refresh_requested.connect(self.request_state_update)
 
-
     # --- Major Action Handlers ---
 
     def on_state_changed(self, state: dict):
@@ -115,13 +116,19 @@ class MainWindow(QMainWindow):
         elif run_mode == "Tune Hyperparameters":
             self.open_tuning_dialog(settings)
         else:
-            self.append_log_message({"level": "ERROR", "message": f"Unknown run mode: {run_mode}"})
+            self.append_log_message(
+                {"level": "ERROR", "message": f"Unknown run mode: {run_mode}"}
+            )
 
     def start_simple_experiment(self, settings: dict):
         """Handles the 'Simple' run mode by showing the SimpleRunDialog."""
         dataset_name, selected_models_names = self.setup_pane.get_experiment_settings()
         if not dataset_name or not selected_models_names:
-            QMessageBox.warning(self, "Missing Information", "Please select a dataset and at least one model.")
+            QMessageBox.warning(
+                self,
+                "Missing Information",
+                "Please select a dataset and at least one model.",
+            )
             return
 
         selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
@@ -129,27 +136,45 @@ class MainWindow(QMainWindow):
         result = dialog.exec()
 
         if result == QDialog.DialogCode.Rejected:
-            self.append_log_message({"level": "INFO", "message": "Experiment start cancelled by user."})
+            self.append_log_message(
+                {"level": "INFO", "message": "Experiment start cancelled by user."}
+            )
             return
 
         custom_hparams = {}
         if result == SimpleRunDialog.RunWithEdits:
             custom_hparams = dialog.get_hyperparameters()
-            self.append_log_message({"level": "INFO", "message": "Starting run with custom hyperparameters."})
-        else: # RunWithDefaults
-            self.append_log_message({"level": "INFO", "message": "Starting run with default hyperparameters."})
+            self.append_log_message(
+                {
+                    "level": "INFO",
+                    "message": "Starting run with custom hyperparameters.",
+                }
+            )
+        else:  # RunWithDefaults
+            self.append_log_message(
+                {
+                    "level": "INFO",
+                    "message": "Starting run with default hyperparameters.",
+                }
+            )
 
         algorithms_to_add = []
         for model_name in selected_models_names:
             model_def = AVAILABLE_MODELS[model_name]
             param_space = {}
             if model_name in custom_hparams:
-                 param_space = custom_hparams[model_name]
+                param_space = custom_hparams[model_name]
             else:
                 for param_type, params in model_def.hyperparameter_schema.items():
                     for param_name, properties in params.items():
                         param_space[param_name] = properties.get("default")
-            algorithms_to_add.append({"name": model_name, "parameter_space": param_space, "is_simple_run": True})
+            algorithms_to_add.append(
+                {
+                    "name": model_name,
+                    "parameter_space": param_space,
+                    "is_simple_run": True,
+                }
+            )
 
         self._configure_new_experiment(dataset_name, algorithms_to_add, settings)
 
@@ -157,7 +182,11 @@ class MainWindow(QMainWindow):
         """Opens the tuning dialog and configures the experiment via the orchestrator."""
         dataset_name, selected_models_names = self.setup_pane.get_experiment_settings()
         if not dataset_name or not selected_models_names:
-            QMessageBox.warning(self, "Warning", "Please select a dataset and at least one model to tune.")
+            QMessageBox.warning(
+                self,
+                "Warning",
+                "Please select a dataset and at least one model to tune.",
+            )
             return
 
         selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
@@ -166,7 +195,10 @@ class MainWindow(QMainWindow):
             return
 
         config = dialog.get_configuration()
-        self.orchestrator.dispatch(ActionType.SET_ADAPTIVE_POLICY, {"policy_name": config["adaptive_scheduler"]})
+        self.orchestrator.dispatch(
+            ActionType.SET_ADAPTIVE_POLICY,
+            {"policy_name": config["adaptive_scheduler"]},
+        )
 
         algorithms_to_add = []
         for model_name, model_params in config["models"].items():
@@ -174,18 +206,21 @@ class MainWindow(QMainWindow):
             for param_type in model_params.values():
                 for param_name, properties in param_type.items():
                     full_param_space[param_name] = {
-                        "type": "float", "min": properties["min"], "max": properties["max"],
+                        "type": "float",
+                        "min": properties["min"],
+                        "max": properties["max"],
                         "scale": properties.get("scale", "linear"),
                     }
-            algorithms_to_add.append({"name": model_name, "parameter_space": full_param_space})
+            algorithms_to_add.append(
+                {"name": model_name, "parameter_space": full_param_space}
+            )
 
         self._configure_new_experiment(dataset_name, algorithms_to_add, settings)
 
     def _configure_new_experiment(self, dataset_name, algorithms, settings):
-        self.append_log_message({
-            "level": "INFO",
-            "message": f"Configuring experiment on '{dataset_name}'"
-        })
+        self.append_log_message(
+            {"level": "INFO", "message": f"Configuring experiment on '{dataset_name}'"}
+        )
         self._clear_previous_experiment()
 
         challenge_def = AVAILABLE_DATASETS[dataset_name]
@@ -256,11 +291,17 @@ class MainWindow(QMainWindow):
 
     def add_models_to_run(self):
         """Adds newly selected models to an already running experiment."""
-        existing_algo_names = {algo.name for algo in self.view_model.algorithms.values()}
-        newly_selected_models = self.setup_pane.get_newly_selected_models(existing_algo_names)
+        existing_algo_names = {
+            algo.name for algo in self.view_model.algorithms.values()
+        }
+        newly_selected_models = self.setup_pane.get_newly_selected_models(
+            existing_algo_names
+        )
 
         if not newly_selected_models:
-            self.append_log_message({'level': 'INFO', 'message': "No new models selected to add."})
+            self.append_log_message(
+                {"level": "INFO", "message": "No new models selected to add."}
+            )
             return
 
         # Prompt the user for the number of trials to generate for the new models
@@ -269,34 +310,46 @@ class MainWindow(QMainWindow):
             "Add Trials",
             f"How many trials to generate for {len(newly_selected_models)} new model(s)?",
             10,  # Default value
-            1,   # Minimum value
-            1000, # Maximum value
-            1,   # Step
+            1,  # Minimum value
+            1000,  # Maximum value
+            1,  # Step
         )
 
         if not ok:
-            self.append_log_message({'level': 'INFO', 'message': "Add models operation cancelled by user."})
+            self.append_log_message(
+                {"level": "INFO", "message": "Add models operation cancelled by user."}
+            )
             return
 
-        self.append_log_message({
-            'level': 'INFO',
-            'message': f"Adding {num_trials} trials for new models: {', '.join(newly_selected_models)}"
-        })
+        self.append_log_message(
+            {
+                "level": "INFO",
+                "message": f"Adding {num_trials} trials for new models: {', '.join(newly_selected_models)}",
+            }
+        )
         for model_name in newly_selected_models:
             model_def = AVAILABLE_MODELS[model_name]
             param_space = self._create_default_param_space(model_def)
             self.orchestrator.dispatch(
                 ActionType.ADD_ALGORITHM,
-                {"name": model_name, "parameter_space": param_space, "num_trials": num_trials},
+                {
+                    "name": model_name,
+                    "parameter_space": param_space,
+                    "num_trials": num_trials,
+                },
             )
 
     def remove_algorithm(self, algorithm_id: str):
         """Dispatches an action to remove an algorithm from the experiment."""
-        self.orchestrator.dispatch(ActionType.REMOVE_ALGORITHM, {"algorithm_id": algorithm_id})
+        self.orchestrator.dispatch(
+            ActionType.REMOVE_ALGORITHM, {"algorithm_id": algorithm_id}
+        )
 
     def update_throttle(self, value: int):
         """Dispatches an action to update the worker throttle percentage."""
-        self.orchestrator.dispatch(ActionType.SET_BUDGET, {"worker_throttle_percent": value})
+        self.orchestrator.dispatch(
+            ActionType.SET_BUDGET, {"worker_throttle_percent": value}
+        )
 
     def pause_experiment(self):
         """Dispatches an action to pause the current experiment run."""
@@ -319,7 +372,6 @@ class MainWindow(QMainWindow):
         """Hides the progress dialog when the operation is complete."""
         self.progress_dialog.hide()
         self.append_log_message({"level": "INFO", "message": message})
-
 
     def save_experiment(self):
         """Opens a file dialog and dispatches the action to save the experiment."""
@@ -349,7 +401,9 @@ class MainWindow(QMainWindow):
         if trial:
             trial.status = "PRUNED"
             self.results_pane.update_view(self.view_model)
-        self.orchestrator.dispatch(ActionType.MANUAL_PRUNE_TRIAL, {"trial_id": trial_id})
+        self.orchestrator.dispatch(
+            ActionType.MANUAL_PRUNE_TRIAL, {"trial_id": trial_id}
+        )
 
     def prioritize_trial(self, trial_id: str):
         """Dispatches an action to increase a trial's priority."""
@@ -357,7 +411,9 @@ class MainWindow(QMainWindow):
         if trial:
             trial.prioritized = True
             self.results_pane.update_view(self.view_model)
-        self.orchestrator.dispatch(ActionType.MANUAL_PRIORITIZE_TRIAL, {"trial_id": trial_id})
+        self.orchestrator.dispatch(
+            ActionType.MANUAL_PRIORITIZE_TRIAL, {"trial_id": trial_id}
+        )
 
     def spawn_trial(self, trial_id: str):
         """Opens a dialog to edit hyperparameters and spawn a new trial."""
@@ -379,7 +435,12 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handles the window close event to ensure graceful shutdown."""
-        self.append_log_message({'level': 'INFO', 'message': "Close event received. Shutting down backend engine..."})
+        self.append_log_message(
+            {
+                "level": "INFO",
+                "message": "Close event received. Shutting down backend engine...",
+            }
+        )
         self.orchestrator.shutdown()
         event.accept()
 

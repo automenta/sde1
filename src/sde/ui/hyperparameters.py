@@ -66,8 +66,7 @@ class HyperparameterViewerDialog(QDialog):
 
 
 class HyperparameterDialog(QDialog):
-    """A dialog for configuring a hyperparameter tuning experiment.
-    """
+    """A dialog for configuring a hyperparameter tuning experiment."""
 
     def __init__(self, models: list[ModelDefinition], parent=None):
         super().__init__(parent)
@@ -202,9 +201,7 @@ class HyperparameterDialog(QDialog):
                             combo = QComboBox()
                             # For int_list, options are lists; for int, they are ints
                             # We convert them all to strings for display.
-                            str_options = [
-                                str(opt) for opt in properties["options"]
-                            ]
+                            str_options = [str(opt) for opt in properties["options"]]
                             combo.addItems(str_options)
                             if "default" in properties:
                                 combo.setCurrentText(str(properties["default"]))
@@ -265,8 +262,8 @@ class HyperparameterDialog(QDialog):
                             self.config["models"][model_name][param_type][
                                 param_name
                             ] = int(value_str)
-                        else: # Potentially other simple types like string
-                             self.config["models"][model_name][param_type][
+                        else:  # Potentially other simple types like string
+                            self.config["models"][model_name][param_type][
                                 param_name
                             ] = value_str
 

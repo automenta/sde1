@@ -13,7 +13,8 @@ class ActionValidator:
 
     @staticmethod
     def get_valid_actions(experiment: Experiment) -> Dict[str, Any]:
-        """Inspects the current state and returns a structured dictionary of valid actions.
+        """
+        Inspects the current state and returns a structured dictionary of valid actions.
         e.g., {
             "global": ["ADD_ALGORITHM"],
             "algorithms": { "algo_1": ["UPDATE_PARAM_SPACE", "REMOVE_ALGORITHM"] },
@@ -115,7 +116,8 @@ class ActionValidator:
             trial_id = payload["trial_id"]
             return action_type in valid_actions.get("trials", {}).get(trial_id, [])
 
-        # The 'SPAWN_SIMILAR_TRIAL' action is a special case scoped by 'source_trial_id'.
+        # The 'SPAWN_SIMILAR_TRIAL' action is a special case scoped by
+        # 'source_trial_id'.
         if "source_trial_id" in payload:
             source_trial_id = payload["source_trial_id"]
             return action_type in valid_actions.get("trials", {}).get(

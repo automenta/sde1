@@ -40,16 +40,16 @@ class UITrial:
 
         # The 'best' trial gets a unique, standout style
         if self.is_best:
-            pen = pg.mkPen(color="#FFD700", width=4) # Gold
-            pen.setCosmetic(True) # Ensures width is consistent when zooming
+            pen = pg.mkPen(color="#FFD700", width=4)  # Gold
+            pen.setCosmetic(True)  # Ensures width is consistent when zooming
             return pen
 
         # Other statuses modify the base plot color and style
         if self.status == "ACTIVE":
-            width = 3 # Make active trials slightly thicker
+            width = 3  # Make active trials slightly thicker
         elif self.status == "PRUNED":
             style = pg.QtCore.Qt.PenStyle.DotLine
-            color.setAlphaF(0.6) # Make it semi-transparent
+            color.setAlphaF(0.6)  # Make it semi-transparent
         elif self.status == "FAILED":
             style = pg.QtCore.Qt.PenStyle.DashLine
             color.setAlphaF(0.7)
@@ -57,8 +57,8 @@ class UITrial:
             # Completed trials are solid but slightly less prominent than active ones
             width = 2
         elif self.status == "PENDING":
-             width = 1
-             style = pg.QtCore.Qt.PenStyle.DotLine
+            width = 1
+            style = pg.QtCore.Qt.PenStyle.DotLine
 
         pen = pg.mkPen(color=color, width=width, style=style)
         pen.setCosmetic(True)
@@ -70,14 +70,14 @@ class UITrial:
         if self.is_best:
             return QColor("#FFFACD")  # LemonChiffon (for gold)
         if self.prioritized:
-            return QColor("#E6F7FF") # Very light blue for prioritized trials
+            return QColor("#E6F7FF")  # Very light blue for prioritized trials
 
         # Colors are subtle to avoid a "rainbow" effect and keep focus on the data
         status_colors = {
-            "ACTIVE": QColor("#E9FEE9"),      # A hint of green
-            "COMPLETED": QColor("#F0F8FF"),   # AliceBlue
-            "PRUNED": QColor("#F5F5F5"),      # A light gray (WhiteSmoke)
-            "FAILED": QColor("#FFF0F0"),      # A hint of red (Snow)
+            "ACTIVE": QColor("#E9FEE9"),  # A hint of green
+            "COMPLETED": QColor("#F0F8FF"),  # AliceBlue
+            "PRUNED": QColor("#F5F5F5"),  # A light gray (WhiteSmoke)
+            "FAILED": QColor("#FFF0F0"),  # A hint of red (Snow)
             "PENDING": QColor("white"),
         }
         return status_colors.get(self.status, QColor("white"))
