@@ -20,9 +20,14 @@ SCHEDULER_VAR_NAME = "SCHEDULER"
 def discover_and_register_components():
     """Discover and register all pluggable components.
 
-    This function scans predefined packages (challenges, models, schedulers),
-    imports the modules, and registers any components they contain with the
-    central registry.
+    This function serves as the main entry point for the component discovery
+    process. It scans predefined packages (challenges, models, schedulers) for
+    Python modules, imports them, and registers any components they contain with
+    the central registry.
+
+    The discovery is convention-based, meaning it looks for variables with
+    specific names (e.g., `CHALLENGE`, `MODEL`) or classes that inherit from
+    specific base classes (e.g., `AdaptiveScheduler`).
     """
     logger.info("Starting component discovery...")
 
@@ -61,7 +66,7 @@ def _discover_in_package(package, base_class, register_func):
                         logger.debug(
                             f"Found {base_class.__name__} '{var_value.name}' in {name}"
                         )
-                        register_func(var_value)
+                        register_func(var_value, origin_file=module.__file__)
         except Exception as e:
             logger.warning(f"Could not import or register from module {name}: {e}")
 
@@ -81,9 +86,10 @@ def _discover_schedulers(package):
                     and class_obj is not AdaptiveScheduler
                 ):
                     # Use a readable name for the scheduler, e.g., "Successive Halving"
-                    scheduler_name = getattr(class_obj, "NAME", class_name)
-                    logger.debug(f"Found Scheduler '{scheduler_name}' in {name}")
-                    registry.register_scheduler(scheduler_name, class_obj)
+                    logger.debug(f"Found Scheduler '{class_name}' in {name}")
+                    registry.register_scheduler(
+                        class_obj, origin_file=module.__file__
+                    )
         except Exception as e:
             logger.warning(
                 f"Could not import or register scheduler from module {name}: {e}"

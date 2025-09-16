@@ -186,7 +186,40 @@ This step-by-step process is the "heartbeat" of the SDE:
 
 ---
 
-## **6.0 Core Data Structures**
+## **6.0 Adding New Components (Challenges, Models, Schedulers)**
+
+The SDE uses an automatic discovery mechanism to find and register components. To add a new component, you simply need to add a new Python file to the appropriate directory and define your component using a specific variable name.
+
+### **Adding a New Challenge**
+
+1.  Create a new file in the `src/sde/challenges/` directory (e.g., `my_new_challenge.py`).
+2.  In this file, define a `CHALLENGE` variable that holds a `DatasetDefinition` object. You can use the `create_image_classification_challenge` factory in `src/sde/challenges/factory.py` to help with this.
+
+**Example:**
+```python
+# src/sde/challenges/my_new_challenge.py
+from torchvision import datasets, transforms
+from sde.challenges.factory import create_image_classification_challenge
+
+CHALLENGE = create_image_classification_challenge(
+    name="MyNewChallenge",
+    ...
+)
+```
+
+### **Adding a New Model**
+
+1.  Create a new file in the `src/sde/models/` directory (e.g., `my_new_model.py`).
+2.  In this file, define a `MODEL` variable that holds a `ModelDefinition` object.
+
+### **Adding a New Scheduler**
+
+1.  Create a new file in the `src/sde/exploration/` directory.
+2.  Define a class that inherits from `AdaptiveScheduler`. The discovery mechanism will automatically register it.
+
+---
+
+## **7.0 Core Data Structures**
 
 This section outlines the key data structures from `sde/core/domain.py` that define the state of the application.
 

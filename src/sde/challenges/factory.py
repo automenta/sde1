@@ -6,7 +6,7 @@ from torchvision.transforms import Compose
 from sde.core.definitions import DatasetDefinition
 from sde.core.definitions import DatasetType
 
-from .utils import create_train_val_dataloaders
+from ..data_utils import create_train_val_dataloaders
 
 
 def create_image_classification_challenge(
@@ -17,6 +17,8 @@ def create_image_classification_challenge(
     input_shape: tuple,
     output_shape: int,
     data_dir: str,
+    version: str = "0.1.0",
+    dependencies: dict = None,
 ) -> DatasetDefinition:
     """Factory function to create a standardized image classification DatasetDefinition.
 
@@ -52,7 +54,8 @@ def create_image_classification_challenge(
         loader_factory=loader_factory,
         input_shape=input_shape,
         output_shape=output_shape,
-        # For now, these are common to all our image classification tasks
         loss_function_factory=nn.CrossEntropyLoss,
         performance_metric_name="accuracy",
+        version=version,
+        dependencies=dependencies or {},
     )

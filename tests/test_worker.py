@@ -23,7 +23,7 @@ class MockModel(torch.nn.Module):
 class TestWorker(unittest.TestCase):
 
     @patch("sde.engine.worker.torch.save")
-    @patch("sde.challenges.utils.create_train_val_dataloaders")
+    @patch("sde.data_utils.create_train_val_dataloaders")
     def test_batch_size_hyperparameter_is_used(
         self, mock_create_dataloaders, mock_torch_save
     ):

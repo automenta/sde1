@@ -31,6 +31,9 @@ class DatasetType(Enum):
     TABULAR_REGRESSION = "TABULAR_REGRESSION"
 
 
+from typing import Dict
+
+
 @dataclass(frozen=True)
 class DatasetDefinition:
     """A metadata container for a dataset, treated as a static definition."""
@@ -43,6 +46,8 @@ class DatasetDefinition:
     output_shape: int  # Number of output classes or features
     loss_function_factory: Callable[[], Any]
     performance_metric_name: str  # e.g., "accuracy"
+    version: str = "0.1.0"
+    dependencies: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -54,6 +59,8 @@ class ModelDefinition:
     model_class: Type[SdeModel]
     model_type: DatasetType  # The type of dataset this model is designed for
     hyperparameter_schema: dict = field(default_factory=dict)
+    version: str = "0.1.0"
+    dependencies: Dict[str, str] = field(default_factory=dict)
 
 
 class InsightType(Enum):

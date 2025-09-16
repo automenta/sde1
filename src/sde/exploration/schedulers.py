@@ -8,7 +8,7 @@ from typing import Dict
 from typing import List
 from typing import Tuple
 
-from sde.challenges.utils import _generate_random_hyperparameters
+from sde.data_utils import _generate_random_hyperparameters
 from sde.core.domain import AlgorithmConfig
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus

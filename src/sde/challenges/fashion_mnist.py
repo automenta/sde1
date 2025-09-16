@@ -22,4 +22,6 @@ CHALLENGE = create_image_classification_challenge(
     input_shape=(1, 28, 28),
     output_shape=10,
     data_dir=get_user_cache_dir() / "fashion_mnist",
+    version="1.0.0",
+    dependencies={"torchvision": ">=0.15.0"},
 )

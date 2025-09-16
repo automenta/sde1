@@ -10,9 +10,9 @@ from .engine.orchestrator import ExperimentOrchestrator
 
 
 def main():
+    """Main entry point for running a command-line-based SDE experiment."""
     # --- Discover and register all components before doing anything else ---
     discover_and_register_components()
-    """Main entry point for running a command-line-based SDE experiment."""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
