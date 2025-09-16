@@ -118,21 +118,27 @@ class TestExperimentOrchestrator(unittest.TestCase):
         mock_emit.assert_any_call(expected_state)
 
     def test_dispatch_remove_algorithm_sends_command(self, MockProxy, mock_emit):
-        """Test removing an algorithm sends the correct command."""
+        """Test removing an algorithm sends the correct command and waits for event."""
         orchestrator = ExperimentOrchestrator()
         algo = AlgorithmConfig(id="algo1", name="TestAlgo", parameter_space={})
         orchestrator.experiment.algorithms["algo1"] = algo
+
+        # Dispatch the action
         orchestrator.dispatch(ActionType.REMOVE_ALGORITHM, {"algorithm_id": "algo1"})
 
-        self.assertNotIn("algo1", orchestrator.experiment.algorithms)
+        # Assert the state is NOT changed yet (no optimistic update)
+        self.assertIn("algo1", orchestrator.experiment.algorithms)
+
+        # Assert the correct command was sent to the engine
+        expected_payload = {"algorithm_id": "algo1", "algorithm_name": "TestAlgo"}
         orchestrator.engine_proxy.post_command.assert_called_once_with(
-            EngineCommand.REMOVE_ALGORITHM, {"algorithm_id": "algo1"}
+            EngineCommand.REMOVE_ALGORITHM, expected_payload
         )
 
-    def test_prune_trial_sends_command_and_updates_optimistically(
+    def test_prune_trial_sends_command_and_waits_for_event(
         self, MockProxy, mock_emit
     ):
-        """Test that pruning a trial sends a command and updates the UI optimistically."""
+        """Test that pruning a trial sends a command and waits for an event."""
         orchestrator = ExperimentOrchestrator()
         t1 = Trial(
             id="t1",
@@ -145,11 +151,11 @@ class TestExperimentOrchestrator(unittest.TestCase):
 
         orchestrator.dispatch(ActionType.MANUAL_PRUNE_TRIAL, {"trial_id": "t1"})
 
-        # The orchestrator should optimistically update its state for the UI
+        # The orchestrator should NOT optimistically update its state
         self.assertEqual(
-            orchestrator.experiment.trials["t1"].status, TrialStatus.PRUNED
+            orchestrator.experiment.trials["t1"].status, TrialStatus.ACTIVE
         )
-        # And it should send a command to the engine to do the real work
+        # But it should send a command to the engine
         orchestrator.engine_proxy.post_command.assert_called_once_with(
             EngineCommand.PRUNE_TRIAL, {"trial_id": "t1"}
         )

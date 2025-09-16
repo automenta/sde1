@@ -129,6 +129,22 @@ class ExperimentOrchestrator:
             self.log_message.emit(
                 {"level": "INFO", "message": "Experiment run has been stopped."}
             )
+        elif event_type == EngineEvent.ALGORITHM_REMOVED:
+            algo_id = payload["algorithm_id"]
+            if algo_id in self.experiment.algorithms:
+                del self.experiment.algorithms[algo_id]
+            # Also remove associated trials from the frontend state
+            self.experiment.trials = {
+                tid: t
+                for tid, t in self.experiment.trials.items()
+                if t.algorithm_name != payload["algorithm_name"]
+            }
+            self.log_message.emit(
+                {
+                    "level": "INFO",
+                    "message": f"Algorithm '{payload['algorithm_name']}' and its trials removed.",
+                }
+            )
         elif event_type == EngineEvent.OPERATION_FINISHED:
             self.operation_finished.emit(payload.get("message", ""))
         elif event_type == EngineEvent.LOG_MESSAGE:
@@ -181,14 +197,12 @@ class ExperimentOrchestrator:
         return True
 
     def handle_remove_algorithm(self, payload: Dict[str, Any]) -> bool:
-        """Remove an algorithm and instruct the engine to prune its trials."""
+        """Dispatch command to remove an algorithm and prune its trials."""
         algo_id = payload["algorithm_id"]
         if algo_id in self.experiment.algorithms:
             algo_name = self.experiment.algorithms[algo_id].name
-            del self.experiment.algorithms[algo_id]
-            self.engine_proxy.post_command(
-                EngineCommand.REMOVE_ALGORITHM, {"algorithm_id": algo_id}
-            )
+            command_payload = {"algorithm_id": algo_id, "algorithm_name": algo_name}
+            self.engine_proxy.post_command(EngineCommand.REMOVE_ALGORITHM, command_payload)
             self.log_message.emit(
                 {
                     "level": "INFO",
@@ -202,7 +216,7 @@ class ExperimentOrchestrator:
                     "message": f"Could not find algorithm with id {algo_id} to remove.",
                 }
             )
-        return True  # Optimistic update
+        return False  # Wait for ALGORITHM_REMOVED event
 
     def handle_update_param_space(self, payload: Dict[str, Any]) -> bool:
         """Update the hyperparameter space for an algorithm."""
@@ -279,8 +293,6 @@ class ExperimentOrchestrator:
     def handle_manual_prune_trial(self, payload: Dict[str, Any]) -> bool:
         """Dispatch a command to manually prune a single trial."""
         trial_id = payload["trial_id"]
-        if trial_id in self.experiment.trials:
-            self.experiment.trials[trial_id].status = TrialStatus.PRUNED
         self.engine_proxy.post_command(
             EngineCommand.PRUNE_TRIAL, {"trial_id": trial_id}
         )
@@ -290,7 +302,7 @@ class ExperimentOrchestrator:
                 "message": f"Dispatched command to prune trial {trial_id}.",
             }
         )
-        return True  # Optimistic update
+        return False  # Wait for TRIAL_UPDATED event
 
     def handle_manual_prioritize_trial(self, payload: Dict[str, Any]) -> bool:
         """Dispatch a command to manually increase a trial's priority."""
@@ -321,19 +333,11 @@ class ExperimentOrchestrator:
         return True
 
     def handle_start_run(self, payload: Dict[str, Any]) -> bool:
-        """Validate and dispatch the command to start the experiment run.
+        """Dispatch the command to start the experiment run.
 
         State mutation is deferred until the `RUN_STARTED` event is received.
+        The action is assumed to be valid by the time it reaches this handler.
         """
-        if not self.experiment.algorithms:
-            self.log_message.emit(
-                {
-                    "level": "ERROR",
-                    "message": "Cannot start run without at least one algorithm.",
-                }
-            )
-            return True  # No command sent, so no event expected.
-
         # Decouple execution settings from the experiment definition
         execution_settings = ExecutionSettings.from_dict(payload)
         command_payload = {

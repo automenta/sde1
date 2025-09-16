@@ -47,9 +47,11 @@ class TestSdeRuntimeEngine(unittest.TestCase):
         )
 
         # Initialize the engine's internal state by calling the start handler directly
-        self.runtime_engine._handle_start_run(
-            {"experiment_definition": self.experiment.to_dict()}
-        )
+        payload = {
+            "experiment_definition": self.experiment.to_dict(),
+            "execution_settings": self.experiment.execution_settings.to_dict(),
+        }
+        self.runtime_engine._handle_start_run(payload)
 
     def test_work_unit_error_sets_trial_to_failed(self):
         """Test that if a work unit result contains an error, the trial's status

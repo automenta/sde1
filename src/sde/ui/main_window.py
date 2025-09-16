@@ -19,10 +19,6 @@ from ..engine.orchestrator import ExperimentOrchestrator
 from ..models import AVAILABLE_MODELS
 from .dialog_service import DialogService
 from .view_controller import ViewController
-from .hyperparameters import HyperparameterDialog
-from .hyperparameters import HyperparameterViewerDialog
-from .hyperparameters import SimpleRunDialog
-from .hyperparameters import SpawnDialog
 from .results_pane import ResultsPane
 from .setup_pane import SetupPane
 from .view_model import ExperimentViewModel
@@ -41,9 +37,11 @@ class MainWindow(QMainWindow):
 
         # --- Backend and ViewModel ---
         self.orchestrator = ExperimentOrchestrator()
-        self.view_controller = ViewController(self.orchestrator)
         self.view_model = ExperimentViewModel(self.style())
         self.dialog_service = DialogService(self)
+        self.view_controller = ViewController(
+            self.orchestrator, self.view_model, self.dialog_service
+        )
 
         self._init_ui()
         self._connect_signals()
@@ -113,80 +111,22 @@ class MainWindow(QMainWindow):
         self._update_all_widgets()
 
     def start_experiment(self, settings: dict):
-        """Starts an experiment based on the mode selected in the SetupPane."""
-        run_mode = settings.get("run_mode")
-        if run_mode == "Simple":
-            self.start_simple_experiment(settings)
-        elif run_mode == "Tune Hyperparameters":
-            self.open_tuning_dialog(settings)
-        else:
-            self.append_log_message(
-                {"level": "ERROR", "message": f"Unknown run mode: {run_mode}"}
-            )
-
-    def start_simple_experiment(self, settings: dict):
-        """Handles the 'Simple' run mode by showing the SimpleRunDialog."""
-        dataset_name, selected_models_names = self.setup_pane.get_experiment_settings()
-        if not dataset_name or not selected_models_names:
+        """Starts an experiment by delegating to the ViewController."""
+        dataset_name, selected_models = self.setup_pane.get_experiment_settings()
+        if not dataset_name or not selected_models:
             self.dialog_service.show_warning(
                 "Missing Information",
                 "Please select a dataset and at least one model.",
             )
             return
 
-        result, custom_hparams = self.dialog_service.show_simple_run_dialog(
-            selected_models_names
-        )
-
-        if result is None:
-            self.append_log_message(
-                {"level": "INFO", "message": "Experiment start cancelled by user."}
-            )
-            return
-
-        if custom_hparams:
-            self.append_log_message(
-                {
-                    "level": "INFO",
-                    "message": "Starting run with custom hyperparameters.",
-                }
-            )
-        else:
-            self.append_log_message(
-                {
-                    "level": "INFO",
-                    "message": "Starting run with default hyperparameters.",
-                }
-            )
-
         self.append_log_message(
             {"level": "INFO", "message": f"Configuring experiment on '{dataset_name}'"}
         )
         self._clear_previous_experiment()
-        self.view_controller.start_simple_experiment(
-            settings, dataset_name, selected_models_names, custom_hparams
+        self.view_controller.initiate_experiment_start(
+            settings, dataset_name, selected_models
         )
-
-    def open_tuning_dialog(self, settings: dict):
-        """Opens the tuning dialog and configures the experiment via the orchestrator."""
-        dataset_name, selected_models_names = self.setup_pane.get_experiment_settings()
-        if not dataset_name or not selected_models_names:
-            self.dialog_service.show_warning(
-                "Warning",
-                "Please select a dataset and at least one model to tune.",
-            )
-            return
-
-        config = self.dialog_service.show_tuning_dialog(selected_models_names)
-        if not config:
-            return
-
-        self.append_log_message(
-            {"level": "INFO", "message": f"Configuring experiment on '{dataset_name}'"}
-        )
-        self._clear_previous_experiment()
-
-        self.view_controller.start_tuning_experiment(settings, dataset_name, config)
 
     # --- UI Update and State Management ---
 
@@ -205,17 +145,6 @@ class MainWindow(QMainWindow):
         self.results_pane.clear_all()
         self.setup_pane.clear_algorithms_table()
 
-    def _create_default_param_space(self, model_def: dict) -> dict:
-        """Creates a detailed, default parameter space for a given model,
-        preserving properties like 'scale' for random sampling.
-        """
-        param_space = {}
-        for param_group in model_def.get("hyperparameter_schema", {}).values():
-            for param_name, properties in param_group.items():
-                # Pass the whole dictionary of properties to the backend
-                param_space[param_name] = properties.copy()
-        return param_space
-
     # --- Event Handlers and Slots ---
 
     def on_trial_selected(self, trial_id: str):
@@ -224,10 +153,8 @@ class MainWindow(QMainWindow):
         self.results_pane.update_plot_highlight(highlight_ids)
 
     def on_trial_double_clicked(self, trial_id: str):
-        """Handles double-clicking a trial to show its hyperparameters."""
-        trial = self.view_model.trials.get(trial_id)
-        if trial:
-            self.dialog_service.show_hyperparameter_viewer(trial.hyperparameters)
+        """Delegates trial double-click to the ViewController."""
+        self.view_controller.show_trial_hyperparameters(trial_id)
 
     def on_insight_selected(self, highlight_ids: set):
         """Handles insight selection from the results pane."""
@@ -241,42 +168,14 @@ class MainWindow(QMainWindow):
         self.results_pane.append_log_message(log_data)
 
     def add_models_to_run(self):
-        """Adds newly selected models to an already running experiment."""
+        """Delegates adding models to the ViewController."""
         existing_algo_names = {
             algo.name for algo in self.view_model.algorithms.values()
         }
         newly_selected_models = self.setup_pane.get_newly_selected_models(
             existing_algo_names
         )
-
-        if not newly_selected_models:
-            self.append_log_message(
-                {"level": "INFO", "message": "No new models selected to add."}
-            )
-            return
-
-        num_trials = self.dialog_service.show_add_trials_dialog(
-            len(newly_selected_models)
-        )
-
-        if not num_trials:
-            self.append_log_message(
-                {"level": "INFO", "message": "Add models operation cancelled by user."}
-            )
-            return
-
-        self.append_log_message(
-            {
-                "level": "INFO",
-                "message": f"Adding {num_trials} trials for new models: {', '.join(newly_selected_models)}",
-            }
-        )
-        for model_name in newly_selected_models:
-            model_def = AVAILABLE_MODELS[model_name]
-            param_space = self._create_default_param_space(model_def)
-            self.view_controller.add_models_to_run(
-                model_name, param_space, num_trials
-            )
+        self.view_controller.initiate_add_models_to_run(newly_selected_models)
 
     def remove_algorithm(self, algorithm_id: str):
         """Dispatches an action to remove an algorithm from the experiment."""
@@ -331,14 +230,8 @@ class MainWindow(QMainWindow):
         self.view_controller.prioritize_trial(trial_id)
 
     def spawn_trial(self, trial_id: str):
-        """Opens a dialog to edit hyperparameters and spawn a new trial."""
-        source_trial = self.view_model.trials.get(trial_id)
-        if not source_trial:
-            return
-
-        new_hparams = self.dialog_service.show_spawn_dialog(source_trial.hyperparameters)
-        if new_hparams:
-            self.view_controller.spawn_trial(trial_id, new_hparams)
+        """Delegates spawning a trial to the ViewController."""
+        self.view_controller.initiate_spawn_trial(trial_id)
 
     def request_state_update(self):
         """Dispatches an action to request a full state update from the orchestrator."""

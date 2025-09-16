@@ -89,9 +89,12 @@ class TestResumeLogic(unittest.TestCase):
         runtime_engine = SdeRuntimeEngine(event_callback=lambda x, y: None)
 
         # 5. Initialize the engine by sending the START_RUN command
-        runtime_engine._handle_start_run(
-            {"experiment_definition": experiment.to_dict(), "start_paused": True}
-        )
+        payload = {
+            "experiment_definition": experiment.to_dict(),
+            "execution_settings": experiment.execution_settings.to_dict(),
+            "start_paused": True,
+        }
+        runtime_engine._handle_start_run(payload)
 
         # 6. Check that the rehydration method was called on the scheduler
         mock_adaptive_scheduler.rehydrate_work_units.assert_called_once()
