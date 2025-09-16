@@ -1,7 +1,7 @@
 import uuid
+from sde.core.definitions import DatasetType, Insight, InsightType
 from sde.core.domain import (
     AlgorithmConfig,
-    DatasetType,
     ExecutionSettings,
     Experiment,
     ExperimentStatus,
@@ -43,13 +43,19 @@ def test_experiment_serialization_roundtrip():
         results={"accuracy": [(1, 0.5), (2, 0.6)]},
     )
 
+    original_insight = Insight(
+        type=InsightType.PERFORMANCE_CROSSOVER,
+        content="Test Insight",
+        trial_ids=["trial_1"],
+    )
+
     original_experiment = Experiment(
         id=f"exp_{uuid.uuid4().hex[:8]}",
         status=ExperimentStatus.RUNNING,
-        challenge={"name": "CIFAR10", "type": DatasetType.IMAGE_CLASSIFICATION},
+        challenge={"name": "CIFAR10", "type": "IMAGE_CLASSIFICATION"},
         algorithms={"algo_1": original_algo},
         trials={"trial_1": original_trial},
-        insights=[{"type": "TestInsight", "content": "Test"}],
+        insights=[original_insight],
         adaptive_policy="Hyperband",
         patience_budget={"max_epochs": 100},
         execution_settings=original_settings,

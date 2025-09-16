@@ -10,8 +10,7 @@ import torch
 import torch.optim as optim
 
 from sde.config import get_checkpoints_dir
-from sde.core.domain import DatasetDefinition
-from sde.core.domain import ModelDefinition
+from sde.core.definitions import DatasetDefinition, ModelDefinition
 from sde.core.domain import Trial
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType

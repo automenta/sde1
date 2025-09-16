@@ -1,65 +1,10 @@
 import dataclasses
 import uuid
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
-from typing import Callable
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import Tuple
-from typing import Type
+from typing import Any, Dict, List, Optional, Tuple
 
-import torch.nn as nn
-
-# --- Foundational Definitions (from former types.py) ---
-
-
-class SdeModel(nn.Module):
-    """Base class for all models in the Scientific Discovery Engine.
-    It standardizes the model interface across different architectures.
-    """
-
-    def __init__(self, input_shape: Tuple[int, ...], output_shape: int, **kwargs):
-        super().__init__()
-        self.input_shape = input_shape
-        self.output_shape = output_shape
-
-
-class DatasetType(Enum):
-    """Enum to categorize the type of a dataset.
-    This is used to ensure that models are only used with compatible datasets.
-    """
-
-    IMAGE_CLASSIFICATION = "IMAGE_CLASSIFICATION"
-    TABULAR_REGRESSION = "TABULAR_REGRESSION"
-
-
-@dataclass(frozen=True)
-class DatasetDefinition:
-    """A metadata container for a dataset, treated as a static definition."""
-
-    name: str
-    type: DatasetType
-    description: str
-    loader_factory: Callable[..., Tuple[Any, Any]]  # Returns (train, val) loaders
-    input_shape: Tuple[int, ...]  # e.g., (1, 28, 28) for MNIST
-    output_shape: int  # Number of output classes or features
-    loss_function_factory: Callable[[], Any]
-    performance_metric_name: str  # e.g., "accuracy"
-
-
-@dataclass(frozen=True)
-class ModelDefinition:
-    """A metadata container for a model/algorithm, treated as a static definition."""
-
-    name: str
-    description: str
-    model_class: Type[SdeModel]
-    model_type: DatasetType  # The type of dataset this model is designed for
-    hyperparameter_schema: dict = field(default_factory=dict)
-
+from .definitions import Insight
 
 # --- Core Runtime Engine & Experiment State ---
 
@@ -192,11 +137,13 @@ class Experiment:
 
     # Runtime State: What is HAPPENING in the experiment
     trials: Dict[str, Trial] = field(default_factory=dict)
-    insights: List[Dict[str, Any]] = field(default_factory=list)
+    insights: List[Insight] = field(default_factory=list)
 
     # Strategy & Constraints: HOW the experiment is run
     adaptive_policy: str = "SuccessiveHalving"
     patience_budget: Optional[Dict[str, int]] = None
+    execution_settings: Optional[ExecutionSettings] = None
+    scheduler_state: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Serializes the entire experiment state to a dictionary."""
@@ -206,9 +153,13 @@ class Experiment:
             "challenge": self.challenge,
             "algorithms": {k: v.to_dict() for k, v in self.algorithms.items()},
             "trials": {k: v.to_dict() for k, v in self.trials.items()},
-            "insights": self.insights,
+            "insights": [insight.to_dict() for insight in self.insights],
             "adaptive_policy": self.adaptive_policy,
             "patience_budget": self.patience_budget,
+            "execution_settings": self.execution_settings.to_dict()
+            if self.execution_settings
+            else None,
+            "scheduler_state": self.scheduler_state,
         }
 
     @classmethod
@@ -226,6 +177,15 @@ class Experiment:
             d_copy["trials"] = {
                 k: Trial.from_dict(v) for k, v in d_copy["trials"].items()
             }
+        if "insights" in d_copy and d_copy["insights"] is not None:
+            d_copy["insights"] = [
+                Insight.from_dict(v) for v in d_copy["insights"]
+            ]
+        if "execution_settings" in d_copy and d_copy["execution_settings"] is not None:
+            d_copy["execution_settings"] = ExecutionSettings.from_dict(
+                d_copy["execution_settings"]
+            )
+
         known_fields = {f.name for f in dataclasses.fields(cls)}
         filtered_dict = {k: v for k, v in d_copy.items() if k in known_fields}
         return cls(**filtered_dict)

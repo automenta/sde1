@@ -109,11 +109,15 @@ class SdeRuntimeEngine:
             return
 
         exp_def = payload.get("experiment_definition", {})
-        exec_settings_dict = payload.get("execution_settings", {})
+        exec_settings_dict = exp_def.get("execution_settings")
         start_paused = payload.get("start_paused", False)
 
         trials = [Trial.from_dict(t) for t in exp_def.get("trials", {}).values()]
-        execution_settings = ExecutionSettings.from_dict(exec_settings_dict)
+        execution_settings = (
+            ExecutionSettings.from_dict(exec_settings_dict)
+            if exec_settings_dict
+            else None
+        )
 
         # 1. Initialize all core components from the definition
         self._initialize_runtime(
@@ -143,7 +147,10 @@ class SdeRuntimeEngine:
             pending_trials = [
                 t for t in all_trials.values() if t.status == TrialStatus.PENDING
             ]
-            work_units = self.adaptive_scheduler.get_initial_work_units(pending_trials)
+            work_units, scheduler_state = self.adaptive_scheduler.get_initial_work_units(
+                pending_trials, exp_def.get("scheduler_state", {})
+            )
+            exp_def["scheduler_state"] = scheduler_state
 
         for work_unit in work_units:
             self._put_work_in_queue(work_unit)

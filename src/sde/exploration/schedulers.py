@@ -36,7 +36,9 @@ class AdaptiveScheduler(ABC):
         ...
 
     @abstractmethod
-    def get_initial_work_units(self, trials: List[Trial]) -> List[WorkUnit]:
+    def get_initial_work_units(
+        self, trials: List[Trial], scheduler_state: Dict[str, Any]
+    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
         """Returns the first batch of WorkUnits to start an experiment."""
         ...
 
@@ -108,9 +110,14 @@ class SuccessiveHalvingScheduler(AdaptiveScheduler):
                 )
         return work_units
 
-    def get_initial_work_units(self, trials: List[Trial]) -> List[WorkUnit]:
+    def get_initial_work_units(
+        self, trials: List[Trial], scheduler_state: Dict[str, Any]
+    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
         """Schedules the first epoch for all pending trials in the experiment."""
-        return self.generate_work_units_for_new_trials(trials, {t.id: t for t in trials})
+        work_units = self.generate_work_units_for_new_trials(
+            trials, {t.id: t for t in trials}
+        )
+        return work_units, scheduler_state
 
     def rehydrate_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
         """For SHA, rehydration is simple: resume any trial that was active."""
@@ -290,11 +297,14 @@ class HyperbandScheduler(AdaptiveScheduler):
             )
         return work_units
 
-    def get_initial_work_units(self, trials: List[Trial]) -> List[WorkUnit]:
+    def get_initial_work_units(
+        self, trials: List[Trial], scheduler_state: Dict[str, Any]
+    ) -> Tuple[List[WorkUnit], Dict[str, Any]]:
         """Schedules the first epoch for all pending trials in the experiment."""
-        return self.generate_work_units_for_new_trials(
+        work_units = self.generate_work_units_for_new_trials(
             trials, {t.id: t for t in trials}
         )
+        return work_units, scheduler_state
 
     def rehydrate_work_units(self, trials: Dict[str, Trial]) -> List[WorkUnit]:
         """Schedules work for all trials that were active. State is on the trials."""
@@ -310,6 +320,10 @@ class HyperbandScheduler(AdaptiveScheduler):
         self, finished_trial: Trial, all_trials: Dict[str, Trial]
     ) -> List[WorkUnit]:
         """Routes the trial to the correct bracket and applies SHA logic within it."""
+        if finished_trial.current_epoch >= self.max_resource:
+            finished_trial.status = TrialStatus.COMPLETED
+            return []
+
         s_val = finished_trial.tags.get("hyperband_bracket_s")
         if s_val is None or finished_trial.status != TrialStatus.ACTIVE:
             return []  # This trial is not managed by this scheduler or has been pruned/completed.

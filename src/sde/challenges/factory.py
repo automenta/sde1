@@ -1,7 +1,7 @@
 from functools import partial
 
 import torch.nn as nn
-from sde.core.domain import DatasetDefinition, DatasetType
+from sde.core.definitions import DatasetDefinition, DatasetType
 from torchvision.transforms import Compose
 
 from .utils import create_train_val_dataloaders

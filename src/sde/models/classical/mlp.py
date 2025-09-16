@@ -1,33 +1,25 @@
 import numpy as np
 import torch.nn as nn
 
-from sde.core.domain import DatasetType
-from sde.core.domain import ModelDefinition
+from sde.core.definitions import DatasetType, ModelDefinition, SdeModel
 
 # --- 1. The PyTorch Model ---
 
 
-class MLP(nn.Module):
+class MLP(SdeModel):
     """A simple Multi-Layer Perceptron (MLP) for image classification."""
 
     def __init__(
         self,
+        input_shape,
+        output_shape,
         hidden_sizes=[512, 256],
         dropout_rate=0.2,
-        input_shape=None,
-        output_shape=None,
         **kwargs,
     ):
-        super().__init__()
+        super().__init__(input_shape, output_shape, **kwargs)
 
-        if input_shape:
-            input_size = int(np.prod(input_shape))
-        else:
-            input_size = 28 * 28  # Default for MNIST
-
-        if not output_shape:
-            output_shape = 10  # Default for MNIST
-
+        input_size = int(np.prod(self.input_shape))
         self.input_size = input_size
         layers = []
         in_size = input_size

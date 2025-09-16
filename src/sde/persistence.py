@@ -3,7 +3,7 @@ import logging
 import os
 import traceback
 
-from .core.types import Experiment
+from .core.domain import Experiment
 
 logger = logging.getLogger(__name__)
 
