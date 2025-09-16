@@ -2,25 +2,17 @@ import sys
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtWidgets import QDialog
-from PyQt6.QtWidgets import QFileDialog
 from PyQt6.QtWidgets import QHBoxLayout
-from PyQt6.QtWidgets import QInputDialog
 from PyQt6.QtWidgets import QMainWindow
-from PyQt6.QtWidgets import QMessageBox
 from PyQt6.QtWidgets import QProgressDialog
 from PyQt6.QtWidgets import QWidget
 
-from ..challenges import AVAILABLE_DATASETS
-
 # Import backend and UI components
-from ..core.actions import ActionType
 from ..engine.orchestrator import ExperimentOrchestrator
-from ..models import AVAILABLE_MODELS
 from .dialog_service import DialogService
-from .view_controller import ViewController
 from .results_pane import ResultsPane
 from .setup_pane import SetupPane
+from .view_controller import ViewController
 from .view_model import ExperimentViewModel
 
 

@@ -48,10 +48,13 @@ class TestCheckpointingAndResume(unittest.TestCase):
         random.seed(42)
 
         # 1. Setup: Use a real model (MLP) and dataset (MNIST) for an integration test.
-        from sde.core.definitions import ModelDefinition, DatasetType
-        from sde.models.classical.mlp import MLP
+        from torchvision import datasets
+        from torchvision import transforms
+
         from sde.challenges.factory import create_image_classification_challenge
-        from torchvision import datasets, transforms
+        from sde.core.definitions import DatasetType
+        from sde.core.definitions import ModelDefinition
+        from sde.models.classical.mlp import MLP
 
         model_def = ModelDefinition(
             name="MLP",
@@ -59,7 +62,9 @@ class TestCheckpointingAndResume(unittest.TestCase):
             model_class=MLP,
             model_type=DatasetType.IMAGE_CLASSIFICATION,
         )
-        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
+        transform = transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+        )
         dataset_def = create_image_classification_challenge(
             name="MNIST",
             dataset_class=datasets.MNIST,

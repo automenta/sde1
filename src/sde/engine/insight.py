@@ -25,11 +25,12 @@ class Insight:
 
 
 class InsightEngine:
-    """Analyzes the state of an experiment to find and report insights."""
+    """Analyze the state of an experiment to find and report insights."""
 
     def __init__(
         self, trials: Dict[str, Trial], primary_metric: str, higher_is_better: bool
     ):
+        """Initialize the insight engine."""
         self.trials = trials
         self.primary_metric = primary_metric
         self.higher_is_better = higher_is_better
@@ -40,6 +41,7 @@ class InsightEngine:
         self._fired_correlation_insights: Set[str] = set()
 
     def analyze_on_epoch(self, active_trial: Trial) -> List[Insight]:
+        """Run all insight detectors that should trigger after each epoch."""
         detectors = [
             self._detect_best_performer,
             self._detect_performance_crossover,
@@ -49,6 +51,7 @@ class InsightEngine:
         return self._run_detectors(detectors, active_trial)
 
     def analyze_on_finish(self, finished_trial: Trial) -> List[Insight]:
+        """Run all insight detectors that should trigger after a trial finishes."""
         detectors = [self._detect_hyperparameter_correlation]
         return self._run_detectors(detectors, finished_trial)
 
@@ -80,8 +83,12 @@ class InsightEngine:
         ) or (not self.higher_is_better and finished_trial_perf < current_best_perf)
         if is_new_best and trial.id != self.current_best_trial_id:
             self.current_best_trial_id = trial.id
+            message = (
+                f"New best performer! Trial {trial.id[:6]} has reached "
+                f"{finished_trial_perf:.4f} {self.primary_metric}."
+            )
             return Insight(
-                message=f"New best performer! Trial {trial.id[:6]} has reached {finished_trial_perf:.4f} {self.primary_metric}.",
+                message=message,
                 type="BEST_PERFORMER",
                 trial_ids=[trial.id],
             )
@@ -139,9 +146,13 @@ class InsightEngine:
                     )
                     if crossover_key not in self._fired_crossover_insights:
                         self._fired_crossover_insights.add(crossover_key)
+                        message = (
+                            f"Performance Crossover: Trial {winner_id[:6]} has "
+                            f"overtaken {loser_id[:6]} at epoch {current_epoch}."
+                        )
                         insights.append(
                             Insight(
-                                message=f"Performance Crossover: Trial {winner_id[:6]} has overtaken {loser_id[:6]} at epoch {current_epoch}.",
+                                message=message,
                                 type="PERFORMANCE_CROSSOVER",
                                 trial_ids=[active_trial.id, other_trial.id],
                             )
@@ -167,8 +178,12 @@ class InsightEngine:
             if improvement < relative_tolerance:
                 if trial.id not in self._fired_plateau_insights:
                     self._fired_plateau_insights.add(trial.id)
+                    message = (
+                        f"Warning: Trial {trial.id[:6]}'s performance may have "
+                        "plateaued."
+                    )
                     return Insight(
-                        message=f"Warning: Trial {trial.id[:6]}'s performance may have plateaued.",
+                        message=message,
                         type="PLATEAU",
                         trial_ids=[trial.id],
                     )
@@ -235,7 +250,12 @@ class InsightEngine:
                     val = params.get(hparam_name)
                     if val is None:
                         continue
-                    group_name = "low" if val <= bins[0] else "high" if val > bins[1] else "medium"  # type: ignore
+                    if val <= bins[0]:
+                        group_name = "low"
+                    elif val > bins[1]:
+                        group_name = "high"
+                    else:
+                        group_name = "medium"
                     groups.setdefault(group_name, []).append(trial_id)
             except IndexError:
                 return {}
@@ -288,9 +308,15 @@ class InsightEngine:
             )
             if relative_diff > significance_threshold:
                 all_involved_ids = [tid for g in groups.values() for tid in g]
+                message = (
+                    f"Correlation found for '{hparam_name}': group "
+                    f"'{best_group_name}' (avg perf: {best_group_perf:.3f}) "
+                    f"outperforms group '{worst_group_name}' "
+                    f"(avg perf: {worst_group_perf:.3f})."
+                )
                 insights.append(
                     Insight(
-                        message=f"Correlation found for '{hparam_name}': group '{best_group_name}' (avg perf: {best_group_perf:.3f}) outperforms group '{worst_group_name}' (avg perf: {worst_group_perf:.3f}).",
+                        message=message,
                         type="HYPERPARAM_CORRELATION",
                         trial_ids=all_involved_ids,
                     )
@@ -333,8 +359,13 @@ class InsightEngine:
             ) or (not self.higher_is_better and z_score > z_score_threshold)
             if is_poor_outlier:
                 self._fired_poor_start_insights.add(trial.id)
+                message = (
+                    f"Warning: Trial {trial.id[:6]} is performing poorly "
+                    f"({own_perf:.4f}) compared to its peers (avg: {mean_perf:.4f}) "
+                    "after the first epoch."
+                )
                 return Insight(
-                    message=f"Warning: Trial {trial.id[:6]} is performing poorly ({own_perf:.4f}) compared to its peers (avg: {mean_perf:.4f}) after the first epoch.",
+                    message=message,
                     type="POOR_INITIAL_PERFORMANCE",
                     trial_ids=[trial.id],
                 )

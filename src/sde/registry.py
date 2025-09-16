@@ -1,6 +1,7 @@
 from typing import Dict
 
-from .core.definitions import DatasetDefinition, ModelDefinition
+from .core.definitions import DatasetDefinition
+from .core.definitions import ModelDefinition
 from .exploration.schedulers import AdaptiveScheduler
 
 
@@ -16,7 +17,9 @@ class Registry:
         """Register a new challenge."""
         if challenge.name in self.challenges:
             # For now, we can just warn. In a real app, might want to raise an error.
-            print(f"Warning: Challenge '{challenge.name}' is already registered. Overwriting.")
+            print(
+                f"Warning: Challenge '{challenge.name}' is already registered. Overwriting."
+            )
         self.challenges[challenge.name] = challenge
 
     def register_model(self, model: ModelDefinition):

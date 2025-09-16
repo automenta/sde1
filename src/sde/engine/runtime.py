@@ -1,4 +1,5 @@
 """Module for the SDE runtime engine, the computational core."""
+
 import logging
 import queue
 import threading
@@ -10,8 +11,6 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
-from ..core.events import EngineCommand
-from ..core.events import EngineEvent
 from sde.core.domain import Challenge
 from sde.core.domain import ExecutionSettings
 from sde.core.domain import PatienceBudget
@@ -20,6 +19,8 @@ from sde.core.domain import TrialStatus
 from sde.core.domain import WorkUnit
 from sde.exploration.schedulers import AdaptiveScheduler
 
+from ..core.events import EngineCommand
+from ..core.events import EngineEvent
 from .compute_scheduler import ComputeScheduler
 from .datastore import DataStore
 from .experiment_serializer import ExperimentSerializer
@@ -128,6 +129,7 @@ class SdeRuntimeEngine:
         )
         challenge = Challenge.from_dict(exp_def.get("challenge"))
         from sde.registry import registry
+
         challenge_def = registry.get_challenge(challenge.name)
         patience_budget_dict = exp_def.get("patience_budget")
         patience_budget = (
@@ -288,7 +290,9 @@ class SdeRuntimeEngine:
             # Re-implement the final part of on_engine_event from the orchestrator
             # This is a bit of a hack, the whole flow needs rethinking.
             # A new event EXPERIMENT_LOADED would be better.
-            self._emit_event(EngineEvent.EXPERIMENT_LOADED, {"experiment": experiment.to_dict()})
+            self._emit_event(
+                EngineEvent.EXPERIMENT_LOADED, {"experiment": experiment.to_dict()}
+            )
 
         except Exception as e:
             self._emit_event(
@@ -305,11 +309,18 @@ class SdeRuntimeEngine:
 
     def _process_command_queue(self):
         """Process all pending commands in the queue."""
+        command_handlers = {
+            EngineCommand.START_RUN: self._handle_start_run,
+            EngineCommand.STOP_RUN: self._handle_stop_run,
+            EngineCommand.PAUSE_RUN: self._handle_pause_run,
+            EngineCommand.RESUME_RUN: self._handle_resume_run,
+            EngineCommand.SAVE_EXPERIMENT: self._handle_save_experiment,
+            EngineCommand.LOAD_EXPERIMENT: self._handle_load_experiment,
+        }
         try:
             while not self.command_queue.empty():
                 command, payload = self.command_queue.get_nowait()
-                handler_name = f"_handle_{command.value.lower()}"
-                handler = getattr(self, handler_name, None)
+                handler = command_handlers.get(command)
                 if handler:
                     handler(payload)
                 else:
@@ -321,7 +332,10 @@ class SdeRuntimeEngine:
         """Get a batch of work units from the queue, respecting worker count and cancellations."""
         assert self.compute_scheduler is not None
         batch = []
-        while not self.work_queue.empty() and len(batch) < self.compute_scheduler.max_workers:
+        while (
+            not self.work_queue.empty()
+            and len(batch) < self.compute_scheduler.max_workers
+        ):
             try:
                 _, _, work_unit = self.work_queue.get_nowait()
                 if work_unit.trial_id in self._cancelled_trials:
@@ -353,25 +367,39 @@ class SdeRuntimeEngine:
 
             self._process_command_queue()
 
-            current_batch = self._get_work_batch()
+            if self._should_stop_or_wait():
+                break
 
-            if not current_batch:
-                if self._is_run_complete():
-                    logger.info("All trials are finished. Shutting down.")
-                    self._handle_stop_run({})
-                    break
-                threading.Event().wait(0.5)  # Wait before checking for work again
-                continue
-
-            results_iterator = self.compute_scheduler.run(current_batch)
-            for work_unit, result in results_iterator:
-                self._pause_event.wait()
-                if self._status in [RuntimeStatus.STOPPING, RuntimeStatus.STOPPED]:
-                    break
-                self._process_completed_work_unit(work_unit, result)
+            self._run_work_batch()
 
         self._status = RuntimeStatus.STOPPED
         logger.info("Runtime engine execution loop finished.")
+
+    def _should_stop_or_wait(self) -> bool:
+        """Check if the execution loop should stop or wait for more work."""
+        if not self.work_queue.empty():
+            return False
+
+        if self._is_run_complete():
+            logger.info("All trials are finished. Shutting down.")
+            self._handle_stop_run({})
+            return True
+
+        threading.Event().wait(0.5)  # Wait before checking for work again
+        return False
+
+    def _run_work_batch(self):
+        """Get a batch of work, run it, and process the results."""
+        current_batch = self._get_work_batch()
+        if not current_batch:
+            return
+
+        results_iterator = self.compute_scheduler.run(current_batch)
+        for work_unit, result in results_iterator:
+            self._pause_event.wait()
+            if self._status in [RuntimeStatus.STOPPING, RuntimeStatus.STOPPED]:
+                break
+            self._process_completed_work_unit(work_unit, result)
 
     def _handle_work_unit_error(self, trial: Trial, work_unit: WorkUnit, result: dict):
         """Handle a failed work unit, updating trial status and logging."""
@@ -420,13 +448,17 @@ class SdeRuntimeEngine:
 
         trial = self.datastore.get_trial(work_unit.trial_id)
         if not trial:
-            logger.warning(f"Could not find trial {work_unit.trial_id} to record result.")
+            logger.warning(
+                f"Could not find trial {work_unit.trial_id} to record result."
+            )
             return
         original_status = trial.status
 
         updated_trial = self.datastore.record_work_unit_result(work_unit, result)
         if not updated_trial:
-            logger.warning(f"Trial {work_unit.trial_id} disappeared before result recorded.")
+            logger.warning(
+                f"Trial {work_unit.trial_id} disappeared before result recorded."
+            )
             return
 
         if updated_trial.id in self._cancelled_trials:

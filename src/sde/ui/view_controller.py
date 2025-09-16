@@ -1,11 +1,7 @@
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject
 
-from ..challenges import AVAILABLE_DATASETS
 from ..core.actions import ActionType
 from ..engine.orchestrator import ExperimentOrchestrator
-from ..models import AVAILABLE_MODELS
-
-
 from ..registry import registry
 
 
@@ -24,9 +20,7 @@ class ViewController(QObject):
 
     # --- Experiment Lifecycle ---
 
-    def initiate_experiment_start(
-        self, settings, dataset_name, selected_models_names
-    ):
+    def initiate_experiment_start(self, settings, dataset_name, selected_models_names):
         """Orchestrates the process of starting a new experiment."""
         run_mode = settings.get("run_mode")
         if run_mode == "Simple":
@@ -71,7 +65,9 @@ class ViewController(QObject):
                 param_space = custom_hparams[model_name]
             else:
                 param_space = self._create_default_param_space(model_def)
-            algorithms_to_add.append({"name": model_name, "parameter_space": param_space})
+            algorithms_to_add.append(
+                {"name": model_name, "parameter_space": param_space}
+            )
 
         self._dispatch_experiment_start(settings, dataset_name, algorithms_to_add)
 
@@ -81,12 +77,13 @@ class ViewController(QObject):
         # This can be simplified for now, as the main goal is decoupling.
         # A full implementation would use the registry to get scheduler schemas.
         self.log_message.emit(
-            {"level": "WARN", "message": "Hyperparameter tuning UI is not fully refactored yet."}
+            {
+                "level": "WARN",
+                "message": "Hyperparameter tuning UI is not fully refactored yet.",
+            }
         )
 
-    def _dispatch_experiment_start(
-        self, settings, dataset_name, algorithms_to_add
-    ):
+    def _dispatch_experiment_start(self, settings, dataset_name, algorithms_to_add):
         challenge_def = registry.get_challenge(dataset_name)
         self.dispatch(
             ActionType.SET_CHALLENGE,

@@ -8,13 +8,14 @@ from sde.core.domain import TrialStatus
 
 class ActionValidator:
     """A dedicated class for validating actions against the current experiment state.
+
     This encapsulates the logic of which actions are permitted in which states.
     """
 
     @staticmethod
     def get_valid_actions(experiment: Experiment) -> Dict[str, Any]:
-        """
-        Inspects the current state and returns a structured dictionary of valid actions.
+        """Inspect the current state and return a structured dictionary of valid actions.
+
         e.g., {
             "global": ["ADD_ALGORITHM"],
             "algorithms": { "algo_1": ["UPDATE_PARAM_SPACE", "REMOVE_ALGORITHM"] },
@@ -92,47 +93,8 @@ class ActionValidator:
     def is_action_valid(
         action_type: str, payload: Dict[str, Any], valid_actions: Dict
     ) -> bool:
-        """Checks if a given action is present in the structured valid_actions dict.
-        This is a strict validator. An action is only considered valid if it
-        is explicitly listed in the `valid_actions` dictionary for the correct
-        context (global, per-algorithm, or per-trial). It follows a
-        "default-deny" policy.
-        """
-        # Global actions have no specific context key in their payload.
-        if (
-            "algorithm_id" not in payload
-            and "trial_id" not in payload
-            and "source_trial_id" not in payload
-        ):
-            return action_type in valid_actions.get("global", [])
+        """Check if a given action is present in the structured valid_actions dict.
 
-        # Algorithm-specific actions are scoped by 'algorithm_id'.
-        if "algorithm_id" in payload:
-            algo_id = payload["algorithm_id"]
-            return action_type in valid_actions.get("algorithms", {}).get(algo_id, [])
-
-        # Trial-specific actions are scoped by 'trial_id'.
-        if "trial_id" in payload:
-            trial_id = payload["trial_id"]
-            return action_type in valid_actions.get("trials", {}).get(trial_id, [])
-
-        # The 'SPAWN_SIMILAR_TRIAL' action is a special case scoped by
-        # 'source_trial_id'.
-        if "source_trial_id" in payload:
-            source_trial_id = payload["source_trial_id"]
-            return action_type in valid_actions.get("trials", {}).get(
-                source_trial_id, []
-            )
-
-        # If the payload format is unrecognized or the action is not found, deny it.
-        return False
-
-    @staticmethod
-    def is_action_valid(
-        action_type: str, payload: Dict[str, Any], valid_actions: Dict
-    ) -> bool:
-        """
-        Checks if a given action is present in the structured valid_actions dict.
         This is a strict validator that uses a "default-deny" policy.
         """
         # Determine context from payload keys

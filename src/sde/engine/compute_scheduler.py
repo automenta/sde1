@@ -9,10 +9,11 @@ from typing import Iterator
 from typing import List
 from typing import Tuple
 
+from sde.core.definitions import DatasetDefinition
+from sde.core.definitions import ModelDefinition
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
 from sde.core.domain import WorkUnit
-from sde.core.definitions import ModelDefinition, DatasetDefinition
 from sde.engine.datastore import DataStore
 from sde.registry import registry
 
@@ -111,12 +112,50 @@ class ComputeScheduler:
     def run(
         self, work_units: List[WorkUnit]
     ) -> Iterator[Tuple[WorkUnit, Dict[str, Any]]]:
-        """Submits work units to the executor and yields results as they complete.
-        This is a generator function.
-        """
+        """Submit work units to the executor and yield results as they complete."""
         if not self._is_running or not self.executor:
             raise RuntimeError("Scheduler must be started before running work.")
 
+        submitted_futures = self._submit_work_units(work_units)
+
+        for future in concurrent.futures.as_completed(submitted_futures):
+            if not self._is_running:
+                break
+
+            work_unit = self.active_futures.get(future)
+            if not work_unit:
+                logger.warning(
+                    f"Future {future} completed but was not in the active map, "
+                    f"likely cancelled."
+                )
+                continue
+
+            try:
+                _, result = future.result(timeout=self.work_unit_timeout)
+                yield work_unit, result
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    f"Work unit for trial {work_unit.trial_id} timed out after "
+                    f"{self.work_unit_timeout} seconds."
+                )
+                yield work_unit, {
+                    "error": (
+                        f"Work unit timed out after {self.work_unit_timeout} "
+                        "seconds."
+                    )
+                }
+            except concurrent.futures.CancelledError:
+                logger.warning(
+                    f"Work unit for trial {work_unit.trial_id} was cancelled."
+                )
+            except Exception:
+                yield work_unit, {"error": traceback.format_exc()}
+            finally:
+                self._cleanup_future(future)
+
+    def _submit_work_units(self, work_units: List[WorkUnit]) -> List:
+        """Submit a list of work units to the executor and return the futures."""
+        futures = []
         with self._lock:
             for work_unit in work_units:
                 trial = self.datastore.get_trial(work_unit.trial_id)
@@ -134,49 +173,14 @@ class ComputeScheduler:
                 )
                 self.active_futures[future] = work_unit
                 self.trial_to_futures.setdefault(trial.id, []).append(future)
+                futures.append(future)
+        return futures
 
-        # Use a copy of the keys for safe iteration, as the dictionary can be
-        # modified by cancel_work_for_trial
-        active_futures_copy = list(self.active_futures.keys())
-        for future in concurrent.futures.as_completed(active_futures_copy):
-            if not self._is_running:
-                break
-
-            work_unit = self.active_futures.get(future)
-            if not work_unit:
-                # This can happen if the future was cancelled and removed
-                logger.warning(
-                    f"Future {future} completed but was not in the active map, "
-                    f"likely cancelled."
-                )
-                continue
-
-            try:
-                # Add a timeout to the result call
-                _, result = future.result(timeout=self.work_unit_timeout)
-                yield work_unit, result
-            except concurrent.futures.TimeoutError:
-                logger.warning(
-                    f"Work unit for trial {work_unit.trial_id} timed out after "
-                    f"{self.work_unit_timeout} seconds."
-                )
-                yield work_unit, {
-                    "error": f"Work unit timed out after {self.work_unit_timeout} seconds."
-                }
-            except concurrent.futures.CancelledError:
-                logger.warning(
-                    f"Work unit for trial {work_unit.trial_id} was cancelled."
-                )
-                continue
-            except Exception:
-                yield work_unit, {"error": traceback.format_exc()}
-            finally:
-                # Clean up finished future from our tracking maps
-                with self._lock:
-                    if future in self.active_futures:
-                        del self.active_futures[future]
-                    if work_unit.trial_id in self.trial_to_futures:
-                        if future in self.trial_to_futures[work_unit.trial_id]:
-                            self.trial_to_futures[work_unit.trial_id].remove(future)
-                        if not self.trial_to_futures[work_unit.trial_id]:
-                            del self.trial_to_futures[work_unit.trial_id]
+    def _cleanup_future(self, future: concurrent.futures.Future):
+        """Remove a completed or cancelled future from all tracking maps."""
+        with self._lock:
+            work_unit = self.active_futures.pop(future, None)
+            if work_unit and work_unit.trial_id in self.trial_to_futures:
+                self.trial_to_futures[work_unit.trial_id].remove(future)
+                if not self.trial_to_futures[work_unit.trial_id]:
+                    del self.trial_to_futures[work_unit.trial_id]

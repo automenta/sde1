@@ -8,12 +8,32 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
+from dataclasses_json import DataClassJsonMixin
 from dataclasses_json import Undefined
+from dataclasses_json import config
 from dataclasses_json import dataclass_json
 
 from ..config import Defaults
 from .definitions import DatasetType
 from .definitions import Insight
+
+
+# --- Base classes for type hinting ---
+@dataclass_json(undefined=Undefined.EXCLUDE)
+@dataclass(frozen=True)
+class JsonSerializable(DataClassJsonMixin):
+    """Base class for all serializable domain objects."""
+
+    pass
+
+
+@dataclass_json(undefined=Undefined.EXCLUDE)
+@dataclass
+class MutableJsonSerializable(DataClassJsonMixin):
+    """Base class for all mutable serializable domain objects."""
+
+    pass
+
 
 # --- Core Runtime Engine & Experiment State ---
 
@@ -26,9 +46,8 @@ class WorkUnitType(Enum):
     EVALUATE = "EVALUATE"
 
 
-@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass(frozen=True)
-class WorkUnit:
+class WorkUnit(JsonSerializable):
     """The smallest schedulable quantum of work. This is a stateless, immutable task."""
 
     trial_id: str
@@ -47,9 +66,8 @@ class TrialStatus(Enum):
     FAILED = "FAILED"  # The trial terminated due to an unrecoverable error.
 
 
-@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass
-class Trial:
+class Trial(MutableJsonSerializable):
     """A container for the dynamic state and results of a single algorithm instance."""
 
     id: str
@@ -81,9 +99,8 @@ class ExperimentStatus(Enum):
     FAILED = "FAILED"  # The experiment terminated due to a critical error.
 
 
-@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass
-class AlgorithmConfig:
+class AlgorithmConfig(MutableJsonSerializable):
     """Configuration for an algorithm to be included in the experiment."""
 
     id: str
@@ -92,9 +109,8 @@ class AlgorithmConfig:
     is_active: bool = True
 
 
-@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass
-class ExecutionSettings:
+class ExecutionSettings(MutableJsonSerializable):
     """Settings that control the execution environment of the experiment."""
 
     num_trials_per_algo: int
@@ -103,18 +119,16 @@ class ExecutionSettings:
     work_unit_timeout_seconds: int
 
 
-@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass(frozen=True)
-class Challenge:
+class Challenge(JsonSerializable):
     """The definition of the problem domain for the experiment."""
 
     name: str
     type: DatasetType
 
 
-@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass(frozen=True)
-class PatienceBudget:
+class PatienceBudget(JsonSerializable):
     """A composite measure of the total resources a user is willing to invest."""
 
     wall_clock_time_seconds: Optional[int] = None
@@ -123,9 +137,8 @@ class PatienceBudget:
     worker_throttle_percent: int = 100
 
 
-@dataclass_json(undefined=Undefined.EXCLUDE)
 @dataclass
-class Experiment:
+class Experiment(MutableJsonSerializable):
     """The single, canonical data structure holding the entire application state.
     This object is managed exclusively by the ExperimentOrchestrator.
     """

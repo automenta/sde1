@@ -1,7 +1,7 @@
 import logging
-import os
 import time
 import traceback
+from typing import Any
 from typing import Dict
 from typing import Tuple
 from typing import Type
@@ -14,6 +14,7 @@ from sde.core.definitions import ModelDefinition
 from sde.core.domain import Trial
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
+
 from .trial_checkpoint_manager import TrialCheckpointManager
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -88,23 +89,12 @@ class Worker:
             # Return an error message that can be displayed in the UI log.
             return {"error": f"Execution failed in worker: {e}"}
 
-    def _load_or_create_model_and_optimizer(
-        self, trial: Trial
-    ) -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
-        """Initializes the model and optimizer, and loads state from a checkpoint if available."""
-        # 1. Create model and optimizer with specified hyperparameters
-        ModelClass = self.model_def.model_class
-        model_params = trial.hyperparameters.get("model_params", {})
-        model_kwargs = {
-            "input_shape": self.dataset_def.input_shape,
-            "output_shape": self.dataset_def.output_shape,
-            **model_params,
-        }
-        model = ModelClass(**model_kwargs).to(DEVICE)
-
-        optimizer_hparams = trial.hyperparameters.get("optimizer_params", {})
-        optimizer_name = optimizer_hparams.get("name", "Adam").lower()
-        optimizer_params = {k: v for k, v in optimizer_hparams.items() if k != "name"}
+    def _create_optimizer(
+        self, model: torch.nn.Module, hparams: Dict[str, Any]
+    ) -> torch.optim.Optimizer:
+        """Create a PyTorch optimizer based on hyperparameter specification."""
+        optimizer_name = hparams.get("name", "Adam").lower()
+        optimizer_params = {k: v for k, v in hparams.items() if k != "name"}
 
         optimizer_class: Type[torch.optim.Optimizer]
         if optimizer_name == "adam":
@@ -114,9 +104,27 @@ class Worker:
         else:
             raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
-        optimizer = optimizer_class(model.parameters(), **optimizer_params)
+        return optimizer_class(model.parameters(), **optimizer_params)
 
-        # 2. Load state from checkpoint if it exists
+    def _load_or_create_model_and_optimizer(
+        self, trial: Trial
+    ) -> Tuple[torch.nn.Module, torch.optim.Optimizer]:
+        """Initialize the model and optimizer, and load state from a checkpoint."""
+        # 1. Create model with specified hyperparameters
+        ModelClass = self.model_def.model_class
+        model_params = trial.hyperparameters.get("model_params", {})
+        model_kwargs = {
+            "input_shape": self.dataset_def.input_shape,
+            "output_shape": self.dataset_def.output_shape,
+            **model_params,
+        }
+        model = ModelClass(**model_kwargs).to(DEVICE)
+
+        # 2. Create optimizer
+        optimizer_hparams = trial.hyperparameters.get("optimizer_params", {})
+        optimizer = self._create_optimizer(model, optimizer_hparams)
+
+        # 3. Load state from checkpoint if it exists
         self.checkpoint_manager.load(trial, model, optimizer)
         return model, optimizer
 

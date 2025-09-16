@@ -4,12 +4,12 @@ from unittest.mock import patch
 
 from sde.core.definitions import DatasetType
 from sde.core.domain import ExecutionSettings
-from sde.core.events import EngineEvent
 from sde.core.domain import Experiment
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
+from sde.core.events import EngineEvent
 from sde.engine.runtime import SdeRuntimeEngine
 
 

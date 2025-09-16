@@ -11,7 +11,6 @@ from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtWidgets import QLabel
 from PyQt6.QtWidgets import QLineEdit
 from PyQt6.QtWidgets import QListWidget
-from PyQt6.QtWidgets import QListWidgetItem
 from PyQt6.QtWidgets import QProgressBar
 from PyQt6.QtWidgets import QPushButton
 from PyQt6.QtWidgets import QSlider

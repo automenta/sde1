@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-import traceback
+
 from sde.core.domain import Experiment
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ class ExperimentSerializer:
         Args:
             experiment: The Experiment object to save.
             filepath: The path to the file where the experiment will be saved.
+
         """
         try:
             state_dict = experiment.to_dict()
@@ -38,6 +39,7 @@ class ExperimentSerializer:
 
         Returns:
             An Experiment object.
+
         """
         try:
             with open(filepath, "r") as f:

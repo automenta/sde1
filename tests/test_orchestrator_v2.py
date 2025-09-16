@@ -3,11 +3,11 @@ from unittest.mock import patch
 
 from sde.core.actions import ActionType
 from sde.core.domain import AlgorithmConfig
-from sde.core.events import EngineCommand
-from sde.core.events import EngineEvent
 from sde.core.domain import ExperimentStatus
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
+from sde.core.events import EngineCommand
+from sde.core.events import EngineEvent
 from sde.engine.action_validator import ActionValidator
 from sde.engine.orchestrator import ExperimentOrchestrator
 
@@ -135,9 +135,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
             EngineCommand.REMOVE_ALGORITHM, expected_payload
         )
 
-    def test_prune_trial_sends_command_and_waits_for_event(
-        self, MockProxy, mock_emit
-    ):
+    def test_prune_trial_sends_command_and_waits_for_event(self, MockProxy, mock_emit):
         """Test that pruning a trial sends a command and waits for an event."""
         orchestrator = ExperimentOrchestrator()
         t1 = Trial(

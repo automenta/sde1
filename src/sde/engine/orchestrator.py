@@ -1,4 +1,5 @@
 """Module for the ExperimentOrchestrator, the central state manager."""
+
 import logging
 import traceback
 from typing import Any
@@ -12,11 +13,10 @@ from sde.core.domain import Experiment
 from sde.core.domain import ExperimentStatus
 from sde.core.domain import PatienceBudget
 from sde.core.domain import Trial
-from sde.core.domain import TrialStatus
+
 from ..core.events import EngineCommand
 from ..core.events import EngineEvent
 from ..core.events import Signal
-
 from .action_validator import ActionValidator
 from .insight import Insight
 from .proxy import EngineProxy
@@ -37,7 +37,12 @@ class ExperimentOrchestrator:
         """Initialize the ExperimentOrchestrator."""
         self.experiment = Experiment()
         self.engine_proxy = EngineProxy(self.on_engine_event)
-        self._action_handlers = {
+        self._action_handlers = self._register_action_handlers()
+        self._event_handlers = self._register_event_handlers()
+        self.log_message.emit({"level": "INFO", "message": "Orchestrator initialized."})
+
+    def _register_action_handlers(self):
+        return {
             ActionType.SET_CHALLENGE: self.handle_set_challenge,
             ActionType.ADD_ALGORITHM: self.handle_add_algorithm,
             ActionType.REMOVE_ALGORITHM: self.handle_remove_algorithm,
@@ -55,7 +60,9 @@ class ExperimentOrchestrator:
             ActionType.SAVE_EXPERIMENT: self.handle_save_experiment,
             ActionType.LOAD_EXPERIMENT: self.handle_load_experiment,
         }
-        self._event_handlers = {
+
+    def _register_event_handlers(self):
+        return {
             EngineEvent.TRIAL_UPDATED: self._on_trial_updated,
             EngineEvent.INSIGHTS_GENERATED: self._on_insights_generated,
             EngineEvent.RUN_STARTED: self._on_run_started,
@@ -67,10 +74,19 @@ class ExperimentOrchestrator:
             EngineEvent.LOG_MESSAGE: self._on_log_message,
             EngineEvent.EXPERIMENT_LOADED: self._on_experiment_loaded,
         }
-        self.log_message.emit({"level": "INFO", "message": "Orchestrator initialized."})
 
     def dispatch(self, action_type: ActionType, payload: Dict[str, Any]) -> None:
         """Receive an action, validate it, and trigger side effects."""
+        handler = self._get_action_handler(action_type)
+        if not handler:
+            return
+
+        if not self._is_action_valid(action_type, payload):
+            return
+
+        self._execute_action(handler, action_type, payload)
+
+    def _get_action_handler(self, action_type: ActionType):
         handler = self._action_handlers.get(action_type)
         if not handler:
             self.log_message.emit(
@@ -79,16 +95,19 @@ class ExperimentOrchestrator:
                     "message": f"No handler for action '{action_type.name}'",
                 }
             )
-            return
+        return handler
 
+    def _is_action_valid(self, action_type: ActionType, payload: Dict[str, Any]) -> bool:
         valid_actions = ActionValidator.get_valid_actions(self.experiment)
         if not ActionValidator.is_action_valid(
             action_type.value, payload, valid_actions
         ):
             msg = f"Action '{action_type.value}' is not valid for the current state."
             self.log_message.emit({"level": "WARN", "message": msg})
-            return
+            return False
+        return True
 
+    def _execute_action(self, handler, action_type: ActionType, payload: Dict[str, Any]):
         try:
             # We only emit the state change automatically for handlers that don't
             # expect a confirmation event from the engine.
@@ -134,19 +153,27 @@ class ExperimentOrchestrator:
             self.experiment.trials = {
                 t["id"]: Trial.from_dict(t) for t in payload["trials"]
             }
-        self.log_message.emit({"level": "INFO", "message": "Experiment run has started."})
+        self.log_message.emit(
+            {"level": "INFO", "message": "Experiment run has started."}
+        )
 
     def _on_run_paused(self, payload: Dict[str, Any]):
         self.experiment.status = ExperimentStatus.PAUSED
-        self.log_message.emit({"level": "INFO", "message": "Experiment run has been paused."})
+        self.log_message.emit(
+            {"level": "INFO", "message": "Experiment run has been paused."}
+        )
 
     def _on_run_resumed(self, payload: Dict[str, Any]):
         self.experiment.status = ExperimentStatus.RUNNING
-        self.log_message.emit({"level": "INFO", "message": "Experiment run has been resumed."})
+        self.log_message.emit(
+            {"level": "INFO", "message": "Experiment run has been resumed."}
+        )
 
     def _on_run_stopped(self, payload: Dict[str, Any]):
         self.experiment.status = ExperimentStatus.STOPPED
-        self.log_message.emit({"level": "INFO", "message": "Experiment run has been stopped."})
+        self.log_message.emit(
+            {"level": "INFO", "message": "Experiment run has been stopped."}
+        )
 
     def _on_algorithm_removed(self, payload: Dict[str, Any]):
         algo_id = payload["algorithm_id"]
@@ -179,7 +206,9 @@ class ExperimentOrchestrator:
                 "message": f"Experiment '{loaded_experiment.id}' loaded successfully.",
             }
         )
-        self.operation_finished.emit(f"Experiment loaded from {payload.get('filepath', 'file')}.")
+        self.operation_finished.emit(
+            f"Experiment loaded from {payload.get('filepath', 'file')}."
+        )
 
     def emit_state_change(self) -> None:
         """Serialize the current experiment state and emit it."""
@@ -230,7 +259,9 @@ class ExperimentOrchestrator:
         if algo_id in self.experiment.algorithms:
             algo_name = self.experiment.algorithms[algo_id].name
             command_payload = {"algorithm_id": algo_id, "algorithm_name": algo_name}
-            self.engine_proxy.post_command(EngineCommand.REMOVE_ALGORITHM, command_payload)
+            self.engine_proxy.post_command(
+                EngineCommand.REMOVE_ALGORITHM, command_payload
+            )
             self.log_message.emit(
                 {
                     "level": "INFO",
