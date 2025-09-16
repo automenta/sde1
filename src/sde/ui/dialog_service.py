@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import QFileDialog
 from PyQt6.QtWidgets import QInputDialog
 from PyQt6.QtWidgets import QMessageBox
 
-from ..models import AVAILABLE_MODELS
+from ..registry import registry
 from .hyperparameters import HyperparameterDialog
 from .hyperparameters import HyperparameterViewerDialog
 from .hyperparameters import SimpleRunDialog
@@ -15,7 +15,7 @@ class DialogService:
         self.parent = parent
 
     def show_simple_run_dialog(self, selected_models_names):
-        selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
+        selected_model_defs = [registry.get_model(name) for name in selected_models_names]
         dialog = SimpleRunDialog(selected_model_defs, self.parent)
         result = dialog.exec()
         if result == QDialog.DialogCode.Rejected:
@@ -28,7 +28,7 @@ class DialogService:
         return result, custom_hparams
 
     def show_tuning_dialog(self, selected_models_names):
-        selected_model_defs = [AVAILABLE_MODELS[name] for name in selected_models_names]
+        selected_model_defs = [registry.get_model(name) for name in selected_models_names]
         dialog = HyperparameterDialog(selected_model_defs, self.parent)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None

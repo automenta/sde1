@@ -26,6 +26,7 @@ class ResultsPane(QWidget):
     # Signals for user interactions that the parent window needs to handle
     trial_selected = pyqtSignal(str)
     trial_double_clicked = pyqtSignal(str)
+    insight_selected = pyqtSignal(set)
     prune_trial_requested = pyqtSignal(str)
     prioritize_trial_requested = pyqtSignal(str)
     spawn_trial_requested = pyqtSignal(str)
@@ -79,7 +80,7 @@ class ResultsPane(QWidget):
 
     def _connect_signals(self):
         """Connects internal widget signals to the pane's public signals."""
-        self.insights_widget.insight_selected.connect(self._on_insight_selected)
+        self.insights_widget.insight_activated.connect(self._on_insight_selected)
         self.log_widget.refresh_requested.connect(self.refresh_requested)
         self.trials_table_widget.trial_selected.connect(self.trial_selected)
         self.trials_table_widget.trial_double_clicked.connect(self.trial_double_clicked)
@@ -125,22 +126,16 @@ class ResultsPane(QWidget):
         self.log_widget.clear_log()
         self.trials_table_widget.clear()
 
-    def _on_insight_selected(self, item: "InsightListItem"):
+    def _on_insight_selected(self, insight: "UIInsight"):
         """Handles insight selection and highlights the plot and table."""
         self.trials_table_widget.clear_highlights()
+        highlight_ids = set(insight.trial_ids)
+        self.insight_selected.emit(highlight_ids)
 
-        selected_item = self.insights_widget.get_selected_item()
-        if not item or not selected_item or item != selected_item:
-            for widget in self.visualization_widgets:
-                if hasattr(widget, "update_plot_highlight"):
-                    widget.update_plot_highlight(set())
-            self.insights_widget.clear_selection()
-            return
-
-        highlight_ids = set(item.insight.trial_ids)
         for widget in self.visualization_widgets:
             if hasattr(widget, "update_plot_highlight"):
                 widget.update_plot_highlight(highlight_ids)
+
         highlight_color = QColor("#FFFACD")  # LemonChiffon
         self.trials_table_widget.highlight_rows(highlight_ids, highlight_color)
 

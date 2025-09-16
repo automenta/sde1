@@ -1,3 +1,5 @@
+import atexit
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -6,6 +8,23 @@ from platformdirs import PlatformDirs
 # --- Application Metadata ---
 APP_NAME = "sde"
 APP_AUTHOR = "SDE"
+
+
+# --- Demo Mode ---
+# When True, all data is stored in a temporary directory that is cleaned up on exit.
+DEMO_MODE = False
+_temp_dir_obj = None
+
+
+def _get_temp_dir_path() -> Path:
+    """Returns path to a temp dir, creating it if it doesn't exist."""
+    global _temp_dir_obj
+    if _temp_dir_obj is None:
+        # Create a temporary directory that will be cleaned up automatically on exit
+        _temp_dir_obj = tempfile.TemporaryDirectory()
+        atexit.register(_temp_dir_obj.cleanup)
+    return Path(_temp_dir_obj.name)
+
 
 # --- Platform-specific Paths ---
 _dirs = PlatformDirs(appname=APP_NAME, appauthor=False)
@@ -41,17 +60,25 @@ def _get_and_create_dir(path_func: Callable[[], Path], *subdirs: str) -> Path:
 def get_user_data_dir() -> Path:
     """Returns the platform-specific user data directory for the application.
     This is where persistent data like experiments and checkpoints should be stored.
+    In demo mode, this will be a temporary directory.
     """
+    if DEMO_MODE:
+        return _get_and_create_dir(_get_temp_dir_path)
     return _get_and_create_dir(lambda: _dirs.user_data_path)
 
 
 def get_user_cache_dir() -> Path:
     """Returns the platform-specific user cache directory for the application.
     This is where non-essential, downloadable data like datasets should be stored.
+    In demo mode, this will be a temporary directory.
     """
+    if DEMO_MODE:
+        return _get_and_create_dir(_get_temp_dir_path)
     return _get_and_create_dir(lambda: _dirs.user_cache_path)
 
 
 def get_checkpoints_dir() -> Path:
     """Returns the specific directory for storing model checkpoints."""
+    if DEMO_MODE:
+        return _get_and_create_dir(_get_temp_dir_path, "checkpoints")
     return _get_and_create_dir(get_user_data_dir, "checkpoints")

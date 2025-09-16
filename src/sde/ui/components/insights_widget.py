@@ -29,7 +29,7 @@ class InsightListItem(QListWidgetItem):
 class InsightsWidget(QWidget):
     """A widget for displaying insights."""
 
-    insight_selected = pyqtSignal(object)  # Emits InsightListItem
+    insight_activated = pyqtSignal(object)  # Emits InsightListItem
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,7 +58,12 @@ class InsightsWidget(QWidget):
 
     def _connect_signals(self):
         """Connects internal widget signals."""
-        self.insights_list.itemClicked.connect(self.insight_selected)
+        self.insights_list.itemClicked.connect(self._on_item_clicked)
+
+    def _on_item_clicked(self, item: QListWidgetItem):
+        """Handles the click event on an insight item."""
+        if isinstance(item, InsightListItem):
+            self.insight_activated.emit(item.insight)
 
     def update_insights_list(self, view_model: ExperimentViewModel):
         """Updates the insights list from the ViewModel efficiently."""

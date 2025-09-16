@@ -9,7 +9,7 @@ from PyQt6.QtCore import QObject
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QStyle
 
-from ..challenges import AVAILABLE_DATASETS
+from ..registry import registry
 from .models import UIAlgorithm
 from .models import UIInsight
 from .models import UITrial
@@ -126,10 +126,13 @@ class ExperimentViewModel(QObject):
         self, trials_data: Dict[str, Any]
     ) -> (Optional[str], Optional[float]):
         """Determines the best trial based on the challenge's performance metric."""
-        if not self.challenge_name or self.challenge_name not in AVAILABLE_DATASETS:
+        if not self.challenge_name:
             return None, None
+        try:
+            challenge_def = registry.get_challenge(self.challenge_name)
+        except KeyError:
+            return None, None  # Should not happen in normal operation
 
-        challenge_def = AVAILABLE_DATASETS[self.challenge_name]
         metric_name = challenge_def.performance_metric_name
         self.performance_metric_name = metric_name
         higher_is_better = "accuracy" in metric_name.lower()

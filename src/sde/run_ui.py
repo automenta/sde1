@@ -1,14 +1,26 @@
+import argparse
 import multiprocessing
 import sys
 
 from PyQt6.QtWidgets import QApplication
 
+from . import config
 from .discovery import discover_and_register_components
+from .ui.demo_controller import DemoController
 from .ui.main_window import MainWindow
 
 
 def main():
     """The main entry point for the SDE application."""
+    parser = argparse.ArgumentParser(description="Scientific Discovery Engine")
+    parser.add_argument(
+        "--demo", action="store_true", help="Run the application in demo mode."
+    )
+    args = parser.parse_args()
+
+    if args.demo:
+        config.DEMO_MODE = True
+
     # --- Discover and register all components before creating the UI ---
     discover_and_register_components()
 
@@ -19,6 +31,11 @@ def main():
 
     main_win = MainWindow()
     main_win.show()
+
+    if config.DEMO_MODE:
+        demo_controller = DemoController(main_win)
+        demo_controller.start()
+
     sys.exit(app.exec())
 
 
