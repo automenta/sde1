@@ -14,7 +14,7 @@ transform = transforms.Compose(
 )
 
 # Use the factory to create the dataset definition
-CIFAR10_DATASET = create_image_classification_challenge(
+CHALLENGE = create_image_classification_challenge(
     name="CIFAR-10",
     description="Dataset of 60,000 32x32 color images in 10 classes.",
     dataset_class=datasets.CIFAR10,

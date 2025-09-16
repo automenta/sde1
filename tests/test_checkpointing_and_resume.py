@@ -9,24 +9,29 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
-from sde.challenges import AVAILABLE_DATASETS
 from sde.core.domain import Trial
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
+from sde.discovery import discover_and_register_components
 from sde.engine.worker import Worker
-from sde.models import AVAILABLE_MODELS
+from sde.registry import registry
 
 
 class TestCheckpointingAndResume(unittest.TestCase):
     def setUp(self):
         """Set up a temporary directory for checkpoints."""
         self.temp_dir = tempfile.mkdtemp()
+        # Ensure components are registered before running tests
+        registry.challenges.clear()
+        registry.models.clear()
+        registry.schedulers.clear()
+        discover_and_register_components()
 
     def tearDown(self):
         """Clean up the temporary directory."""
         shutil.rmtree(self.temp_dir)
 
-    @patch("sde.engine.worker.get_checkpoints_dir")
+    @patch("sde.engine.trial_checkpoint_manager.get_checkpoints_dir")
     def test_training_progresses_across_epochs_with_checkpointing(
         self, mock_get_checkpoints_dir
     ):
@@ -43,8 +48,27 @@ class TestCheckpointingAndResume(unittest.TestCase):
         random.seed(42)
 
         # 1. Setup: Use a real model (MLP) and dataset (MNIST) for an integration test.
-        model_def = AVAILABLE_MODELS["MLP"]
-        dataset_def = AVAILABLE_DATASETS["MNIST"]
+        from sde.core.definitions import ModelDefinition, DatasetType
+        from sde.models.classical.mlp import MLP
+        from sde.challenges.factory import create_image_classification_challenge
+        from torchvision import datasets, transforms
+
+        model_def = ModelDefinition(
+            name="MLP",
+            description="A test MLP model.",
+            model_class=MLP,
+            model_type=DatasetType.IMAGE_CLASSIFICATION,
+        )
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
+        dataset_def = create_image_classification_challenge(
+            name="MNIST",
+            dataset_class=datasets.MNIST,
+            transform=transform,
+            input_shape=(1, 28, 28),
+            output_shape=10,
+            description="",
+            data_dir=self.temp_dir,
+        )
 
         # A minimal trial object.
         trial = Trial(

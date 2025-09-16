@@ -9,12 +9,12 @@ from typing import Type
 import torch
 import torch.optim as optim
 
-from sde.config import get_checkpoints_dir
 from sde.core.definitions import DatasetDefinition
 from sde.core.definitions import ModelDefinition
 from sde.core.domain import Trial
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
+from .trial_checkpoint_manager import TrialCheckpointManager
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class Worker:
         logger.info(f"Worker process initialized. Using device: {DEVICE}")
         self.model_def = model_def
         self.dataset_def = dataset_def
-        self.checkpoints_dir = get_checkpoints_dir()
+        self.checkpoint_manager = TrialCheckpointManager()
         self._dataloader_cache: Dict[
             int, Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]
         ] = {}
@@ -116,23 +116,8 @@ class Worker:
 
         optimizer = optimizer_class(model.parameters(), **optimizer_params)
 
-        # 2. Load state from checkpoint if the path exists
-        if trial.checkpoint_path and os.path.exists(trial.checkpoint_path):
-            try:
-                checkpoint = torch.load(trial.checkpoint_path, map_location=DEVICE)
-                model.load_state_dict(checkpoint["model_state_dict"])
-                optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-                logger.info(
-                    f"Loaded checkpoint for trial {trial.id} from {trial.checkpoint_path}"
-                )
-            except FileNotFoundError:
-                logger.warning(
-                    f"Checkpoint file not found at {trial.checkpoint_path}. Starting from scratch."
-                )
-            except Exception as e:
-                logger.error(
-                    f"Failed to load checkpoint for trial {trial.id} from {trial.checkpoint_path}: {e}"
-                )
+        # 2. Load state from checkpoint if it exists
+        self.checkpoint_manager.load(trial, model, optimizer)
         return model, optimizer
 
     def _profile_speed(self, work_unit: WorkUnit, trial: Trial) -> dict:
@@ -219,23 +204,7 @@ class Worker:
         # 5. Save new state to a new checkpoint file (if enabled)
         new_checkpoint_path = trial.checkpoint_path
         if enable_checkpointing:
-            # Use a canonical checkpoint path for each trial
-            if not new_checkpoint_path:
-                checkpoint_filename = f"{trial.id}.pt"
-                new_checkpoint_path = os.path.join(
-                    self.checkpoints_dir, checkpoint_filename
-                )
-
-            # Atomic save: write to a temporary file then rename
-            temp_checkpoint_path = f"{new_checkpoint_path}.tmp"
-            torch.save(
-                {
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                },
-                temp_checkpoint_path,
-            )
-            os.rename(temp_checkpoint_path, new_checkpoint_path)
+            new_checkpoint_path = self.checkpoint_manager.save(trial, model, optimizer)
 
         # 6. Return results and state update instructions
         metric_name = self.dataset_def.performance_metric_name

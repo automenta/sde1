@@ -126,3 +126,34 @@ class ActionValidator:
 
         # If the payload format is unrecognized or the action is not found, deny it.
         return False
+
+    @staticmethod
+    def is_action_valid(
+        action_type: str, payload: Dict[str, Any], valid_actions: Dict
+    ) -> bool:
+        """
+        Checks if a given action is present in the structured valid_actions dict.
+        This is a strict validator that uses a "default-deny" policy.
+        """
+        # Determine context from payload keys
+        context_id = None
+        actions_dict = {}
+
+        if "algorithm_id" in payload:
+            context_id = payload["algorithm_id"]
+            actions_dict = valid_actions.get("algorithms", {})
+        elif "trial_id" in payload:
+            context_id = payload["trial_id"]
+            actions_dict = valid_actions.get("trials", {})
+        elif "source_trial_id" in payload:
+            context_id = payload["source_trial_id"]
+            actions_dict = valid_actions.get("trials", {})
+        else:
+            # Global action
+            return action_type in valid_actions.get("global", [])
+
+        # Context-specific action
+        if context_id:
+            return action_type in actions_dict.get(context_id, [])
+
+        return False

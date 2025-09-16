@@ -26,7 +26,7 @@ class LogisticRegression(SdeModel):
 
 # --- Model Definition ---
 
-LOGISTIC_REGRESSION_MODEL = ModelDefinition(
+MODEL = ModelDefinition(
     name="LogisticRegression",
     description="A classical Logistic Regression model for baseline performance.",
     model_class=LogisticRegression,

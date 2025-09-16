@@ -3,17 +3,10 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
-from sde.challenges import AVAILABLE_DATASETS
 from sde.exploration.schedulers import AdaptiveScheduler
-from sde.exploration.schedulers import HyperbandScheduler
-from sde.exploration.schedulers import SuccessiveHalvingScheduler
+from sde.registry import registry
 
 logger = logging.getLogger(__name__)
-
-SCHEDULER_MAP = {
-    "SuccessiveHalving": SuccessiveHalvingScheduler,
-    "Hyperband": HyperbandScheduler,
-}
 
 
 class SchedulerFactory:
@@ -43,16 +36,14 @@ class SchedulerFactory:
         if patience_budget is None:
             patience_budget = {}
 
-        scheduler_class = SCHEDULER_MAP.get(policy_name)
-        if not scheduler_class:
-            raise ValueError(f"Unknown scheduler '{policy_name}' specified.")
-
         try:
-            challenge_def = AVAILABLE_DATASETS[challenge_name]
-            metric = challenge_def.performance_metric_name
-            increasing = "accuracy" in metric.lower()
-        except KeyError:
-            raise ValueError(f"Unknown challenge name '{challenge_name}' provided.")
+            scheduler_class = registry.get_scheduler_class(policy_name)
+            challenge_def = registry.get_challenge(challenge_name)
+        except KeyError as e:
+            raise ValueError(f"Unknown scheduler or challenge name provided: {e}")
+
+        metric = challenge_def.performance_metric_name
+        increasing = "accuracy" in metric.lower()
 
         # --- Instantiate the scheduler with correct parameters ---
         scheduler_args = {

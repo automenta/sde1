@@ -39,9 +39,8 @@ class MainWindow(QMainWindow):
         self.orchestrator = ExperimentOrchestrator()
         self.view_model = ExperimentViewModel(self.style())
         self.dialog_service = DialogService(self)
-        self.view_controller = ViewController(
-            self.orchestrator, self.view_model, self.dialog_service
-        )
+        # The ViewController is now stateless and only needs the orchestrator and dialogs
+        self.view_controller = ViewController(self.orchestrator, self.dialog_service)
 
         self._init_ui()
         self._connect_signals()
@@ -76,10 +75,10 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         """Connects all UI signals to their corresponding slots."""
         # Backend signals -> Main Window
-        self.view_controller.log_message.connect(self.append_log_message)
-        self.view_controller.state_changed.connect(self.on_state_changed)
-        self.view_controller.operation_started.connect(self.on_operation_started)
-        self.view_controller.operation_finished.connect(self.on_operation_finished)
+        self.orchestrator.log_message.connect(self.append_log_message)
+        self.orchestrator.state_changed.connect(self.on_state_changed)
+        self.orchestrator.operation_started.connect(self.on_operation_started)
+        self.orchestrator.operation_finished.connect(self.on_operation_finished)
 
         # Setup Pane -> Main Window
         self.setup_pane.start_experiment_requested.connect(self.start_experiment)
@@ -154,7 +153,8 @@ class MainWindow(QMainWindow):
 
     def on_trial_double_clicked(self, trial_id: str):
         """Delegates trial double-click to the ViewController."""
-        self.view_controller.show_trial_hyperparameters(trial_id)
+        trial = self.view_model.trials.get(trial_id)
+        self.view_controller.show_trial_hyperparameters(trial)
 
     def on_insight_selected(self, highlight_ids: set):
         """Handles insight selection from the results pane."""
@@ -231,7 +231,8 @@ class MainWindow(QMainWindow):
 
     def spawn_trial(self, trial_id: str):
         """Delegates spawning a trial to the ViewController."""
-        self.view_controller.initiate_spawn_trial(trial_id)
+        trial = self.view_model.trials.get(trial_id)
+        self.view_controller.initiate_spawn_trial(trial)
 
     def request_state_update(self):
         """Dispatches an action to request a full state update from the orchestrator."""

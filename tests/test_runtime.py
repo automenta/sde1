@@ -2,9 +2,9 @@ import unittest
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
-from sde.core.comms import EngineEvent
 from sde.core.definitions import DatasetType
 from sde.core.domain import ExecutionSettings
+from sde.core.events import EngineEvent
 from sde.core.domain import Experiment
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus

@@ -14,7 +14,7 @@ transform = transforms.Compose(
 )
 
 # Use the factory to create the dataset definition
-FASHION_MNIST_DATASET = create_image_classification_challenge(
+CHALLENGE = create_image_classification_challenge(
     name="Fashion-MNIST",
     description="70,000 28x28 grayscale images of 10 clothing types.",
     dataset_class=datasets.FashionMNIST,

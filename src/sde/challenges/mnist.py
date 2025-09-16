@@ -14,7 +14,7 @@ transform = transforms.Compose(
 )
 
 # Use the factory to create the dataset definition
-MNIST_DATASET = create_image_classification_challenge(
+CHALLENGE = create_image_classification_challenge(
     name="MNIST",
     description="70,000 28x28 grayscale images of handwritten digits (0-9).",
     dataset_class=datasets.MNIST,

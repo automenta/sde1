@@ -2,9 +2,9 @@ import unittest
 from unittest.mock import patch
 
 from sde.core.actions import ActionType
-from sde.core.comms import EngineCommand
-from sde.core.comms import EngineEvent
 from sde.core.domain import AlgorithmConfig
+from sde.core.events import EngineCommand
+from sde.core.events import EngineEvent
 from sde.core.domain import ExperimentStatus
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
@@ -171,6 +171,7 @@ class TestExperimentOrchestrator(unittest.TestCase):
             priority=0,
         )
         orchestrator.experiment.trials = {"t1": t1}
+        orchestrator.experiment.status = ExperimentStatus.RUNNING
 
         orchestrator.dispatch(ActionType.MANUAL_PRIORITIZE_TRIAL, {"trial_id": "t1"})
         orchestrator.engine_proxy.post_command.assert_called_once_with(

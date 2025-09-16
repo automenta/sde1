@@ -22,9 +22,8 @@ from PyQt6.QtWidgets import QTextEdit
 from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWidgets import QWidget
 
-from ..challenges import AVAILABLE_DATASETS
 from ..config import Defaults
-from ..models import AVAILABLE_MODELS
+from ..registry import registry
 from .view_model import ExperimentViewModel
 
 
@@ -269,7 +268,10 @@ class SetupPane(QWidget):
 
         # For simplicity, show details for the first selected item
         model_name = selected_items[0].text()
-        model_def = AVAILABLE_MODELS.get(model_name)
+        try:
+            model_def = registry.get_model(model_name)
+        except KeyError:
+            model_def = None
 
         if not model_def:
             self.model_details_text.setText(
@@ -329,21 +331,23 @@ class SetupPane(QWidget):
     # --- Public Methods to Update UI State ---
 
     def populate_datasets(self):
-        self.dataset_combo.addItems(AVAILABLE_DATASETS.keys())
+        self.dataset_combo.addItems(registry.list_challenges())
 
     def update_model_list(self, selected_dataset_name: str):
         self.model_list.clear()
         if not selected_dataset_name:
             return
-        dataset_def = AVAILABLE_DATASETS[selected_dataset_name]
-        supported_models = [
-            name
-            for name, model_def in AVAILABLE_MODELS.items()
-            if dataset_def.type == model_def.model_type
-        ]
-        for model_name in supported_models:
-            item = QListWidgetItem(model_name)
-            self.model_list.addItem(item)
+        try:
+            dataset_def = registry.get_challenge(selected_dataset_name)
+            supported_models = [
+                name
+                for name in registry.list_models()
+                if dataset_def.type == registry.get_model(name).model_type
+            ]
+            self.model_list.addItems(supported_models)
+        except KeyError:
+            # This can happen if the registry is not yet populated during init
+            pass
 
     def get_experiment_settings(self):
         dataset_name = self.dataset_combo.currentText()

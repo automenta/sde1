@@ -41,7 +41,7 @@ class MLP(SdeModel):
 
 # --- 2. The Model Definition ---
 
-MLP_MODEL = ModelDefinition(
+MODEL = ModelDefinition(
     name="MLP",
     description="A simple Multi-Layer Perceptron for image classification.",
     model_class=MLP,

@@ -105,7 +105,7 @@ class ConfigurableResNet(SdeModel):
 
 
 # --- Model Definition ---
-CONFIGURABLE_RESNET_MODEL = ModelDefinition(
+MODEL = ModelDefinition(
     name="ConfigurableResNet",
     description="A ResNet-style model where the number of blocks per layer is a configurable hyperparameter.",
     model_class=ConfigurableResNet,

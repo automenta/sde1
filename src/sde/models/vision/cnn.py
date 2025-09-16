@@ -47,7 +47,7 @@ class SimpleCNN(SdeModel):
 
 # --- Model Definition ---
 
-SIMPLE_CNN_MODEL = ModelDefinition(
+MODEL = ModelDefinition(
     name="SimpleCNN",
     description="A simple Convolutional Neural Network for image classification.",
     model_class=SimpleCNN,

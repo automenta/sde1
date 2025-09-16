@@ -4,9 +4,8 @@ from typing import Callable
 from typing import Dict
 from typing import Optional
 
-from sde.core.comms import EngineCommand
-from sde.core.comms import EngineEvent
-
+from ..core.events import EngineCommand
+from ..core.events import EngineEvent
 from .runtime import SdeRuntimeEngine
 
 logger = logging.getLogger(__name__)

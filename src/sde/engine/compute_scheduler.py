@@ -9,12 +9,12 @@ from typing import Iterator
 from typing import List
 from typing import Tuple
 
-from sde.challenges import AVAILABLE_DATASETS
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
 from sde.core.domain import WorkUnit
+from sde.core.definitions import ModelDefinition, DatasetDefinition
 from sde.engine.datastore import DataStore
-from sde.models import AVAILABLE_MODELS
+from sde.registry import registry
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 def execute_work_unit_in_process(
     work_unit: WorkUnit,
     trial: Trial,
-    model_name: str,
-    dataset_name: str,
+    model_def: ModelDefinition,
+    dataset_def: DatasetDefinition,
     enable_checkpointing: bool,
 ) -> Tuple[WorkUnit, dict]:
     """A wrapper function that initializes a Worker in a new process, executes
@@ -33,8 +33,6 @@ def execute_work_unit_in_process(
     try:
         from .worker import Worker  # Import inside for pickling
 
-        model_def = AVAILABLE_MODELS[model_name]
-        dataset_def = AVAILABLE_DATASETS[dataset_name]
         worker = Worker(model_def=model_def, dataset_def=dataset_def)
         result = worker.execute_work_unit(work_unit, trial, enable_checkpointing)
         return work_unit, result
@@ -52,13 +50,13 @@ class ComputeScheduler:
     def __init__(
         self,
         datastore: DataStore,
-        dataset_name: str,
+        dataset_def: DatasetDefinition,
         max_workers: int = 2,
         enable_checkpointing: bool = False,
         work_unit_timeout: int = 300,
     ):
         self.datastore = datastore
-        self.dataset_name = dataset_name
+        self.dataset_def = dataset_def
         self.max_workers = max_workers
         self.enable_checkpointing = enable_checkpointing
         self.work_unit_timeout = work_unit_timeout
@@ -125,12 +123,13 @@ class ComputeScheduler:
                 if not trial or trial.status != TrialStatus.ACTIVE:
                     continue
 
+                model_def = registry.get_model(trial.algorithm_name)
                 future = self.executor.submit(
                     execute_work_unit_in_process,
                     work_unit,
                     trial,
-                    trial.algorithm_name,
-                    self.dataset_name,
+                    model_def,
+                    self.dataset_def,
                     self.enable_checkpointing,
                 )
                 self.active_futures[future] = work_unit

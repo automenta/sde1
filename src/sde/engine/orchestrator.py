@@ -5,8 +5,6 @@ from typing import Any
 from typing import Dict
 
 from sde.core.actions import ActionType
-from sde.core.comms import EngineCommand
-from sde.core.comms import EngineEvent
 from sde.core.domain import AlgorithmConfig
 from sde.core.domain import Challenge
 from sde.core.domain import ExecutionSettings
@@ -15,7 +13,9 @@ from sde.core.domain import ExperimentStatus
 from sde.core.domain import PatienceBudget
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
-from sde.events import Signal
+from ..core.events import EngineCommand
+from ..core.events import EngineEvent
+from ..core.events import Signal
 
 from .action_validator import ActionValidator
 from .insight import Insight
@@ -55,6 +55,18 @@ class ExperimentOrchestrator:
             ActionType.SAVE_EXPERIMENT: self.handle_save_experiment,
             ActionType.LOAD_EXPERIMENT: self.handle_load_experiment,
         }
+        self._event_handlers = {
+            EngineEvent.TRIAL_UPDATED: self._on_trial_updated,
+            EngineEvent.INSIGHTS_GENERATED: self._on_insights_generated,
+            EngineEvent.RUN_STARTED: self._on_run_started,
+            EngineEvent.RUN_PAUSED: self._on_run_paused,
+            EngineEvent.RUN_RESUMED: self._on_run_resumed,
+            EngineEvent.RUN_STOPPED: self._on_run_stopped,
+            EngineEvent.ALGORITHM_REMOVED: self._on_algorithm_removed,
+            EngineEvent.OPERATION_FINISHED: self._on_operation_finished,
+            EngineEvent.LOG_MESSAGE: self._on_log_message,
+            EngineEvent.EXPERIMENT_LOADED: self._on_experiment_loaded,
+        }
         self.log_message.emit({"level": "INFO", "message": "Orchestrator initialized."})
 
     def dispatch(self, action_type: ActionType, payload: Dict[str, Any]) -> None:
@@ -93,65 +105,81 @@ class ExperimentOrchestrator:
             logger.error(traceback.format_exc())
 
     def on_engine_event(self, event_type: EngineEvent, payload: Dict[str, Any]):
-        """Handle all events coming from the SdeRuntimeEngine."""
+        """Dispatch engine events to the appropriate handler."""
         logger.info(f"Orchestrator received event: {event_type.name}")
-        if event_type == EngineEvent.TRIAL_UPDATED:
-            trial_data = payload["trial"]
-            trial = Trial.from_dict(trial_data)
-            self.experiment.trials[trial.id] = trial
-        elif event_type == EngineEvent.INSIGHTS_GENERATED:
-            # The payload now contains serialized Insight objects
-            self.experiment.insights.extend(
-                [Insight.from_dict(d) for d in payload["insights"]]
-            )
-        elif event_type == EngineEvent.RUN_STARTED:
-            self.experiment.status = ExperimentStatus.RUNNING
-            # The engine might send back initial state, like trial IDs
-            if "trials" in payload:
-                self.experiment.trials = {
-                    t["id"]: Trial.from_dict(t) for t in payload["trials"]
-                }
-            self.log_message.emit(
-                {"level": "INFO", "message": "Experiment run has started."}
-            )
-        elif event_type == EngineEvent.RUN_PAUSED:
-            self.experiment.status = ExperimentStatus.PAUSED
-            self.log_message.emit(
-                {"level": "INFO", "message": "Experiment run has been paused."}
-            )
-        elif event_type == EngineEvent.RUN_RESUMED:
-            self.experiment.status = ExperimentStatus.RUNNING
-            self.log_message.emit(
-                {"level": "INFO", "message": "Experiment run has been resumed."}
-            )
-        elif event_type == EngineEvent.RUN_STOPPED:
-            self.experiment.status = ExperimentStatus.STOPPED
-            self.log_message.emit(
-                {"level": "INFO", "message": "Experiment run has been stopped."}
-            )
-        elif event_type == EngineEvent.ALGORITHM_REMOVED:
-            algo_id = payload["algorithm_id"]
-            if algo_id in self.experiment.algorithms:
-                del self.experiment.algorithms[algo_id]
-            # Also remove associated trials from the frontend state
-            self.experiment.trials = {
-                tid: t
-                for tid, t in self.experiment.trials.items()
-                if t.algorithm_name != payload["algorithm_name"]
-            }
-            self.log_message.emit(
-                {
-                    "level": "INFO",
-                    "message": f"Algorithm '{payload['algorithm_name']}' and its trials removed.",
-                }
-            )
-        elif event_type == EngineEvent.OPERATION_FINISHED:
-            self.operation_finished.emit(payload.get("message", ""))
-        elif event_type == EngineEvent.LOG_MESSAGE:
-            self.log_message.emit(payload)
+        handler = self._event_handlers.get(event_type)
+        if handler:
+            handler(payload)
+        else:
+            logger.warning(f"No handler for event type: {event_type}")
 
         # Always emit a full state change to keep the UI in sync
         self.emit_state_change()
+
+    # --- Event Handlers ---
+
+    def _on_trial_updated(self, payload: Dict[str, Any]):
+        trial_data = payload["trial"]
+        trial = Trial.from_dict(trial_data)
+        self.experiment.trials[trial.id] = trial
+
+    def _on_insights_generated(self, payload: Dict[str, Any]):
+        self.experiment.insights.extend(
+            [Insight.from_dict(d) for d in payload["insights"]]
+        )
+
+    def _on_run_started(self, payload: Dict[str, Any]):
+        self.experiment.status = ExperimentStatus.RUNNING
+        if "trials" in payload:
+            self.experiment.trials = {
+                t["id"]: Trial.from_dict(t) for t in payload["trials"]
+            }
+        self.log_message.emit({"level": "INFO", "message": "Experiment run has started."})
+
+    def _on_run_paused(self, payload: Dict[str, Any]):
+        self.experiment.status = ExperimentStatus.PAUSED
+        self.log_message.emit({"level": "INFO", "message": "Experiment run has been paused."})
+
+    def _on_run_resumed(self, payload: Dict[str, Any]):
+        self.experiment.status = ExperimentStatus.RUNNING
+        self.log_message.emit({"level": "INFO", "message": "Experiment run has been resumed."})
+
+    def _on_run_stopped(self, payload: Dict[str, Any]):
+        self.experiment.status = ExperimentStatus.STOPPED
+        self.log_message.emit({"level": "INFO", "message": "Experiment run has been stopped."})
+
+    def _on_algorithm_removed(self, payload: Dict[str, Any]):
+        algo_id = payload["algorithm_id"]
+        if algo_id in self.experiment.algorithms:
+            del self.experiment.algorithms[algo_id]
+        self.experiment.trials = {
+            tid: t
+            for tid, t in self.experiment.trials.items()
+            if t.algorithm_name != payload["algorithm_name"]
+        }
+        self.log_message.emit(
+            {
+                "level": "INFO",
+                "message": f"Algorithm '{payload['algorithm_name']}' and its trials removed.",
+            }
+        )
+
+    def _on_operation_finished(self, payload: Dict[str, Any]):
+        self.operation_finished.emit(payload.get("message", ""))
+
+    def _on_log_message(self, payload: Dict[str, Any]):
+        self.log_message.emit(payload)
+
+    def _on_experiment_loaded(self, payload: Dict[str, Any]):
+        loaded_experiment = Experiment.from_dict(payload["experiment"])
+        self.experiment = loaded_experiment
+        self.log_message.emit(
+            {
+                "level": "INFO",
+                "message": f"Experiment '{loaded_experiment.id}' loaded successfully.",
+            }
+        )
+        self.operation_finished.emit(f"Experiment loaded from {payload.get('filepath', 'file')}.")
 
     def emit_state_change(self) -> None:
         """Serialize the current experiment state and emit it."""

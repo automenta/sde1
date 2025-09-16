@@ -5,10 +5,13 @@ from typing import Dict
 
 from .core.actions import ActionType
 from .core.domain import ExperimentStatus
+from .discovery import discover_and_register_components
 from .engine.orchestrator import ExperimentOrchestrator
 
 
 def main():
+    # --- Discover and register all components before doing anything else ---
+    discover_and_register_components()
     """Main entry point for running a command-line-based SDE experiment."""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

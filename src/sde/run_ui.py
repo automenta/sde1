@@ -3,11 +3,15 @@ import sys
 
 from PyQt6.QtWidgets import QApplication
 
+from .discovery import discover_and_register_components
 from .ui.main_window import MainWindow
 
 
 def main():
     """The main entry point for the SDE application."""
+    # --- Discover and register all components before creating the UI ---
+    discover_and_register_components()
+
     app = QApplication(sys.argv)
     # It's good practice to set application-wide metadata
     app.setApplicationName("Scientific Discovery Engine")

@@ -23,7 +23,7 @@ class TestResumeLogic(unittest.TestCase):
         experiment = Experiment(id="test_exp_1")
         experiment.status = ExperimentStatus.PAUSED
         experiment.challenge = {
-            "name": "CIFAR10",
+            "name": "CIFAR-10",
             "type": DatasetType.IMAGE_CLASSIFICATION.value,
         }
         experiment.adaptive_policy = "SuccessiveHalving"

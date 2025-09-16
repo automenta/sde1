@@ -58,8 +58,11 @@ class AdaptiveScheduler(ABC):
 
 
 class SuccessiveHalvingScheduler(AdaptiveScheduler):
-    """Implements the Successive Halving algorithm (SHA) in a stateless manner.
+    """Implements the Successive Halving algorithm (SHA) in a stateless manner."""
 
+    NAME = "Successive Halving"
+
+    """
     This scheduler runs a set of trials for a certain number of epochs (a "rung"),
     then prunes the worst-performing half and continues with the survivors.
     This process is repeated, forming subsequent rungs with more epochs but fewer trials.
@@ -207,8 +210,11 @@ class _Bracket:
 
 
 class HyperbandScheduler(AdaptiveScheduler):
-    """Implements the Hyperband algorithm.
+    """Implements the Hyperband algorithm."""
 
+    NAME = "Hyperband"
+
+    """
     Hyperband is a more advanced version of Successive Halving that automates
     the trade-off between the number of trials to run and the number of epochs
     allocated to each. It does this by running several brackets of Successive
