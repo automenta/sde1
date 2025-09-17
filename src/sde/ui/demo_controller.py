@@ -1,7 +1,7 @@
-from typing import TYPE_CHECKING
 import time
+from typing import TYPE_CHECKING
+
 from PyQt6.QtCore import QTimer
-from PyQt.QtWidgets import QListView, QWidget
 
 if TYPE_CHECKING:
     from .components.spotlight_widget import SpotlightWidget

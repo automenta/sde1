@@ -9,7 +9,6 @@ from sde.exploration.schedulers import SuccessiveHalvingScheduler
 
 
 class TestSuccessiveHalvingScheduler(unittest.TestCase):
-
     def setUp(self):
         """Set up trials for testing the scheduler."""
         self.experiment = Experiment(id="test_exp")

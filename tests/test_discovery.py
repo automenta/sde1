@@ -69,9 +69,7 @@ class TestDiscovery(unittest.TestCase):
         discover_and_register_components()
         challenge_component = registry.challenges["MNIST"]
         self.assertEqual(challenge_component.version, "1.0.0")
-        self.assertEqual(
-            challenge_component.dependencies, {"torchvision": ">=0.15.0"}
-        )
+        self.assertEqual(challenge_component.dependencies, {"torchvision": ">=0.15.0"})
 
     def test_strict_mode_raises_error_on_duplicate(self):
         """Test that strict mode raises an error on duplicate registration."""

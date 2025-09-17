@@ -6,7 +6,6 @@ from sde.engine.insight import InsightEngine
 
 
 class TestInsightEngine(unittest.TestCase):
-
     def setUp(self):
         """Set up a basic InsightEngine and mock trials for testing."""
         self.trials = {}

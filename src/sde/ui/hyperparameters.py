@@ -268,9 +268,9 @@ class HyperparameterDialog(QDialog):
                             ] = value_str
 
                     elif isinstance(widget, QSpinBox):
-                        self.config["models"][model_name][param_type][
-                            param_name
-                        ] = widget.value()
+                        self.config["models"][model_name][param_type][param_name] = (
+                            widget.value()
+                        )
 
         return self.config
 

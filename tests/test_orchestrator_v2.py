@@ -15,7 +15,6 @@ from sde.engine.orchestrator import ExperimentOrchestrator
 @patch("sde.engine.orchestrator.Signal.emit")
 @patch("sde.engine.orchestrator.EngineProxy")
 class TestExperimentOrchestrator(unittest.TestCase):
-
     def test_initialization(self, MockProxy, mock_emit):
         """Test that the orchestrator initializes and creates a proxy."""
         orchestrator = ExperimentOrchestrator()

@@ -8,12 +8,19 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 """Data utilities"""
+
 import random
-from typing import Any, Dict, Tuple, Type
+from typing import Any
+from typing import Dict
+from typing import Tuple
+from typing import Type
 
 import numpy as np
-from torch.utils.data import Dataset, TensorDataset
-from torchvision.datasets import MNIST, FashionMNIST, CIFAR10
+from torch.utils.data import Dataset
+from torch.utils.data import TensorDataset
+from torchvision.datasets import CIFAR10
+from torchvision.datasets import MNIST
+from torchvision.datasets import FashionMNIST
 
 from sde.config import get_user_cache_dir
 
@@ -47,9 +54,7 @@ def _generate_random_hyperparameters(parameter_space: Dict[str, Any]) -> Dict[st
 
 
 def _get_dataset(dataset_class: Type[Dataset]) -> Tuple[Dataset, Dataset]:
-    """
-    Generic function to get a dataset.
-    """
+    """Generic function to get a dataset."""
     data_dir = get_user_cache_dir()
     train_dataset = dataset_class(
         root=data_dir,
@@ -67,30 +72,22 @@ def _get_dataset(dataset_class: Type[Dataset]) -> Tuple[Dataset, Dataset]:
 
 
 def get_mnist_dataset() -> Tuple[Dataset, Dataset]:
-    """
-    Returns the MNIST dataset.
-    """
+    """Returns the MNIST dataset."""
     return _get_dataset(MNIST)
 
 
 def get_fashion_mnist_dataset() -> Tuple[Dataset, Dataset]:
-    """
-    Returns the Fashion-MNIST dataset.
-    """
+    """Returns the Fashion-MNIST dataset."""
     return _get_dataset(FashionMNIST)
 
 
 def get_cifar10_dataset() -> Tuple[Dataset, Dataset]:
-    """
-    Returns the CIFAR10 dataset.
-    """
+    """Returns the CIFAR10 dataset."""
     return _get_dataset(CIFAR10)
 
 
 def get_dummy_dataset() -> Tuple[Dataset, Dataset]:
-    """
-    Returns a dummy dataset.
-    """
+    """Returns a dummy dataset."""
     train_dataset = TensorDataset(
         __import__("torch").randn(100, 10), __import__("torch").randn(100, 1)
     )

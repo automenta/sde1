@@ -138,12 +138,15 @@ class ComputeScheduler:
                     f"Work unit for trial {work_unit.trial_id} timed out after "
                     f"{self.work_unit_timeout} seconds."
                 )
-                yield work_unit, {
-                    "error": (
-                        f"Work unit timed out after {self.work_unit_timeout} "
-                        "seconds."
-                    )
-                }
+                yield (
+                    work_unit,
+                    {
+                        "error": (
+                            f"Work unit timed out after {self.work_unit_timeout} "
+                            "seconds."
+                        )
+                    },
+                )
             except concurrent.futures.CancelledError:
                 logger.warning(
                     f"Work unit for trial {work_unit.trial_id} was cancelled."

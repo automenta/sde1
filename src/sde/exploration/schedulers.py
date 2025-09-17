@@ -8,12 +8,12 @@ from typing import Dict
 from typing import List
 from typing import Tuple
 
-from sde.data_utils import _generate_random_hyperparameters
 from sde.core.domain import AlgorithmConfig
 from sde.core.domain import Trial
 from sde.core.domain import TrialStatus
 from sde.core.domain import WorkUnit
 from sde.core.domain import WorkUnitType
+from sde.data_utils import _generate_random_hyperparameters
 
 
 class AdaptiveScheduler(ABC):
@@ -332,9 +332,7 @@ class HyperbandScheduler(AdaptiveScheduler):
 
         s_val = finished_trial.tags.get("hyperband_bracket_s")
         if s_val is None or finished_trial.status != TrialStatus.ACTIVE:
-            return (
-                []
-            )  # This trial is not managed by this scheduler or has been pruned/completed.
+            return []  # This trial is not managed by this scheduler or has been pruned/completed.
 
         # Re-create bracket definitions on the fly; they are deterministic.
         brackets = self._get_brackets()

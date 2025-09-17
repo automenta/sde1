@@ -10,7 +10,6 @@ from typing import Tuple
 
 from dataclasses_json import DataClassJsonMixin
 from dataclasses_json import Undefined
-from dataclasses_json import config
 from dataclasses_json import dataclass_json
 
 from ..config import Defaults
@@ -159,3 +158,11 @@ class Experiment(MutableJsonSerializable):
     patience_budget: Optional[PatienceBudget] = None
     execution_settings: Optional[ExecutionSettings] = None
     scheduler_state: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ExperimentSnapshot(MutableJsonSerializable):
+    """A snapshot of the experiment state for saving and loading."""
+
+    experiment: Experiment
+    version: str = "1.0"

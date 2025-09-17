@@ -87,9 +87,7 @@ def _discover_schedulers(package):
                 ):
                     # Use a readable name for the scheduler, e.g., "Successive Halving"
                     logger.debug(f"Found Scheduler '{class_name}' in {name}")
-                    registry.register_scheduler(
-                        class_obj, origin_file=module.__file__
-                    )
+                    registry.register_scheduler(class_obj, origin_file=module.__file__)
         except Exception as e:
             logger.warning(
                 f"Could not import or register scheduler from module {name}: {e}"

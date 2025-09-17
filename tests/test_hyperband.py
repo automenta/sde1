@@ -7,7 +7,6 @@ from sde.exploration.schedulers import HyperbandScheduler
 
 
 class TestHyperbandScheduler(unittest.TestCase):
-
     def test_bracket_initialization(self):
         """Tests that Hyperband initializes its brackets correctly."""
         # Setup: 13 trials to test assignment

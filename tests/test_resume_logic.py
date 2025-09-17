@@ -16,7 +16,6 @@ from sde.exploration.schedulers import SuccessiveHalvingScheduler
 
 
 class TestResumeLogic(unittest.TestCase):
-
     @patch("sde.engine.runtime.ComputeScheduler")
     @patch("sde.engine.runtime.SchedulerFactory")
     def test_resume_from_saved_state(self, MockSchedulerFactory, MockComputeScheduler):
@@ -96,13 +95,13 @@ class TestResumeLogic(unittest.TestCase):
             "execution_settings": experiment.execution_settings.to_dict(),
             "start_paused": True,
         }
-        runtime_engine._handle_start_run(payload)
+        runtime_engine.lifecycle_manager.start_run(payload)
 
         # 6. Check that the rehydration method was called on the scheduler
         mock_adaptive_scheduler.rehydrate_work_units.assert_called_once()
 
         # 7. Check the work queue
-        work_queue = runtime_engine.work_queue
+        work_queue = runtime_engine.work_manager.work_queue
         self.assertEqual(work_queue.qsize(), 2)
 
         work_units = []
@@ -114,7 +113,7 @@ class TestResumeLogic(unittest.TestCase):
         self.assertEqual(active_trial_ids, work_unit_trial_ids)
 
         # Clean up the engine
-        runtime_engine._handle_stop_run({})
+        runtime_engine.lifecycle_manager.stop_run()
 
 
 if __name__ == "__main__":

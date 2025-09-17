@@ -16,7 +16,9 @@ class DialogService:
         self.parent = parent
 
     def show_simple_run_dialog(self, selected_models_names):
-        selected_model_defs = [registry.get_model(name) for name in selected_models_names]
+        selected_model_defs = [
+            registry.get_model(name) for name in selected_models_names
+        ]
         dialog = SimpleRunDialog(selected_model_defs, self.parent)
         result = dialog.exec()
         if result == QDialog.DialogCode.Rejected:
@@ -29,16 +31,16 @@ class DialogService:
         return result, custom_hparams
 
     def show_tuning_dialog(self, selected_models_names):
-        selected_model_defs = [registry.get_model(name) for name in selected_models_names]
+        selected_model_defs = [
+            registry.get_model(name) for name in selected_models_names
+        ]
         dialog = HyperparameterDialog(selected_model_defs, self.parent)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
 
         return dialog.get_configuration()
 
-    def show_hyperparameter_viewer(
-        self, hparams, auto_close_in_ms: int | None = None
-    ):
+    def show_hyperparameter_viewer(self, hparams, auto_close_in_ms: int | None = None):
         """Shows the hyperparameter viewer dialog. If auto_close_in_ms is provided,
         the dialog is shown non-modally and closed after the delay.
         """

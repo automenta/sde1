@@ -15,7 +15,6 @@ from sde.engine.runtime import SdeRuntimeEngine
 
 
 class TestSdeRuntimeEngine(unittest.TestCase):
-
     @patch("sde.engine.runtime.ComputeScheduler")
     @patch("sde.engine.runtime.SchedulerFactory")
     def setUp(self, MockSchedulerFactory, MockComputeScheduler):
@@ -53,7 +52,7 @@ class TestSdeRuntimeEngine(unittest.TestCase):
             "experiment_definition": self.experiment.to_dict(),
             "execution_settings": self.experiment.execution_settings.to_dict(),
         }
-        self.runtime_engine._handle_start_run(payload)
+        self.runtime_engine.lifecycle_manager.start_run(payload)
 
     def test_work_unit_error_sets_trial_to_failed(self):
         """Test that if a work unit result contains an error, the trial's status
@@ -65,7 +64,7 @@ class TestSdeRuntimeEngine(unittest.TestCase):
         error_result = {"error": "CUDA out of memory"}
 
         # Directly call the method that processes results
-        self.runtime_engine._process_completed_work_unit(work_unit, error_result)
+        self.runtime_engine.work_manager.process_completed_work_unit(work_unit, error_result)
 
         # 1. Check that the datastore has the updated trial status
         updated_trial = self.runtime_engine.datastore.get_trial("trial1")

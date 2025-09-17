@@ -220,9 +220,9 @@ class PerformancePlotWidget(QWidget):
                 break
 
         if clicked_trial_id:
-            self.plot_curve_visibility[clicked_trial_id] = (
-                not self.plot_curve_visibility.get(clicked_trial_id, True)
-            )
+            self.plot_curve_visibility[
+                clicked_trial_id
+            ] = not self.plot_curve_visibility.get(clicked_trial_id, True)
             self._apply_plot_curve_styles()
 
     def _apply_plot_curve_styles(self):
