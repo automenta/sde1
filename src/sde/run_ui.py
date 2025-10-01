@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QApplication
 
 from . import config
 from .discovery import discover_and_register_components
+from .ui.auto_controller import AutoController
 from .ui.demo_controller import DemoController
 from .ui.main_window import MainWindow
 
@@ -16,10 +17,17 @@ def main():
     parser.add_argument(
         "--demo", action="store_true", help="Run the application in demo mode."
     )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Run the application in continuous auto-discovery mode.",
+    )
     args = parser.parse_args()
 
     if args.demo:
         config.DEMO_MODE = True
+    if args.auto:
+        config.AUTO_MODE = True
 
     # --- Discover and register all components before creating the UI ---
     discover_and_register_components()
@@ -33,8 +41,12 @@ def main():
     main_win.show()
 
     if config.DEMO_MODE:
+        # Demo mode takes precedence if both flags are set
         demo_controller = DemoController(main_win, main_win.spotlight)
         demo_controller.start()
+    elif config.AUTO_MODE:
+        auto_controller = AutoController(main_win)
+        auto_controller.start()
 
     sys.exit(app.exec())
 

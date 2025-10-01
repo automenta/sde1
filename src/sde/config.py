@@ -11,8 +11,15 @@ APP_AUTHOR = "SDE"
 
 
 # --- Demo Mode ---
-# When True, all data is stored in a temporary directory that is cleaned up on exit.
+# When True, the application runs a scripted demonstration.
 DEMO_MODE = False
+
+
+# --- Auto Mode ---
+# When True, the application runs in a continuous, automated discovery mode.
+AUTO_MODE = False
+
+
 _temp_dir_obj = None
 
 
@@ -43,6 +50,16 @@ class Defaults:
 
     # For adaptive schedulers
     DEFAULT_ADAPTIVE_POLICY = "SuccessiveHalving"
+
+
+# --- Auto Mode Configuration ---
+class AutoModeConfig:
+    """A namespace for auto mode configuration values."""
+
+    # Time in seconds to wait before starting a new experiment
+    DELAY_BETWEEN_EXPERIMENTS_S = 10
+    # Default patience budget for each automated run
+    PATIENCE_BUDGET = {"max_wall_clock_time_s": 120}
 
 
 # --- Public API ---

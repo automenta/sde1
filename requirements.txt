@@ -1,0 +1,8 @@
+PyQt6
+dataclasses-json
+platformdirs
+torch
+torchvision
+torchaudio
+pyqtgraph
+scikit-learn
