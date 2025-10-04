@@ -1,3 +1,120 @@
+# Scientific Discovery Engine (SDE)
+
+## Project Details
+
+SDE is a system for optimizing machine learning experiments through adaptive resource allocation and real-time analysis.
+
+- Purpose: Accelerate scientific discovery by managing computational budgets and generating insights during experimentation.
+- Architecture: Asynchronous, event-driven system with separation of concerns between UI, orchestration, and computation.
+- Target: Researchers conducting hyperparameter optimization and model comparison studies.
+
+## Functionality
+
+SDE executes experiments defined by challenges, algorithms, and patience budgets.
+
+- Experiment Lifecycle:
+  - Define challenge (dataset and metric).
+  - Select algorithms with hyperparameter spaces.
+  - Set patience budget (time, compute limits).
+  - Run experiment with adaptive scheduling.
+  - Monitor progress via UI with real-time updates.
+  - Generate insights from results stream.
+  - Persist and resume experiments.
+
+- Core Concepts:
+  - Trial: Instance of algorithm with specific hyperparameters.
+  - WorkUnit: Atomic task (train epoch, evaluate).
+  - Patience Budget: Composite resource limit.
+  - Adaptive Scheduler: Policy for resource allocation (e.g., pruning underperformers).
+
+- Execution Flow:
+  - UI dispatches actions to orchestrator.
+  - Orchestrator validates and commands runtime engine.
+  - Runtime engine schedules work units to compute pool.
+  - Workers execute tasks and report results.
+  - Results update state and trigger rescheduling/insights.
+
+## Possibilities
+
+- Extend to additional domains beyond image classification.
+- Integrate advanced HPO techniques and multi-objective optimization.
+- Support distributed computing across clusters.
+- Add automated model architecture search.
+- Implement collaborative experimentation features.
+- Enable integration with external ML frameworks and tools.
+
+## Setup
+
+1. Install package: `pip install .`
+2. Run UI: `sde-ui`
+3. Select dataset, models, configure parameters.
+4. Start experiment.
+
+## Features
+
+### Datasets
+- [x] MNIST: Handwritten digit recognition.
+- [x] CIFAR-10: Color image classification.
+- [x] Fashion-MNIST: Clothing image classification.
+- [ ] ImageNet: Large-scale image recognition.
+- [ ] Reinforcement Learning (ex: `gymnasium`)
+- [ ] Custom dataset support.
+
+### Models
+- [x] LogisticRegression: Linear classifier.
+- [x] MLP: Multi-layer perceptron.
+- [x] SimpleCNN: Convolutional neural network.
+- [x] ConfigurableResNet: Residual network with variable depth.
+- [ ] Transformer-based models.
+- [ ] Pre-trained model fine-tuning.
+
+### Schedulers
+- [x] SuccessiveHalving: Progressive pruning of underperformers.
+- [x] Hyperband: Multi-bracket successive halving.
+- [ ] Bayesian optimization.
+- [ ] Population-based training.
+- [ ] Custom scheduler plugins.
+
+### User Interface
+- [x] Main window with setup and results panes.
+- [x] Real-time performance plots.
+- [x] Trial status table with sorting/filtering.
+- [x] Hyperparameter visualization (PCA).
+- [x] Insight notifications and highlighting.
+- [x] Experiment save/load dialogs.
+- [x] Trial spawning with parameter editing.
+- [ ] Web-based interface.
+- [ ] Mobile companion app.
+
+### Core Components
+- [x] Experiment orchestrator.
+- [x] Runtime engine with background execution.
+- [x] Compute scheduler with worker pool.
+- [x] Data store for trial state.
+- [x] Event-driven state management.
+- [ ] Distributed worker coordination.
+- [ ] GPU resource management.
+
+### Insights
+- [x] Basic insight generation framework.
+- [ ] Performance crossover detection.
+- [ ] Hyperparameter correlation analysis.
+- [ ] Anomaly detection in results.
+- [ ] Automated report generation.
+
+### Persistence
+- [x] Experiment serialization to disk.
+- [x] Checkpoint management for trials.
+- [ ] Cloud storage integration.
+- [ ] Version control for experiments.
+
+### Automation
+- [x] Demo controller for guided tours.
+- [x] Auto controller for systematic exploration.
+- [ ] Scheduled experiment runs.
+- [ ] Integration with CI/CD pipelines.
+
+
 # **Scientific Discovery Engine (SDE): Software Spec**
 
 This document serves a _dual_ purpose:
